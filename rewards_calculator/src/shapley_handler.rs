@@ -1,6 +1,19 @@
 use anyhow::Result;
-use metrics_processor::{data_store::DataStore, dzd_telemetry_processor::DZDTelemetryStatMap};
-use network_shapley::types::{Demands, PrivateLink, PrivateLinks};
+use metrics_processor::{
+    data_store::DataStore, dzd_telemetry_processor::DZDTelemetryStatMap,
+    internet_telemetry_processor::DZInternetStatMap,
+};
+use network_shapley::types::{Demands, PrivateLink, PrivateLinks, PublicLinks};
+
+pub fn build_public_links(
+    _after_us: u64,
+    _before_us: u64,
+    _data_store: &DataStore,
+    _internet_stats: &DZInternetStatMap,
+) -> Result<PublicLinks> {
+    // TODO
+    Ok(vec![])
+}
 
 pub async fn build_demands() -> Result<Demands> {
     let demand_settings = demand_generator::settings::Settings::from_env()?;

@@ -126,17 +126,3 @@ The API token **must** be provided via environment variable for security:
 ```bash
 export DZ__DEMAND_GENERATOR__IP_INFO__API_TOKEN=your_token_here
 ```
-
-#### Rate Limiting Configuration
-
-The demand generator includes configurable rate limiting to respect API quotas:
-
-| Setting                   | Default | Description                                |
-| ------------------------- | ------- | ------------------------------------------ |
-| `concurrent_api_requests` | 5       | Maximum concurrent API requests            |
-| `max_api_retries`         | 3       | Maximum retry attempts for failed requests |
-| `retry_backoff_base_ms`   | 100     | Initial backoff duration in milliseconds   |
-| `retry_backoff_max_ms`    | 30000   | Maximum backoff duration (30 seconds)      |
-| `rate_limit_multiplier`   | 3       | Multiplier for rate limit errors (429)     |
-
-**Note**: The system implements exponential backoff with jitter to handle rate limits gracefully. If you encounter frequent 429 errors, reduce the `concurrent_api_requests` setting.

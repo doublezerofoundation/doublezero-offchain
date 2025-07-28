@@ -1,8 +1,8 @@
 use crate::{
-    rpc, serviceability,
+    internet, rpc, serviceability,
     settings::Settings,
     telemetry,
-    types::{DZDTelemetryData, DZServiceabilityData},
+    types::{DZDInternetData, DZDTelemetryData, DZServiceabilityData},
 };
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -37,18 +37,20 @@ impl Fetcher {
         // Fetch data in parallel
         // For serviceability, we use the before timestamp to get the latest network state
         // For telemetry, we filter by timestamp range
-        let (serviceability_data, telemetry_data) = tokio::try_join!(
+        let (serviceability_data, telemetry_data, internet_data) = tokio::try_join!(
             serviceability::fetch(
                 &rpc_client,
                 &settings,
                 before_us // Get network state at the end of the time range
             ),
-            telemetry::fetch(&rpc_client, &settings, after_us, before_us)
+            telemetry::fetch(&rpc_client, &settings, after_us, before_us),
+            internet::fetch(&rpc_client, &settings, after_us, before_us)
         )?;
 
         Ok(FetchData {
             dz_serviceability: serviceability_data,
             dz_telemetry: telemetry_data,
+            dz_internet: internet_data,
             after_us,
             before_us,
             fetched_at: Utc::now(),
@@ -60,6 +62,7 @@ impl Fetcher {
 pub struct FetchData {
     pub dz_serviceability: DZServiceabilityData,
     pub dz_telemetry: DZDTelemetryData,
+    pub dz_internet: DZDInternetData,
     pub after_us: u64,
     pub before_us: u64,
     pub fetched_at: DateTime<Utc>,

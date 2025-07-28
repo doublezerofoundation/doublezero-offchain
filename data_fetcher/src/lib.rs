@@ -1,4 +1,5 @@
 pub mod fetcher;
+pub mod internet;
 pub mod rpc;
 pub mod serviceability;
 pub mod settings;

@@ -199,6 +199,8 @@ impl TryFrom<FetchData> for DataStore {
         }
 
         Ok(data_store)
+
+        // TODO: Build Internet Sample
     }
 }
 

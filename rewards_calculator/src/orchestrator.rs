@@ -1,14 +1,14 @@
 use crate::{
     demand_exporter::export_demand_data,
     shapley_handler::{build_demands, build_private_links},
-    util::{micros_to_datetime, parse_timestamp, print_demands, print_private_links},
+    util::{
+        micros_to_datetime, parse_timestamp, print_demands, print_private_links,
+        print_telemetry_stats,
+    },
 };
 use anyhow::Result;
 use data_fetcher::fetcher::Fetcher;
-use metrics_processor::{
-    data_store::DataStore,
-    dzd_telemetry_processor::{DZDTelemetryProcessor, print_telemetry_stats},
-};
+use metrics_processor::{data_store::DataStore, dzd_telemetry_processor::DZDTelemetryProcessor};
 use std::path::Path;
 use tracing::info;
 
@@ -35,11 +35,11 @@ impl Orchestrator {
         let fetch_data = Fetcher::fetch(after_us, before_us).await?;
         let data_store = DataStore::try_from(fetch_data)?;
         let stat_map = DZDTelemetryProcessor::process(&data_store);
-        info!("\n{}", print_telemetry_stats(&stat_map));
+        info!("DZD Telemetry Stats:\n{}", print_telemetry_stats(&stat_map));
 
         // Build pvt links
         let pvt_links = build_private_links(after_us, before_us, &data_store, &stat_map);
-        info!("\n{}", print_private_links(&pvt_links));
+        info!("Private Links:\n{}", print_private_links(&pvt_links));
 
         // Build demand
         let demands = build_demands().await?;

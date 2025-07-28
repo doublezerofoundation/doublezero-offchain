@@ -1,11 +1,11 @@
 use crate::{
     settings::Settings,
-    types::{DZDTelemetryData, DZDeviceLatencySamples},
+    types::{DZDInternetData, DZInternetLatencySamples},
 };
 use anyhow::{Context, Result};
 use backon::Retryable;
 use doublezero_telemetry::state::{
-    accounttype::AccountType, device_latency_samples::DeviceLatencySamples,
+    accounttype::AccountType, internet_latency_samples::InternetLatencySamples,
 };
 use solana_account_decoder::UiAccountEncoding;
 use solana_client::{
@@ -24,14 +24,14 @@ pub async fn fetch(
     settings: &Settings,
     after_us: u64,
     before_us: u64,
-) -> Result<DZDTelemetryData> {
+) -> Result<DZDInternetData> {
     let program_id = &settings.data_fetcher.programs.telemetry_program_id;
 
     let program_pubkey = Pubkey::from_str(program_id)
         .with_context(|| format!("Invalid telemetry program ID: {program_id}"))?;
 
     info!(
-        "Fetching telemetry data for time range {} to {} from program {}",
+        "Fetching internet telemetry data for time range {} to {} from program {}",
         after_us, before_us, program_id
     );
 
@@ -41,7 +41,7 @@ pub async fn fetch(
         // Filter by account type discriminator
         RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
             0, // Offset 0: account type
-            &[AccountType::DeviceLatencySamples as u8],
+            &[AccountType::InternetLatencySamples as u8],
         )),
     ];
 
@@ -67,18 +67,18 @@ pub async fn fetch(
     .await?;
 
     info!(
-        "Found {} total telemetry accounts to process",
+        "Found {} total internet telemetry accounts to process",
         accounts.len()
     );
 
     // Process accounts in batches
-    let mut device_latency_samples = Vec::new();
+    let mut internet_latency_samples = Vec::new();
     let batch_size = 100;
     let mut error_count = 0;
 
     for (i, chunk) in accounts.chunks(batch_size).enumerate() {
         info!(
-            "Processing telemetry batch {}/{}",
+            "Processing internet telemetry batch {}/{}",
             i + 1,
             accounts.len().div_ceil(batch_size)
         );
@@ -86,7 +86,7 @@ pub async fn fetch(
         let mut batch_samples = Vec::new();
 
         for (pubkey, account) in chunk {
-            match DeviceLatencySamples::try_from(&account.data[..]) {
+            match InternetLatencySamples::try_from(&account.data[..]) {
                 Ok(samples) => {
                     // Calculate end timestamp based on number of samples and interval
                     let sample_count = samples.header.next_sample_index as u64;
@@ -107,7 +107,7 @@ pub async fn fetch(
                             sample_count,
                             samples.header.sampling_interval_microseconds
                         );
-                        let db_samples = DZDeviceLatencySamples::from_raw(*pubkey, &samples);
+                        let db_samples = DZInternetLatencySamples::from_raw(*pubkey, &samples);
                         batch_samples.push(db_samples);
                     } else {
                         debug!(
@@ -126,22 +126,25 @@ pub async fn fetch(
             }
         }
 
-        device_latency_samples.extend(batch_samples);
+        internet_latency_samples.extend(batch_samples);
     }
 
     info!(
-        "Filtered {} telemetry accounts within time range (from {} total, {} errors)",
-        device_latency_samples.len(),
+        "Filtered {} internet telemetry accounts within time range (from {} total, {} errors)",
+        internet_latency_samples.len(),
         accounts.len(),
         error_count
     );
 
-    if !device_latency_samples.is_empty() {
+    if !internet_latency_samples.is_empty() {
         // Log some sample statistics
-        let total_samples: usize = device_latency_samples.iter().map(|d| d.samples.len()).sum();
-        let avg_samples_per_account = total_samples / device_latency_samples.len();
+        let total_samples: usize = internet_latency_samples
+            .iter()
+            .map(|d| d.samples.len())
+            .sum();
+        let avg_samples_per_account = total_samples / internet_latency_samples.len();
 
-        info!("Telemetry statistics:");
+        info!("Internet Telemetry statistics:");
         info!("  - Total latency samples: {}", total_samples);
         info!(
             "  - Average samples per account: {}",
@@ -149,7 +152,7 @@ pub async fn fetch(
         );
     }
 
-    Ok(DZDTelemetryData {
-        device_latency_samples,
+    Ok(DZDInternetData {
+        internet_latency_samples,
     })
 }

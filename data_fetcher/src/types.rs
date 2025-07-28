@@ -2,7 +2,9 @@ use doublezero_serviceability::state::{
     device::Device, exchange::Exchange, link::Link, location::Location,
     multicastgroup::MulticastGroup, user::User,
 };
-use doublezero_telemetry::state::device_latency_samples::DeviceLatencySamples;
+use doublezero_telemetry::state::{
+    device_latency_samples::DeviceLatencySamples, internet_latency_samples::InternetLatencySamples,
+};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
@@ -267,7 +269,7 @@ pub struct DZServiceabilityData {
 
 /// DB representation of DeviceLatencySamples
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DbDeviceLatencySamples {
+pub struct DZDeviceLatencySamples {
     pub pubkey: Pubkey,
     pub epoch: u64,
     pub origin_device_pk: Pubkey,
@@ -282,8 +284,8 @@ pub struct DbDeviceLatencySamples {
     pub sample_count: u32,
 }
 
-impl DbDeviceLatencySamples {
-    pub fn from_solana(pubkey: Pubkey, samples: &DeviceLatencySamples) -> Self {
+impl DZDeviceLatencySamples {
+    pub fn from_raw(pubkey: Pubkey, samples: &DeviceLatencySamples) -> Self {
         Self {
             pubkey,
             epoch: samples.header.epoch,
@@ -304,7 +306,45 @@ impl DbDeviceLatencySamples {
 /// Telemetry data container
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DZDTelemetryData {
-    pub device_latency_samples: Vec<DbDeviceLatencySamples>,
+    pub device_latency_samples: Vec<DZDeviceLatencySamples>,
+}
+
+/// DB representation of DeviceLatencySamples
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DZInternetLatencySamples {
+    pub pubkey: Pubkey,
+    pub data_provider_name: String,
+    pub epoch: u64,
+    pub oracle_agent_pk: Pubkey,
+    pub origin_location_pk: Pubkey,
+    pub target_location_pk: Pubkey,
+    pub sampling_interval_us: u64,
+    pub start_timestamp_us: u64,
+    pub samples: Vec<u32>,
+    pub sample_count: u32,
+}
+
+impl DZInternetLatencySamples {
+    pub fn from_raw(pubkey: Pubkey, samples: &InternetLatencySamples) -> Self {
+        Self {
+            pubkey,
+            epoch: samples.header.epoch,
+            start_timestamp_us: samples.header.start_timestamp_microseconds,
+            sampling_interval_us: samples.header.sampling_interval_microseconds,
+            samples: samples.samples.clone(),
+            sample_count: samples.header.next_sample_index,
+            origin_location_pk: samples.header.origin_location_pk,
+            target_location_pk: samples.header.target_location_pk,
+            oracle_agent_pk: samples.header.oracle_agent_pk,
+            data_provider_name: samples.header.data_provider_name.to_string(),
+        }
+    }
+}
+
+/// Internet Telemetry data container
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct DZDInternetData {
+    pub internet_latency_samples: Vec<DZInternetLatencySamples>,
 }
 
 #[cfg(test)]
@@ -352,7 +392,7 @@ mod tests {
             samples: vec![100, 200, 300],
         };
 
-        let db_samples = DbDeviceLatencySamples::from_solana(pubkey, &samples);
+        let db_samples = DZDeviceLatencySamples::from_raw(pubkey, &samples);
 
         assert_eq!(db_samples.pubkey, pubkey);
         assert_eq!(db_samples.epoch, 100);

@@ -1,20 +1,15 @@
 use crate::data_store::{DataStore, TelemetrySample};
-use std::collections::HashMap;
-use tabled::{Table, Tabled, settings::Style};
+use std::{cmp::Ordering, collections::HashMap};
 use tracing::debug;
 
 // Key: link_pk
 pub type DZDTelemetryStatMap = HashMap<String, DZDTelemetryStats>;
 
-#[derive(Debug, Clone, Tabled)]
+#[derive(Debug, Clone)]
 pub struct DZDTelemetryStats {
-    #[tabled(rename = "Circuit")]
     pub circuit: String,
-    #[tabled(skip)]
     pub link_pubkey: String,
-    #[tabled(skip)]
     pub origin_device: String,
-    #[tabled(skip)]
     pub target_device: String,
     pub rtt_mean_us: f64,
     pub rtt_median_us: f64,
@@ -28,15 +23,27 @@ pub struct DZDTelemetryStats {
     pub total_samples: usize,
 }
 
-pub struct DZDTelemetryProcessor;
-
-// Helper function to print stats in table fmt
-pub fn print_telemetry_stats(map: &DZDTelemetryStatMap) -> String {
-    let stats: Vec<DZDTelemetryStats> = map.values().cloned().collect();
-    Table::new(stats)
-        .with(Style::psql().remove_horizontals())
-        .to_string()
+impl PartialEq for DZDTelemetryStats {
+    fn eq(&self, other: &Self) -> bool {
+        self.circuit == other.circuit
+    }
 }
+
+impl Eq for DZDTelemetryStats {}
+
+impl PartialOrd for DZDTelemetryStats {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DZDTelemetryStats {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.circuit.cmp(&other.circuit)
+    }
+}
+
+pub struct DZDTelemetryProcessor;
 
 impl DZDTelemetryProcessor {
     pub fn process(data_store: &DataStore) -> DZDTelemetryStatMap {

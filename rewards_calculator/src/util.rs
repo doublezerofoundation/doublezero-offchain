@@ -1,9 +1,12 @@
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, TimeZone, Utc, offset::LocalResult};
 use humantime::{parse_duration, parse_rfc3339_weak};
+use metrics_processor::dzd_telemetry_processor::DZDTelemetryStatMap;
 use network_shapley::types::{Demand, PrivateLink};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tabled::{builder::Builder as TableBuilder, settings::Style};
+
+pub const US_TO_MS: f64 = 1000.0;
 
 /// Parse a time range from before/after strings
 pub fn parse_time_range(before: &str, after: &str) -> Result<(u64, u64)> {
@@ -70,16 +73,60 @@ pub fn micros_to_datetime(micros: u64) -> Result<DateTime<Utc>> {
     }
 }
 
+pub fn print_telemetry_stats(map: &DZDTelemetryStatMap) -> String {
+    let header = vec![
+        "circuit".to_string(),
+        "rtt_mean_ms".to_string(),
+        "rtt_median_ms".to_string(),
+        "rtt_min_ms".to_string(),
+        "rtt_max_ms".to_string(),
+        "rtt_p95_ms".to_string(),
+        "rtt_p99_ms".to_string(),
+        "avg_jitter_ms".to_string(),
+        "max_jitter_ms".to_string(),
+        "packet_loss".to_string(),
+        "total_samples".to_string(),
+    ];
+
+    let mut printable = vec![];
+    for stat in map.values() {
+        let row = vec![
+            stat.circuit.to_string(),
+            (stat.rtt_mean_us / US_TO_MS).to_string(),
+            (stat.rtt_median_us / US_TO_MS).to_string(),
+            (stat.rtt_min_us / US_TO_MS).to_string(),
+            (stat.rtt_max_us / US_TO_MS).to_string(),
+            (stat.rtt_p95_us / US_TO_MS).to_string(),
+            (stat.rtt_p99_us / US_TO_MS).to_string(),
+            (stat.avg_jitter_us / US_TO_MS).to_string(),
+            (stat.max_jitter_us / US_TO_MS).to_string(),
+            stat.packet_loss.to_string(),
+            stat.total_samples.to_string(),
+        ];
+        printable.push(row);
+    }
+    printable.sort();
+
+    // Insert header at the beginning
+    printable.insert(0, header);
+
+    TableBuilder::from(printable)
+        .build()
+        .with(Style::psql().remove_horizontals())
+        .to_string()
+}
+
 pub fn print_private_links(private_links: &[PrivateLink]) -> String {
-    let mut printable = vec![vec![
+    let header = vec![
         "device1".to_string(),
         "device2".to_string(),
-        "latency(ms)".to_string(),
-        "bandwidth(Gbps)".to_string(),
+        "latency_ms".to_string(),
+        "bandwidth_Gbps".to_string(),
         "uptime".to_string(),
         "shared".to_string(),
-    ]];
+    ];
 
+    let mut printable = vec![];
     for pl in private_links {
         let row = vec![
             pl.device1.to_string(),
@@ -91,6 +138,10 @@ pub fn print_private_links(private_links: &[PrivateLink]) -> String {
         ];
         printable.push(row);
     }
+    printable.sort();
+
+    // Insert header at the beginning
+    printable.insert(0, header);
 
     TableBuilder::from(printable)
         .build()
@@ -99,7 +150,7 @@ pub fn print_private_links(private_links: &[PrivateLink]) -> String {
 }
 
 pub fn print_demands(demands: &[Demand], k: usize) -> String {
-    let mut printable = vec![vec![
+    let header = vec![
         "start".to_string(),
         "end".to_string(),
         "receivers".to_string(),
@@ -107,8 +158,9 @@ pub fn print_demands(demands: &[Demand], k: usize) -> String {
         "priority".to_string(),
         "type".to_string(),
         "multicast".to_string(),
-    ]];
+    ];
 
+    let mut printable = vec![];
     for demand in demands.iter().take(k) {
         let row = vec![
             demand.start.to_string(),
@@ -121,6 +173,9 @@ pub fn print_demands(demands: &[Demand], k: usize) -> String {
         ];
         printable.push(row);
     }
+
+    printable.sort();
+    printable.insert(0, header);
 
     TableBuilder::from(printable)
         .build()
