@@ -30,11 +30,6 @@ pub async fn fetch(
     let program_pubkey = Pubkey::from_str(program_id)
         .with_context(|| format!("Invalid telemetry program ID: {program_id}"))?;
 
-    info!(
-        "Fetching telemetry data for time range {} to {} from program {}",
-        after_us, before_us, program_id
-    );
-
     // Create filters for getProgramAccounts
     // We only filter by account type, not epoch, since we'll filter by timestamp later
     let filters = vec![

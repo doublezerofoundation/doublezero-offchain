@@ -20,10 +20,6 @@ impl Fetcher {
         let settings = Settings::from_env()?;
 
         info!(
-            "Fetching all data for time range: {} to {} microseconds",
-            after_us, before_us
-        );
-        info!(
             "Using serviceability program: {}",
             settings.data_fetcher.programs.serviceability_program_id
         );
@@ -35,14 +31,10 @@ impl Fetcher {
         let rpc_client = rpc::create_client(&settings.data_fetcher.rpc)?;
 
         // Fetch data in parallel
-        // For serviceability, we use the before timestamp to get the latest network state
+        // For serviceability, we fetch all the accounts to get current network state
         // For telemetry, we filter by timestamp range
         let (serviceability_data, telemetry_data, internet_data) = tokio::try_join!(
-            serviceability::fetch(
-                &rpc_client,
-                &settings,
-                before_us // Get network state at the end of the time range
-            ),
+            serviceability::fetch(&rpc_client, &settings,),
             telemetry::fetch(&rpc_client, &settings, after_us, before_us),
             internet::fetch(&rpc_client, &settings, after_us, before_us)
         )?;

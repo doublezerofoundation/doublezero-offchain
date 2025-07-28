@@ -22,20 +22,11 @@ use tracing::{debug, info};
 
 /// Fetch all network serviceability data at a given timestamp
 /// For now, we fetch the latest state (no historical slot lookup)
-pub async fn fetch(
-    rpc_client: &RpcClient,
-    settings: &Settings,
-    timestamp_us: u64,
-) -> Result<DZServiceabilityData> {
+pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServiceabilityData> {
     let program_id = &settings.data_fetcher.programs.serviceability_program_id;
 
     let program_pubkey = Pubkey::from_str(program_id)
         .with_context(|| format!("Invalid serviceability program ID: {program_id}"))?;
-
-    info!(
-        "Fetching serviceability network data at timestamp {} from program {}",
-        timestamp_us, program_id
-    );
 
     // For serviceability data, we fetch all accounts without filters
     // since we need the complete network state

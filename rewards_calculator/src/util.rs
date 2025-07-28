@@ -1,3 +1,4 @@
+use crate::constants::{MICRO_S_TO_MILLI_S, SEC_TO_MICRO_S};
 use anyhow::{Context, Result, anyhow, bail};
 use chrono::{DateTime, TimeZone, Utc, offset::LocalResult};
 use humantime::{parse_duration, parse_rfc3339_weak};
@@ -5,8 +6,6 @@ use metrics_processor::dzd_telemetry_processor::DZDTelemetryStatMap;
 use network_shapley::types::{Demand, PrivateLink};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tabled::{builder::Builder as TableBuilder, settings::Style};
-
-pub const US_TO_MS: f64 = 1000.0;
 
 /// Parse a time range from before/after strings
 pub fn parse_time_range(before: &str, after: &str) -> Result<(u64, u64)> {
@@ -60,13 +59,13 @@ pub fn system_time_to_micros(time: SystemTime) -> u64 {
     let duration = time
         .duration_since(UNIX_EPOCH)
         .expect("Time went backwards");
-    duration.as_secs() * 1_000_000 + duration.subsec_micros() as u64
+    duration.as_secs() * SEC_TO_MICRO_S + duration.subsec_micros() as u64
 }
 
 /// Convert microseconds to chrono DateTime for formatting
 pub fn micros_to_datetime(micros: u64) -> Result<DateTime<Utc>> {
-    let secs = (micros / 1_000_000) as i64;
-    let nanos = ((micros % 1_000_000) * 1_000) as u32;
+    let secs = (micros / SEC_TO_MICRO_S) as i64;
+    let nanos = ((micros % SEC_TO_MICRO_S) * 1_000) as u32;
     match TimeZone::timestamp_opt(&Utc, secs, nanos) {
         LocalResult::Single(t) => Ok(t),
         other => bail!(format!("{other:?}")),
@@ -92,14 +91,14 @@ pub fn print_telemetry_stats(map: &DZDTelemetryStatMap) -> String {
     for stat in map.values() {
         let row = vec![
             stat.circuit.to_string(),
-            (stat.rtt_mean_us / US_TO_MS).to_string(),
-            (stat.rtt_median_us / US_TO_MS).to_string(),
-            (stat.rtt_min_us / US_TO_MS).to_string(),
-            (stat.rtt_max_us / US_TO_MS).to_string(),
-            (stat.rtt_p95_us / US_TO_MS).to_string(),
-            (stat.rtt_p99_us / US_TO_MS).to_string(),
-            (stat.avg_jitter_us / US_TO_MS).to_string(),
-            (stat.max_jitter_us / US_TO_MS).to_string(),
+            format!("{:.4}", (stat.rtt_mean_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.rtt_median_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.rtt_min_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.rtt_max_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.rtt_p95_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.rtt_p99_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.avg_jitter_us / MICRO_S_TO_MILLI_S as f64)),
+            format!("{:.4}", (stat.max_jitter_us / MICRO_S_TO_MILLI_S as f64)),
             stat.packet_loss.to_string(),
             stat.total_samples.to_string(),
         ];
@@ -131,9 +130,9 @@ pub fn print_private_links(private_links: &[PrivateLink]) -> String {
         let row = vec![
             pl.device1.to_string(),
             pl.device2.to_string(),
-            pl.latency.to_string(),
-            pl.bandwidth.to_string(),
-            pl.uptime.to_string(),
+            format!("{:.4}", pl.latency),
+            format!("{:.4}", pl.bandwidth),
+            format!("{:.4}", pl.uptime),
             format!("{:?}", pl.shared),
         ];
         printable.push(row);
