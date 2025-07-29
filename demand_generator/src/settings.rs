@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use backon::ExponentialBuilder;
 use figment::{
     Figment,
@@ -16,7 +16,7 @@ pub struct Settings {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DemandGeneratorSettings {
-    pub ip_info: IpInfoSettings,
+    pub validators_app: ValidatorsAppSettings,
     #[serde(default = "default_solana_rpc_url")]
     pub solana_rpc_url: String,
     #[serde(default = "default_concurrent_api_requests")]
@@ -25,8 +25,8 @@ pub struct DemandGeneratorSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IpInfoSettings {
-    #[serde(default = "default_ipinfo_base_url")]
+pub struct ValidatorsAppSettings {
+    #[serde(default = "default_validators_app_base_url")]
     pub base_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_token: Option<String>,
@@ -102,30 +102,55 @@ impl Settings {
     }
 
     fn validate_and_set_api_token(&mut self) -> Result<()> {
-        // First check if token is already set (shouldn't be from config files anymore)
-        if let Some(ref token) = self.demand_generator.ip_info.api_token {
+        // Check if token is already set in config
+        if let Some(ref token) = self.demand_generator.validators_app.api_token {
             if token.contains("_token") || token.is_empty() {
-                anyhow::bail!(
-                    "Invalid API token placeholder found in configuration. Please set DZ__DEMAND_GENERATOR__IP_INFO__API_TOKEN environment variable."
+                bail!(
+                    "Validators.app API token appears to be a placeholder or empty. Please set DZ__DEMAND_GENERATOR__VALIDATORS_APP__API_TOKEN environment variable."
                 );
             }
+            // Token exists and looks valid
+            return Ok(());
         }
 
-        // Get token from environment variable
-        let env_token = std::env::var("DZ__DEMAND_GENERATOR__IP_INFO__API_TOKEN")
-            .or_else(|_| std::env::var("IPINFO_API_TOKEN"))
-            .map_err(|_| anyhow::anyhow!(
-                "IP info API token not found. Please set DZ__DEMAND_GENERATOR__IP_INFO__API_TOKEN environment variable."
-            ))?;
+        // No token in config, check environment
+        let env_key = "DZ__DEMAND_GENERATOR__VALIDATORS_APP__API_TOKEN";
+        let env_token = std::env::var("DZ__DEMAND_GENERATOR__VALIDATORS_APP__API_TOKEN").with_context(|| {
+            format!(
+                "Please set the {env_key} environment variable with your validators.app API token.",
+            )
+        })?;
 
-        // Validate the token
-        if env_token.is_empty() || env_token.contains("your_token_here") {
-            anyhow::bail!("Invalid API token. Please provide a valid ipinfo.io API token.");
+        if env_token.is_empty() {
+            bail!("Validators.app API token is empty. Please provide a valid token.");
         }
 
-        // Set the validated token
-        self.demand_generator.ip_info.api_token = Some(env_token);
+        // Set the token from environment
+        self.demand_generator.validators_app.api_token = Some(env_token);
         Ok(())
+    }
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            log_level: default_log_level(),
+            demand_generator: DemandGeneratorSettings::default(),
+        }
+    }
+}
+
+impl Default for DemandGeneratorSettings {
+    fn default() -> Self {
+        Self {
+            validators_app: ValidatorsAppSettings {
+                base_url: default_validators_app_base_url(),
+                api_token: None,
+            },
+            solana_rpc_url: default_solana_rpc_url(),
+            concurrent_api_requests: default_concurrent_api_requests(),
+            backoff: None,
+        }
     }
 }
 
@@ -133,8 +158,8 @@ fn default_log_level() -> String {
     "info".to_string()
 }
 
-fn default_ipinfo_base_url() -> String {
-    "https://ipinfo.io".to_string()
+fn default_validators_app_base_url() -> String {
+    "https://www.validators.app/api/v1".to_string()
 }
 
 fn default_solana_rpc_url() -> String {

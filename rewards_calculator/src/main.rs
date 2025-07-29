@@ -23,10 +23,9 @@ async fn main() -> Result<()> {
         Commands::CalculateRewards { before, after } => {
             Orchestrator::calculate_rewards(before, after).await
         }
-        Commands::ExportDemand {
-            demand,
-            enriched_validators,
-        } => Orchestrator::export_demand(demand, enriched_validators.as_deref()).await,
+        Commands::ExportDemand { demand, validators } => {
+            Orchestrator::export_demand(demand, validators.as_deref()).await
+        }
     }
 }
 

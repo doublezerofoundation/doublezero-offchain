@@ -76,14 +76,14 @@ With specific timestamps:
 Export demand matrix and validator information:
 
 ```bash
-# Set API token for IP enrichment (required)
-export DZ__DEMAND_GENERATOR__IP_INFO__API_TOKEN=your_ipinfo_token_here
+# Set API token for validator information (required)
+export DZ__DEMAND_GENERATOR__VALIDATORS_APP__API_TOKEN=your_validators_app_token_here
 
 # Export demand matrix only
 ./target/release/rewards_calculator export-demand --demand demand.csv
 
-# Export both demand matrix and enriched validators
-./target/release/rewards_calculator export-demand --demand demand.csv --enriched-validators validators.csv
+# Export both demand matrix and validators
+./target/release/rewards_calculator export-demand --demand demand.csv --validators validators.csv
 ```
 
 ## Usage
@@ -96,7 +96,7 @@ Usage: rewards-calculator [OPTIONS] <COMMAND>
 
 Commands:
   calculate-rewards  Calculate rewards for the given time period
-  export-demand      Export demand matrix and enriched validators to CSV files
+  export-demand      Export demand matrix and validators to CSV files
   help               Print this message or the help of the given subcommand(s)
 
 Options:
@@ -117,14 +117,14 @@ The system uses a hierarchical configuration approach:
 
 ### API Configuration (Demand Generator)
 
-The demand generator requires an ipinfo.io API token for enriching validator data with geographic information.
+The demand generator requires a validators.app API token for fetching validator data with geographic information.
 
 #### Setting Up API Token
 
 The API token **must** be provided via environment variable for security:
 
 ```bash
-export DZ__DEMAND_GENERATOR__IP_INFO__API_TOKEN=your_token_here
+export DZ__DEMAND_GENERATOR__VALIDATORS_APP__API_TOKEN=your_token_here
 ```
 
 #### Rate Limiting Configuration

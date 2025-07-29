@@ -35,15 +35,16 @@ pub enum Commands {
         #[arg(short, long, help_heading = "Time Range")]
         after: String,
     },
-    /// Export demand matrix and enriched validators to CSV files
+
+    /// Export demand matrix and validators to CSV files
     ExportDemand {
         /// Output path for demand CSV file
         #[arg(long)]
         demand: PathBuf,
 
-        /// Output path for enriched validators CSV file (optional)
+        /// Output path for validators CSV file (optional)
         #[arg(long)]
-        enriched_validators: Option<PathBuf>,
+        validators: Option<PathBuf>,
     },
 }
 
@@ -124,18 +125,15 @@ mod tests {
             "export-demand",
             "--demand",
             "demand.csv",
-            "--enriched-validators",
+            "--validators",
             "validators.csv",
         ];
 
         let cli = Cli::try_parse_from(args).unwrap();
         match cli.command {
-            Commands::ExportDemand {
-                demand,
-                enriched_validators,
-            } => {
+            Commands::ExportDemand { demand, validators } => {
                 assert_eq!(demand, PathBuf::from("demand.csv"));
-                assert_eq!(enriched_validators, Some(PathBuf::from("validators.csv")));
+                assert_eq!(validators, Some(PathBuf::from("validators.csv")));
             }
             _ => panic!("Expected ExportDemand command"),
         }

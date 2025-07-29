@@ -17,3 +17,4 @@ uptime_threshold = 0.95
 percentile_bins = [50, 75, 90, 95, 99]
 
 [demand_generator.backoff]
+[demand_generator.validators_app]

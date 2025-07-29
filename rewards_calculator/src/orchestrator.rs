@@ -52,10 +52,7 @@ impl Orchestrator {
         Ok(())
     }
 
-    pub async fn export_demand(
-        demand_path: &Path,
-        enriched_validators_path: Option<&Path>,
-    ) -> Result<()> {
-        export_demand_data(demand_path, enriched_validators_path).await
+    pub async fn export_demand(demand_path: &Path, validators_path: Option<&Path>) -> Result<()> {
+        export_demand_data(demand_path, validators_path).await
     }
 }
