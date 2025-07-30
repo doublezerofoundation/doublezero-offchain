@@ -1,4 +1,4 @@
-pub mod city_aggregator;
+pub mod aggregator;
 pub mod demand_matrix;
 pub mod generator;
 pub mod settings;

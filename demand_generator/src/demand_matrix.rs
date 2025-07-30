@@ -1,4 +1,4 @@
-use crate::city_aggregator::CityAggregate;
+use crate::aggregator::DataCenterAggregate;
 use anyhow::Result;
 use csv::Writer;
 use network_shapley::types::Demand;
@@ -28,13 +28,13 @@ impl Default for DemandConfig {
 
 /// Generates demand matrix from city aggregates
 pub fn generate_demand_matrix(
-    city_aggregates: &[CityAggregate],
+    city_aggregates: &[DataCenterAggregate],
     config: &DemandConfig,
 ) -> Result<Vec<Demand>> {
     let mut demands = Vec::new();
 
     // Calculate total network stake
-    let total_stake = city_aggregates.iter().map(|c| c.total_stake_sol).sum();
+    let total_stake = city_aggregates.iter().map(|c| c.total_stake).sum();
 
     // Generate bidirectional flows between all city pairs
     for source in city_aggregates {
@@ -46,21 +46,18 @@ pub fn generate_demand_matrix(
 
             // Calculate traffic based on stake weights
             let traffic = calculate_traffic(
-                source.total_stake_sol,
-                destination.total_stake_sol,
+                source.total_stake,
+                destination.total_stake,
                 total_stake,
                 config.traffic_multiplier,
             );
 
             // Calculate priority based on combined stake
-            let priority = calculate_priority(
-                source.total_stake_sol,
-                destination.total_stake_sol,
-                total_stake,
-            );
+            let priority =
+                calculate_priority(source.total_stake, destination.total_stake, total_stake);
 
             // Determine type based on source stake concentration
-            let kind = if (source.total_stake_sol / total_stake) as f64 >= config.type_2_threshold {
+            let kind = if (source.total_stake / total_stake) as f64 >= config.type_2_threshold {
                 2 // High-stake cities use Type 2
             } else {
                 1 // Standard type

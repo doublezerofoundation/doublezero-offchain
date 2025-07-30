@@ -19,8 +19,8 @@ pub struct DemandGeneratorSettings {
     pub validators_app: ValidatorsAppSettings,
     #[serde(default = "default_solana_rpc_url")]
     pub solana_rpc_url: String,
-    #[serde(default = "default_concurrent_api_requests")]
-    pub concurrent_api_requests: u32,
+    #[serde(default = "default_max_requests")]
+    pub max_requests: u32,
     pub backoff: Option<BackoffSettings>,
 }
 
@@ -148,7 +148,7 @@ impl Default for DemandGeneratorSettings {
                 api_token: None,
             },
             solana_rpc_url: default_solana_rpc_url(),
-            concurrent_api_requests: default_concurrent_api_requests(),
+            max_requests: default_max_requests(),
             backoff: None,
         }
     }
@@ -166,7 +166,7 @@ fn default_solana_rpc_url() -> String {
     "https://api.mainnet-beta.solana.com".to_string()
 }
 
-fn default_concurrent_api_requests() -> u32 {
+fn default_max_requests() -> u32 {
     8
 }
 
