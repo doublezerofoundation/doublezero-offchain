@@ -1,8 +1,6 @@
 use crate::aggregator::DataCenterAggregate;
 use anyhow::Result;
-use csv::Writer;
 use network_shapley::types::Demand;
-use std::path::PathBuf;
 
 /// Configuration for demand generation
 #[derive(Debug, Clone)]
@@ -28,17 +26,17 @@ impl Default for DemandConfig {
 
 /// Generates demand matrix from city aggregates
 pub fn generate_demand_matrix(
-    city_aggregates: &[DataCenterAggregate],
+    dc_aggregates: &[DataCenterAggregate],
     config: &DemandConfig,
 ) -> Result<Vec<Demand>> {
     let mut demands = Vec::new();
 
     // Calculate total network stake
-    let total_stake = city_aggregates.iter().map(|c| c.total_stake).sum();
+    let total_stake = dc_aggregates.iter().map(|c| c.total_stake).sum();
 
     // Generate bidirectional flows between all city pairs
-    for source in city_aggregates {
-        for destination in city_aggregates {
+    for source in dc_aggregates {
+        for destination in dc_aggregates {
             // Skip self-loops
             if source.data_center_key == destination.data_center_key {
                 continue;
@@ -80,33 +78,23 @@ pub fn generate_demand_matrix(
     Ok(demands)
 }
 
-/// Calculates traffic volume between two cities
+// TODO: Do this better? This is very naive.
+/// Calculates traffic volume between two data centers
 fn calculate_traffic(source_stake: u64, dest_stake: u64, total_stake: u64, multiplier: f64) -> f64 {
     // Use geometric mean of stakes, normalized by total stake
-    let geometric_mean = (source_stake * dest_stake).isqrt();
-    let normalized = geometric_mean / total_stake;
+    let geometric_mean = ((source_stake as f64) * (dest_stake as f64)).sqrt();
+    let normalized = geometric_mean / (total_stake as f64);
 
     // Apply multiplier and round to reasonable precision
-    (normalized as f64 * multiplier * 100.0).round() / 100.0
+    (normalized * multiplier * 100.0).round() / 100.0
 }
 
+// TODO: Do this better? This is also very naive.
 /// Calculates priority based on stake concentration
 fn calculate_priority(source_stake: u64, dest_stake: u64, total_stake: u64) -> f64 {
     // Average of source and destination stake concentrations
-    let avg_concentration = (source_stake + dest_stake) / (2 * total_stake);
+    let avg_concentration = (source_stake + dest_stake) as f64 / (2.0 * total_stake as f64);
 
     // Ensure priority is between 0 and 1, round to 2 decimal places
-    (avg_concentration.min(1) * 100) as f64 / 100.0
-}
-
-/// Writes demand matrix to CSV file
-pub fn write_demand_csv(path: &PathBuf, demands: &[Demand]) -> Result<()> {
-    let mut writer = Writer::from_path(path)?;
-
-    for demand in demands {
-        writer.serialize(demand)?;
-    }
-
-    writer.flush()?;
-    Ok(())
+    (avg_concentration.min(1.0) * 100.0).round() / 100.0
 }

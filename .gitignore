@@ -32,3 +32,8 @@ test-data/
 *.xml
 *.diff
 *.csv
+*.json
+*.jsonl
+*.duckdb
+*.geojson
+*.sql

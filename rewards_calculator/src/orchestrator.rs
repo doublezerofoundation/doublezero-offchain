@@ -44,8 +44,7 @@ impl Orchestrator {
         // Build demand
         let demands = build_demands().await?;
         info!("Generated {} demands", demands.len());
-        info!("Showing Top 10 demands");
-        info!("\n{}", print_demands(&demands, 10));
+        info!("Top 10 demands:\n{}", print_demands(&demands, 10));
 
         // TODO: Use demand
 

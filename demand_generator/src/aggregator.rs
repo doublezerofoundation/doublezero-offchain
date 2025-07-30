@@ -1,11 +1,10 @@
 use crate::validators_app::ValidatorsAppResponse;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::{cmp::Ordering, collections::HashMap};
+use std::collections::HashMap;
 
 pub type CityAggregates = Vec<DataCenterAggregate>;
 
-// TODO: Does it make sense to do this city-by-city or DC-by-DC?
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DataCenterAggregate {
     pub data_center_key: String,
@@ -17,49 +16,41 @@ pub struct DataCenterAggregate {
 
 /// Aggregates validators by data center
 pub fn aggregate_by_dc(validators: &[ValidatorsAppResponse]) -> Result<CityAggregates> {
-    let mut city_map: HashMap<String, DataCenterAggregate> = HashMap::new();
+    let mut dc_map: HashMap<String, DataCenterAggregate> = HashMap::new();
 
-    // FIXME: There should be no defaults, just ignore when building the aggregate
     for validator in validators {
-        let entry = city_map
-            .entry(
-                validator
-                    .data_center_key
-                    .clone()
-                    .unwrap_or("default_dck".to_string())
-                    .to_string(),
-            )
+        // Skip validators without required data
+        let Some(dc_key) = &validator.data_center_key else {
+            continue;
+        };
+        let Some(stake) = validator.active_stake else {
+            continue;
+        };
+        let Some(lat) = &validator.latitude else {
+            continue;
+        };
+        let Some(lon) = &validator.longitude else {
+            continue;
+        };
+
+        let entry = dc_map
+            .entry(dc_key.clone())
             .or_insert_with(|| DataCenterAggregate {
-                data_center_key: validator
-                    .data_center_key
-                    .clone()
-                    .unwrap_or("default_dck".to_string())
-                    .to_string(),
+                data_center_key: dc_key.clone(),
                 total_stake: 0,
                 validator_count: 0,
-                latitude: validator
-                    .latitude
-                    .clone()
-                    .unwrap_or("nope".to_string())
-                    .to_string(),
-                longitude: validator
-                    .longitude
-                    .clone()
-                    .unwrap_or("nope".to_string())
-                    .to_string(),
+                latitude: lat.clone(),
+                longitude: lon.clone(),
             });
 
-        entry.total_stake += validator.active_stake.unwrap_or(0);
+        entry.total_stake += stake;
         entry.validator_count += 1;
     }
 
-    let mut aggregates: Vec<DataCenterAggregate> = city_map.into_values().collect();
+    let mut aggregates: Vec<DataCenterAggregate> = dc_map.into_values().collect();
+
     // Sort by stake descending
-    aggregates.sort_by(|a, b| {
-        b.total_stake
-            .partial_cmp(&a.total_stake)
-            .unwrap_or(Ordering::Equal)
-    });
+    aggregates.sort_by(|a, b| b.total_stake.cmp(&a.total_stake));
 
     Ok(aggregates)
 }
