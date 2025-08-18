@@ -1,6 +1,7 @@
 use crate::{
+    AccessIds, Result,
     client::{doublezero_ledger::DzRpcClient, solana::SolRpcClient},
-    verify_access_request, AccessIds, Result,
+    verify_access_request,
 };
 use doublezero_passport::instruction::AccessMode;
 use solana_sdk::signature::{Keypair, Signature};

@@ -1,8 +1,8 @@
-use crate::{client::solana::SolPubsubClient, Result};
+use crate::{Result, client::solana::SolPubsubClient};
 
 use futures::StreamExt;
 use solana_sdk::signature::Signature;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 use url::Url;

@@ -2,7 +2,7 @@ use doublezero_passport::{instruction::AccessMode, state::AccessRequest};
 use solana_sdk::{
     hash::Hash,
     instruction::Instruction,
-    message::{v0::Message, VersionedMessage},
+    message::{VersionedMessage, v0::Message},
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
