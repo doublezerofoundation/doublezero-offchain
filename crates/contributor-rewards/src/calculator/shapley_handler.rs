@@ -141,37 +141,6 @@ pub fn build_public_links(
     Ok(public_links)
 }
 
-/// Build mapping from exchange codes to location codes using coordinate matching
-fn build_exchange_to_location_mapping(fetch_data: &FetchData) -> HashMap<String, String> {
-    let mut mapping = HashMap::new();
-
-    for exchange in fetch_data.dz_serviceability.exchanges.values() {
-        // Find location with matching coordinates
-        for location in fetch_data.dz_serviceability.locations.values() {
-            if (exchange.lat - location.lat).abs() < 0.0001
-                && (exchange.lng - location.lng).abs() < 0.0001
-            {
-                mapping.insert(exchange.code.to_string(), location.code.to_string());
-                debug!(
-                    "Mapped exchange {} to location {}",
-                    exchange.code, location.code
-                );
-                break;
-            }
-        }
-
-        // Log unmapped exchanges
-        if !mapping.contains_key(&exchange.code) {
-            debug!(
-                "No location found for exchange {} at ({}, {})",
-                exchange.code, exchange.lat, exchange.lng
-            );
-        }
-    }
-
-    mapping
-}
-
 pub fn build_private_links(
     fetch_data: &FetchData,
     telemetry_stats: &DZDTelemetryStatMap,
