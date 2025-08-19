@@ -28,10 +28,10 @@ pub struct InternetTelemetryStats {
     pub oracle_agent_pk: Pubkey,
     #[tabled(skip)]
     #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
-    pub origin_location_pk: Pubkey,
+    pub origin_exchange_pk: Pubkey,
     #[tabled(skip)]
     #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
-    pub target_location_pk: Pubkey,
+    pub target_exchange_pk: Pubkey,
     #[tabled(display = "display_us_as_ms", rename = "rtt_mean(ms)")]
     pub rtt_mean_us: f64,
     #[tabled(display = "display_us_as_ms", rename = "rtt_median(ms)")]
@@ -65,12 +65,12 @@ pub fn print_internet_stats(map: &InternetTelemetryStatMap) -> String {
 
 impl InternetTelemetryProcessor {
     pub fn process(fetch_data: &FetchData) -> Result<InternetTelemetryStatMap> {
-        // Build location PK to code mapping
-        let location_pk_to_code: HashMap<Pubkey, String> = fetch_data
+        // Build exchange PK to code mapping
+        let exchange_pk_to_code: HashMap<Pubkey, String> = fetch_data
             .dz_serviceability
-            .locations
+            .exchanges
             .iter()
-            .map(|(pubkey, loc)| (*pubkey, loc.code.to_string()))
+            .map(|(pubkey, exch)| (*pubkey, exch.code.to_string()))
             .collect();
 
         // Process internet telemetry samples
@@ -93,7 +93,7 @@ impl InternetTelemetryProcessor {
         for sample in &fetch_data.dz_internet.internet_latency_samples {
             let key = format!(
                 "{}:{}:{}",
-                sample.origin_location_pk, sample.target_location_pk, sample.data_provider_name
+                sample.origin_exchange_pk, sample.target_exchange_pk, sample.data_provider_name
             );
             sample_by_key.entry(key).or_insert(sample);
         }
@@ -105,27 +105,27 @@ impl InternetTelemetryProcessor {
                 continue;
             }
 
-            let origin_location_pk = parts[0].parse::<Pubkey>().ok();
-            let target_location_pk = parts[1].parse::<Pubkey>().ok();
+            let origin_exchange_pk = parts[0].parse::<Pubkey>().ok();
+            let target_exchange_pk = parts[1].parse::<Pubkey>().ok();
             let data_provider_name = parts[2].to_string();
 
-            if let (Some(origin_pk), Some(target_pk)) = (origin_location_pk, target_location_pk) {
-                // Get location codes
+            if let (Some(origin_pk), Some(target_pk)) = (origin_exchange_pk, target_exchange_pk) {
+                // Get exchange codes
                 let origin_code =
-                    location_pk_to_code
+                    exchange_pk_to_code
                         .get(&origin_pk)
                         .cloned()
                         .unwrap_or_else(|| {
-                            warn!("Missing location code for origin PK: {}", origin_pk);
-                            format!("LOC-{}", &origin_pk)
+                            warn!("Missing exchange code for origin PK: {}", origin_pk);
+                            format!("EXC-{}", &origin_pk)
                         });
                 let target_code =
-                    location_pk_to_code
+                    exchange_pk_to_code
                         .get(&target_pk)
                         .cloned()
                         .unwrap_or_else(|| {
-                            warn!("Missing location code for target PK: {}", target_pk);
-                            format!("LOC-{}", &target_pk)
+                            warn!("Missing exchange code for target PK: {}", target_pk);
+                            format!("EXC-{}", &target_pk)
                         });
 
                 // Get oracle agent from sample
@@ -143,8 +143,8 @@ impl InternetTelemetryProcessor {
                     target_code: target_code.to_string(),
                     data_provider_name: data_provider_name.to_string(),
                     oracle_agent_pk,
-                    origin_location_pk: origin_pk,
-                    target_location_pk: target_pk,
+                    origin_exchange_pk: origin_pk,
+                    target_exchange_pk: target_pk,
                     rtt_mean_us: stats.rtt_mean_us,
                     rtt_median_us: stats.rtt_median_us,
                     rtt_min_us: stats.rtt_min_us,

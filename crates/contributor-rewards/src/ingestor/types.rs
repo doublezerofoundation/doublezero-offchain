@@ -167,9 +167,9 @@ pub struct DZInternetLatencySamples {
     #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
     pub oracle_agent_pk: Pubkey,
     #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
-    pub origin_location_pk: Pubkey,
+    pub origin_exchange_pk: Pubkey,
     #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
-    pub target_location_pk: Pubkey,
+    pub target_exchange_pk: Pubkey,
     pub sampling_interval_us: u64,
     pub start_timestamp_us: u64,
     #[serde(skip)]
@@ -184,8 +184,8 @@ impl DZInternetLatencySamples {
             epoch: samples.header.epoch,
             data_provider_name: samples.header.data_provider_name.to_string(),
             oracle_agent_pk: samples.header.oracle_agent_pk,
-            origin_location_pk: samples.header.origin_location_pk,
-            target_location_pk: samples.header.target_location_pk,
+            origin_exchange_pk: samples.header.origin_exchange_pk,
+            target_exchange_pk: samples.header.target_exchange_pk,
             sampling_interval_us: samples.header.sampling_interval_microseconds,
             start_timestamp_us: samples.header.start_timestamp_microseconds,
             samples: samples.samples.clone(),

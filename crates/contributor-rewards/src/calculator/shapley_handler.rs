@@ -10,6 +10,7 @@ use network_shapley::types::{
     Demands, Device, Devices, PrivateLink, PrivateLinks, PublicLink, PublicLinks,
 };
 use std::collections::HashMap;
+use tracing::debug;
 
 // (city1_code, city2_code)
 type CityPair = (String, String);
@@ -48,16 +49,49 @@ pub async fn build_demands(
     Ok((result.demands, result.city_stats))
 }
 
-pub fn build_public_links(internet_stats: &InternetTelemetryStatMap) -> Result<PublicLinks> {
+pub fn build_public_links(
+    internet_stats: &InternetTelemetryStatMap,
+    fetch_data: &FetchData,
+) -> Result<PublicLinks> {
+    // Build exchange-to-location mapping using coordinates
+    let exchange_code_to_location_code = build_exchange_to_location_mapping(fetch_data);
+
     // Group latencies by normalized city pairs
     let mut city_pair_latencies = CityPairLatencies::new();
 
     for stats in internet_stats.values() {
+        // Map exchange codes to location codes
+        let origin_location = exchange_code_to_location_code
+            .get(&stats.origin_code)
+            .cloned()
+            .unwrap_or_else(|| {
+                debug!("No location mapping for exchange {}", stats.origin_code);
+                // Strip 'x' prefix as fallback
+                if stats.origin_code.starts_with('x') {
+                    stats.origin_code[1..].to_string()
+                } else {
+                    stats.origin_code.clone()
+                }
+            });
+
+        let target_location = exchange_code_to_location_code
+            .get(&stats.target_code)
+            .cloned()
+            .unwrap_or_else(|| {
+                debug!("No location mapping for exchange {}", stats.target_code);
+                // Strip 'x' prefix as fallback
+                if stats.target_code.starts_with('x') {
+                    stats.target_code[1..].to_string()
+                } else {
+                    stats.target_code.clone()
+                }
+            });
+
         // Normalize city pair (alphabetical order)
-        let (city1, city2) = if stats.origin_code <= stats.target_code {
-            (stats.origin_code.clone(), stats.target_code.clone())
+        let (city1, city2) = if origin_location <= target_location {
+            (origin_location, target_location)
         } else {
-            (stats.target_code.clone(), stats.origin_code.clone())
+            (target_location, origin_location)
         };
 
         // Convert p95 RTT from microseconds to milliseconds
@@ -86,6 +120,37 @@ pub fn build_public_links(internet_stats: &InternetTelemetryStatMap) -> Result<P
     public_links.sort_by(|a, b| (&a.city1, &a.city2).cmp(&(&b.city1, &b.city2)));
 
     Ok(public_links)
+}
+
+/// Build mapping from exchange codes to location codes using coordinate matching
+fn build_exchange_to_location_mapping(fetch_data: &FetchData) -> HashMap<String, String> {
+    let mut mapping = HashMap::new();
+
+    for exchange in fetch_data.dz_serviceability.exchanges.values() {
+        // Find location with matching coordinates
+        for location in fetch_data.dz_serviceability.locations.values() {
+            if (exchange.lat - location.lat).abs() < 0.0001
+                && (exchange.lng - location.lng).abs() < 0.0001
+            {
+                mapping.insert(exchange.code.to_string(), location.code.to_string());
+                debug!(
+                    "Mapped exchange {} to location {}",
+                    exchange.code, location.code
+                );
+                break;
+            }
+        }
+
+        // Log unmapped exchanges
+        if !mapping.contains_key(&exchange.code) {
+            debug!(
+                "No location found for exchange {} at ({}, {})",
+                exchange.code, exchange.lat, exchange.lng
+            );
+        }
+    }
+
+    mapping
 }
 
 pub fn build_private_links(
