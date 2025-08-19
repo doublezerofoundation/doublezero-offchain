@@ -65,26 +65,22 @@ pub fn build_public_links(
             .get(&stats.origin_code)
             .cloned()
             .unwrap_or_else(|| {
-                debug!("No location mapping for exchange {}", stats.origin_code);
-                // Strip 'x' prefix as fallback
-                if stats.origin_code.starts_with('x') {
-                    stats.origin_code[1..].to_string()
-                } else {
-                    stats.origin_code.clone()
-                }
+                debug!(
+                    "No location mapping for exchange {}, using exchange code",
+                    stats.origin_code
+                );
+                stats.origin_code.clone()
             });
 
         let target_location = exchange_code_to_location_code
             .get(&stats.target_code)
             .cloned()
             .unwrap_or_else(|| {
-                debug!("No location mapping for exchange {}", stats.target_code);
-                // Strip 'x' prefix as fallback
-                if stats.target_code.starts_with('x') {
-                    stats.target_code[1..].to_string()
-                } else {
-                    stats.target_code.clone()
-                }
+                debug!(
+                    "No location mapping for exchange {}, using exchange code",
+                    stats.target_code
+                );
+                stats.target_code.clone()
             });
 
         // Normalize city pair (alphabetical order)

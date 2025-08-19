@@ -74,11 +74,10 @@ fn create_expected_results() -> HashMap<(String, String), f64> {
     let mut expected = HashMap::new();
 
     // Expected output for devnet data: xchi → xpit
-    // Since test data has exchange codes with 'x' prefix,
-    // and no location mapping, the fallback will strip 'x' to get "chi" and "pit"
-    // Average of wheresitup (17.988237ms) and ripeatlas (9.992551ms) = 13.990394ms
+    // Without coordinate mapping, exchange codes are used directly
+    // Average of wheresitup (17.988237ms) and ripeatlas (9.992551ms) p95 values
     // Rounding p95 values: wheresitup (18.010ms) and ripeatlas (10.183ms) = 14.0965ms average
-    expected.insert(("chi".to_string(), "pit".to_string()), 14.0965);
+    expected.insert(("xchi".to_string(), "xpit".to_string()), 14.0965);
 
     expected
 }
@@ -163,7 +162,7 @@ mod tests {
         // Verify that we have the expected city pairs for devnet data
         let expected = create_expected_results();
 
-        // For devnet data, we only have one city pair: chi -> pit
+        // For devnet data, we only have one city pair: xchi -> xpit
         assert_eq!(
             expected.len(),
             1,
@@ -171,8 +170,8 @@ mod tests {
         );
 
         assert!(
-            expected.contains_key(&("chi".to_string(), "pit".to_string())),
-            "Missing city pair: chi -> pit"
+            expected.contains_key(&("xchi".to_string(), "xpit".to_string())),
+            "Missing city pair: xchi -> xpit"
         );
     }
 }

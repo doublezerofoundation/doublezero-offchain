@@ -27,9 +27,14 @@ chrono = { version = "0", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 config = "0"
 csv = "1"
+doublezero-serviceability = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde"] }
+doublezero-telemetry = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde" ] }
+doublezero_sdk = { git = "ssh://git@github.com/malbeclabs/doublezero" }
+doublezero-record = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint" ] }
 doublezero-passport = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
 doublezero-program-tools = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
-doublezero-revenue-distribution = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana", features = ["no-entrypoint"] }
+doublezero-revenue-distribution = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
+futures = "0"
 futures-util = "0"
 governor = "0"
 itertools = "0"
@@ -61,13 +66,6 @@ toml = "0"
 tracing = "0"
 tracing-subscriber = { version = "0", default-features = true, features = ["env-filter", "fmt", "registry"] }
 url = "2"
-
-# DoubleZero Deps
-doublezero-serviceability = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde"] }
-doublezero-telemetry = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde" ] }
-doublezero_sdk = { git = "ssh://git@github.com/malbeclabs/doublezero" }
-doublezero-record = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint" ] }
-
 
 [profile.release]
 lto = true
