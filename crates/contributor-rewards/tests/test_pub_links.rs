@@ -84,6 +84,14 @@ mod tests {
             internet_stats.len()
         );
 
+        // Create a minimal FetchData with empty serviceability data
+        // Since the test data already uses location codes, not exchange codes,
+        // the mapping will fall back to stripping 'x' prefix (which doesn't apply here)
+        let fetch_data = FetchData {
+            dz_serviceability: DZServiceabilityData::default(),
+            ..Default::default()
+        };
+
         // Generate public links
         let public_links = build_public_links(&internet_stats, &fetch_data)?;
 
