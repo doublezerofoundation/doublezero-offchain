@@ -57,8 +57,9 @@ solana-epoch-info = "3"
 solana-sdk = "2"
 solana-system-interface = "1"
 solana-transaction-status-client-types = "2"
-svm-hash = { version = "0.1.0-beta.1", features = [ "bytemuck", "borsh" ] }
+svm-hash = { version = "0.1.0-beta.5", features = [ "bytemuck", "borsh" ] }
 tabled = { version = "0", features = [ "std", "derive" ]}
+tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "signal"] }
 tokio-util = { version = "0" }
