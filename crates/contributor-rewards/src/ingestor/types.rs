@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use doublezero_program_common::serializer;
 use doublezero_serviceability::state::{
