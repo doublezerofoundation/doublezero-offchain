@@ -31,6 +31,7 @@ doublezero-serviceability = { git = "ssh://git@github.com/malbeclabs/doublezero"
 doublezero-telemetry = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde" ] }
 doublezero-program-common = { git = "ssh://git@github.com/malbeclabs/doublezero" }
 doublezero-record = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint" ] }
+doublezero_sdk = { git = "ssh://git@github.com/malbeclabs/doublezero" }
 doublezero-passport = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
 doublezero-program-tools = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
 doublezero-revenue-distribution = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }

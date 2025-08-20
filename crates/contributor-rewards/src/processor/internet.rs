@@ -5,7 +5,7 @@ use crate::{
 use anyhow::Result;
 use borsh::{BorshDeserialize, BorshSerialize};
 use doublezero_program_common::serializer;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
 use tabled::{Table, Tabled, settings::Style};
@@ -14,7 +14,7 @@ use tracing::{debug, warn};
 // Key format: "{origin_code} → {target_code} ({data_provider})"
 pub type InternetTelemetryStatMap = HashMap<String, InternetTelemetryStats>;
 
-#[derive(Debug, Clone, Tabled, Serialize, BorshSerialize, BorshDeserialize)]
+#[derive(Debug, Clone, Tabled, Serialize, BorshSerialize, BorshDeserialize, Deserialize)]
 pub struct InternetTelemetryStats {
     pub circuit: String,
     #[tabled(skip)]
@@ -24,13 +24,22 @@ pub struct InternetTelemetryStats {
     #[tabled(skip)]
     pub data_provider_name: String,
     #[tabled(skip)]
-    #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
+    #[serde(
+        serialize_with = "serializer::serialize_pubkey_as_string",
+        deserialize_with = "serializer::deserialize_pubkey_from_string"
+    )]
     pub oracle_agent_pk: Pubkey,
     #[tabled(skip)]
-    #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
+    #[serde(
+        serialize_with = "serializer::serialize_pubkey_as_string",
+        deserialize_with = "serializer::deserialize_pubkey_from_string"
+    )]
     pub origin_exchange_pk: Pubkey,
     #[tabled(skip)]
-    #[serde(serialize_with = "serializer::serialize_pubkey_as_string")]
+    #[serde(
+        serialize_with = "serializer::serialize_pubkey_as_string",
+        deserialize_with = "serializer::deserialize_pubkey_from_string"
+    )]
     pub target_exchange_pk: Pubkey,
     #[tabled(display = "display_us_as_ms", rename = "rtt_mean(ms)")]
     pub rtt_mean_us: f64,
