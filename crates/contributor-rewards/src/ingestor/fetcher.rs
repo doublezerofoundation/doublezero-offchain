@@ -78,6 +78,8 @@ impl Fetcher {
             fetched_at: Utc::now(),
         };
 
+        serde_json::to_writer_pretty(std::fs::File::create("/tmp/data.json")?, &data)?;
+
         Ok((epoch, data))
     }
 }

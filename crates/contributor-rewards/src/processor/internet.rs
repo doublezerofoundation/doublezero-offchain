@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::Result;
 use borsh::{BorshDeserialize, BorshSerialize};
-use doublezero_sdk::serializer;
+use doublezero_program_common::serializer;
 use serde::Serialize;
 use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
@@ -18,9 +18,9 @@ pub type InternetTelemetryStatMap = HashMap<String, InternetTelemetryStats>;
 pub struct InternetTelemetryStats {
     pub circuit: String,
     #[tabled(skip)]
-    pub origin_code: String,
+    pub origin_exchange_code: String,
     #[tabled(skip)]
-    pub target_code: String,
+    pub target_exchange_code: String,
     #[tabled(skip)]
     pub data_provider_name: String,
     #[tabled(skip)]
@@ -65,7 +65,7 @@ pub fn print_internet_stats(map: &InternetTelemetryStatMap) -> String {
 
 impl InternetTelemetryProcessor {
     pub fn process(fetch_data: &FetchData) -> Result<InternetTelemetryStatMap> {
-        // Build exchange PK to code mapping
+        // Build exchange PK to code mapping (internet telemetry now uses exchange PKs)
         let exchange_pk_to_code: HashMap<Pubkey, String> = fetch_data
             .dz_serviceability
             .exchanges
@@ -110,23 +110,29 @@ impl InternetTelemetryProcessor {
             let data_provider_name = parts[2].to_string();
 
             if let (Some(origin_pk), Some(target_pk)) = (origin_exchange_pk, target_exchange_pk) {
-                // Get exchange codes
-                let origin_code =
-                    exchange_pk_to_code
-                        .get(&origin_pk)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            warn!("Missing exchange code for origin PK: {}", origin_pk);
-                            format!("EXC-{}", &origin_pk)
-                        });
-                let target_code =
-                    exchange_pk_to_code
-                        .get(&target_pk)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            warn!("Missing exchange code for target PK: {}", target_pk);
-                            format!("EXC-{}", &target_pk)
-                        });
+                // Check if these PKs are actually exchanges (not deprecated location PKs)
+                // Skip samples using the old location PK format
+                let origin_exchange_code = match exchange_pk_to_code.get(&origin_pk) {
+                    Some(code) => code.clone(),
+                    None => {
+                        debug!(
+                            "Skipping telemetry sample with non-exchange origin PK: {} (likely using deprecated location PK)",
+                            origin_pk
+                        );
+                        continue;
+                    }
+                };
+
+                let target_exchange_code = match exchange_pk_to_code.get(&target_pk) {
+                    Some(code) => code.clone(),
+                    None => {
+                        debug!(
+                            "Skipping telemetry sample with non-exchange target PK: {} (likely using deprecated location PK)",
+                            target_pk
+                        );
+                        continue;
+                    }
+                };
 
                 // Get oracle agent from sample
                 let oracle_agent_pk = sample_by_key
@@ -138,9 +144,11 @@ impl InternetTelemetryProcessor {
                     });
 
                 let internet_stats = InternetTelemetryStats {
-                    circuit: format!("{origin_code} → {target_code} ({data_provider_name})"),
-                    origin_code: origin_code.to_string(),
-                    target_code: target_code.to_string(),
+                    circuit: format!(
+                        "{origin_exchange_code} → {target_exchange_code} ({data_provider_name})"
+                    ),
+                    origin_exchange_code: origin_exchange_code.to_string(),
+                    target_exchange_code: target_exchange_code.to_string(),
                     data_provider_name: data_provider_name.to_string(),
                     oracle_agent_pk,
                     origin_exchange_pk: origin_pk,

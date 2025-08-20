@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::Result;
 use borsh::{BorshDeserialize, BorshSerialize};
-use doublezero_sdk::serializer;
+use doublezero_program_common::serializer;
 use serde::Serialize;
 use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;

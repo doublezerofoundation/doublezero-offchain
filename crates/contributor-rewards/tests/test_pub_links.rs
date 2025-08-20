@@ -4,6 +4,7 @@ use contributor_rewards::{
     ingestor::types::{DZServiceabilityData, FetchData},
     processor::internet::{InternetTelemetryStatMap, InternetTelemetryStats},
 };
+use doublezero_serviceability::state::{device::Device, exchange::Exchange, location::Location};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::{collections::HashMap, fs, path::Path, str::FromStr};
@@ -44,8 +45,8 @@ fn convert_to_internet_stat_map(
     for (key, test_stats) in test_data {
         let internet_stats = InternetTelemetryStats {
             circuit: test_stats.circuit,
-            origin_code: test_stats.origin_code,
-            target_code: test_stats.target_code,
+            origin_exchange_code: test_stats.origin_code,
+            target_exchange_code: test_stats.target_code,
             data_provider_name: test_stats.data_provider_name,
             oracle_agent_pk: Pubkey::from_str(&test_stats.oracle_agent_pk).unwrap_or_default(),
             origin_exchange_pk: Pubkey::from_str(&test_stats.origin_exchange_pk)
@@ -73,11 +74,11 @@ fn convert_to_internet_stat_map(
 fn create_expected_results() -> HashMap<(String, String), f64> {
     let mut expected = HashMap::new();
 
-    // Expected output for devnet data: xchi → xpit
-    // Without coordinate mapping, exchange codes are used directly
+    // Expected output for devnet data: chi → pit
+    // Now using location codes directly from internet telemetry
     // Average of wheresitup (17.988237ms) and ripeatlas (9.992551ms) p95 values
     // Rounding p95 values: wheresitup (18.010ms) and ripeatlas (10.183ms) = 14.0965ms average
-    expected.insert(("xchi".to_string(), "xpit".to_string()), 14.0965);
+    expected.insert(("chi".to_string(), "pit".to_string()), 14.0965);
 
     expected
 }
@@ -95,11 +96,73 @@ mod tests {
         // Convert to InternetTelemetryStatMap
         let internet_stats = convert_to_internet_stat_map(test_data);
 
-        // Create a minimal FetchData with empty serviceability data
-        // Since the test data already uses location codes, not exchange codes,
-        // the mapping will fall back to stripping 'x' prefix (which doesn't apply here)
+        // Create test data with proper exchange->device->location mapping
+        let mut serviceability_data = DZServiceabilityData::default();
+
+        // Create fake exchange PKs
+        let xchi_exchange_pk = Pubkey::new_unique();
+        let xpit_exchange_pk = Pubkey::new_unique();
+
+        // Create fake device PKs
+        let chi_device_pk = Pubkey::new_unique();
+        let pit_device_pk = Pubkey::new_unique();
+
+        // Create fake location PKs
+        let chi_location_pk = Pubkey::new_unique();
+        let pit_location_pk = Pubkey::new_unique();
+
+        // Add exchanges
+        serviceability_data.exchanges.insert(
+            xchi_exchange_pk,
+            Exchange {
+                code: "xchi".to_string(),
+                ..Default::default()
+            },
+        );
+        serviceability_data.exchanges.insert(
+            xpit_exchange_pk,
+            Exchange {
+                code: "xpit".to_string(),
+                ..Default::default()
+            },
+        );
+
+        // Add locations
+        serviceability_data.locations.insert(
+            chi_location_pk,
+            Location {
+                code: "chi".to_string(),
+                ..Default::default()
+            },
+        );
+        serviceability_data.locations.insert(
+            pit_location_pk,
+            Location {
+                code: "pit".to_string(),
+                ..Default::default()
+            },
+        );
+
+        // Add devices that link exchanges to locations
+        serviceability_data.devices.insert(
+            chi_device_pk,
+            Device {
+                exchange_pk: xchi_exchange_pk,
+                location_pk: chi_location_pk,
+                ..Default::default()
+            },
+        );
+        serviceability_data.devices.insert(
+            pit_device_pk,
+            Device {
+                exchange_pk: xpit_exchange_pk,
+                location_pk: pit_location_pk,
+                ..Default::default()
+            },
+        );
+
         let fetch_data = FetchData {
-            dz_serviceability: DZServiceabilityData::default(),
+            dz_serviceability: serviceability_data,
             ..Default::default()
         };
 

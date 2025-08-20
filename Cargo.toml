@@ -29,7 +29,7 @@ config = "0"
 csv = "1"
 doublezero-serviceability = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde"] }
 doublezero-telemetry = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint", "serde" ] }
-doublezero_sdk = { git = "ssh://git@github.com/malbeclabs/doublezero" }
+doublezero-program-common = { git = "ssh://git@github.com/malbeclabs/doublezero" }
 doublezero-record = { git = "ssh://git@github.com/malbeclabs/doublezero", features = [ "no-entrypoint" ] }
 doublezero-passport = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
 doublezero-program-tools = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
@@ -57,7 +57,7 @@ solana-epoch-info = "3"
 solana-sdk = "2"
 solana-system-interface = "1"
 solana-transaction-status-client-types = "2"
-svm-hash = { version = "0.1.0-beta.5", features = [ "bytemuck", "borsh" ] }
+svm-hash = { version = "0.1.0-beta.6", features = [ "bytemuck", "borsh" ] }
 tabled = { version = "0", features = [ "std", "derive" ]}
 tempfile = "3"
 thiserror = "2"

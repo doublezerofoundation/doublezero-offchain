@@ -53,35 +53,57 @@ pub fn build_public_links(
     internet_stats: &InternetTelemetryStatMap,
     fetch_data: &FetchData,
 ) -> Result<PublicLinks> {
-    // Build exchange-to-location mapping using coordinates
-    let exchange_code_to_location_code = build_exchange_to_location_mapping(fetch_data);
+    // Build exchange to location mapping via devices
+    // exchange_pk -> device -> location_pk -> location_code
+    let mut exchange_to_location: HashMap<String, String> = HashMap::new();
+
+    for device in fetch_data.dz_serviceability.devices.values() {
+        // Find the exchange for this device
+        if let Some(exchange) = fetch_data
+            .dz_serviceability
+            .exchanges
+            .get(&device.exchange_pk)
+        {
+            // Find the location for this device
+            if let Some(location) = fetch_data
+                .dz_serviceability
+                .locations
+                .get(&device.location_pk)
+            {
+                // Map exchange code to location code
+                exchange_to_location.insert(exchange.code.clone(), location.code.clone());
+            }
+        }
+    }
 
     // Group latencies by normalized city pairs
     let mut city_pair_latencies = CityPairLatencies::new();
 
     for stats in internet_stats.values() {
         // Map exchange codes to location codes
-        let origin_location = exchange_code_to_location_code
-            .get(&stats.origin_code)
-            .cloned()
-            .unwrap_or_else(|| {
+        // Since we're now only processing valid exchange codes in the processor,
+        // we should always have a mapping. If not, skip this entry.
+        let origin_location = match exchange_to_location.get(&stats.origin_exchange_code) {
+            Some(loc) => loc.clone(),
+            None => {
                 debug!(
-                    "No location mapping for exchange {}, using exchange code",
-                    stats.origin_code
+                    "No location mapping for exchange: {} (missing device mapping)",
+                    stats.origin_exchange_code
                 );
-                stats.origin_code.clone()
-            });
+                continue;
+            }
+        };
 
-        let target_location = exchange_code_to_location_code
-            .get(&stats.target_code)
-            .cloned()
-            .unwrap_or_else(|| {
+        let target_location = match exchange_to_location.get(&stats.target_exchange_code) {
+            Some(loc) => loc.clone(),
+            None => {
                 debug!(
-                    "No location mapping for exchange {}, using exchange code",
-                    stats.target_code
+                    "No location mapping for exchange: {} (missing device mapping)",
+                    stats.target_exchange_code
                 );
-                stats.target_code.clone()
-            });
+                continue;
+            }
+        };
 
         // Normalize city pair (alphabetical order)
         let (city1, city2) = if origin_location <= target_location {
@@ -116,37 +138,6 @@ pub fn build_public_links(
     public_links.sort_by(|a, b| (&a.city1, &a.city2).cmp(&(&b.city1, &b.city2)));
 
     Ok(public_links)
-}
-
-/// Build mapping from exchange codes to location codes using coordinate matching
-fn build_exchange_to_location_mapping(fetch_data: &FetchData) -> HashMap<String, String> {
-    let mut mapping = HashMap::new();
-
-    for exchange in fetch_data.dz_serviceability.exchanges.values() {
-        // Find location with matching coordinates
-        for location in fetch_data.dz_serviceability.locations.values() {
-            if (exchange.lat - location.lat).abs() < 0.0001
-                && (exchange.lng - location.lng).abs() < 0.0001
-            {
-                mapping.insert(exchange.code.to_string(), location.code.to_string());
-                debug!(
-                    "Mapped exchange {} to location {}",
-                    exchange.code, location.code
-                );
-                break;
-            }
-        }
-
-        // Log unmapped exchanges
-        if !mapping.contains_key(&exchange.code) {
-            debug!(
-                "No location found for exchange {} at ({}, {})",
-                exchange.code, exchange.lat, exchange.lng
-            );
-        }
-    }
-
-    mapping
 }
 
 pub fn build_private_links(

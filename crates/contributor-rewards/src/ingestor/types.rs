@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
-use doublezero_sdk::serializer;
+use doublezero_program_common::serializer;
 use doublezero_serviceability::state::{
     contributor::Contributor as DZContributor, device::Device as DZDevice,
     exchange::Exchange as DZExchange, link::Link as DZLink, location::Location as DZLocation,
@@ -9,7 +9,7 @@ use doublezero_serviceability::state::{
 use doublezero_telemetry::state::{
     device_latency_samples::DeviceLatencySamples, internet_latency_samples::InternetLatencySamples,
 };
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 use solana_sdk::pubkey::Pubkey;
 use std::{
     collections::HashMap,
@@ -78,13 +78,38 @@ impl FetchData {
 /// Struct for all network data
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct DZServiceabilityData {
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub locations: HashMap<Pubkey, DZLocation>,
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub exchanges: HashMap<Pubkey, DZExchange>,
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub devices: HashMap<Pubkey, DZDevice>,
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub links: HashMap<Pubkey, DZLink>,
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub users: HashMap<Pubkey, DZUser>,
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub multicast_groups: HashMap<Pubkey, DZMulticastGroup>,
+    #[serde(serialize_with = "serialize_pubkey_map")]
     pub contributors: HashMap<Pubkey, DZContributor>,
+}
+
+pub fn serialize_pubkey_map<S, T>(
+    map: &HashMap<Pubkey, T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    use serde::ser::SerializeMap;
+
+    let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
+    for (k, v) in map {
+        // Convert Pubkey to string representation
+        map_serializer.serialize_entry(&k.to_string(), v)?;
+    }
+    map_serializer.end()
 }
 
 /// DB representation of DeviceLatencySamples
