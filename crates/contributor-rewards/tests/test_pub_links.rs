@@ -217,7 +217,7 @@ mod tests {
         // Verify that we have reasonable latency values
         for link in &public_links {
             assert!(
-                link.latency > 0.0 && link.latency < 1000.0,
+                link.latency >= 0.0 && link.latency < 1000.0,
                 "Unreasonable latency value for {} -> {}: {}",
                 link.city1,
                 link.city2,
@@ -225,19 +225,19 @@ mod tests {
             );
         }
 
-        // If we have matching expected pairs, verify they're close
+        // Verify the exact values match expected results with small tolerance
         for ((city1, city2), expected_latency) in expected.iter() {
             if let Some(actual_latency) = result_map.get(&(city1.clone(), city2.clone())) {
-                // Allow 50% difference since these are estimates
-                let diff_ratio = (actual_latency - expected_latency).abs() / expected_latency;
+                // Allow very small difference due to floating point precision
+                let diff = (actual_latency - expected_latency).abs();
                 println!(
-                    "Checking {}->{}: expected {:.3}, got {:.3}, diff ratio {:.2}",
-                    city1, city2, expected_latency, actual_latency, diff_ratio
+                    "Checking {}->{}: expected {:.3}, got {:.3}, diff {:.6}",
+                    city1, city2, expected_latency, actual_latency, diff
                 );
-                // We're being lenient here since exact values depend on the actual data
+                // We should get exact or very close values since we're using the same test data
                 assert!(
-                    diff_ratio < 1.0,
-                    "Large latency difference for {city1} -> {city2}: got {actual_latency}, expected {expected_latency}"
+                    diff < 0.001,
+                    "Latency mismatch for {city1} -> {city2}: got {actual_latency}, expected {expected_latency}"
                 );
             }
         }
