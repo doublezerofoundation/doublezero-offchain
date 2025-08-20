@@ -78,9 +78,6 @@ impl Fetcher {
             fetched_at: Utc::now(),
         };
 
-        // TODO: remove
-        serde_json::to_writer_pretty(std::fs::File::create("/tmp/snapshot.json")?, &data)?;
-
         Ok((epoch, data))
     }
 }
