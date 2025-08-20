@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use doublezero_record::state::RecordData;
 use doublezero_sdk::record::{self, client, state::read_record_data};
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcSendTransactionConfig};
-use solana_sdk::{commitment_config::CommitmentConfig, signer::keypair::Keypair, signer::Signer};
+use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer, signer::keypair::Keypair};
 use std::fmt;
 
 /// Result of a write operation
