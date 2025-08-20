@@ -8,7 +8,7 @@ use doublezero_program_common::serializer;
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{Table, Tabled, settings::Style};
 use tracing::{debug, warn};
 
 // Key format: "{origin_code} → {target_code} ({data_provider})"

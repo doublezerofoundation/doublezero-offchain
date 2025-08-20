@@ -84,11 +84,73 @@ mod tests {
             internet_stats.len()
         );
 
-        // Create a minimal FetchData with empty serviceability data
-        // Since the test data already uses location codes, not exchange codes,
-        // the mapping will fall back to stripping 'x' prefix (which doesn't apply here)
+        // Create test data with proper exchange->device->location mapping
+        let mut serviceability_data = DZServiceabilityData::default();
+
+        // Create fake exchange PKs
+        let xchi_exchange_pk = Pubkey::new_unique();
+        let xpit_exchange_pk = Pubkey::new_unique();
+
+        // Create fake device PKs
+        let chi_device_pk = Pubkey::new_unique();
+        let pit_device_pk = Pubkey::new_unique();
+
+        // Create fake location PKs
+        let chi_location_pk = Pubkey::new_unique();
+        let pit_location_pk = Pubkey::new_unique();
+
+        // Add exchanges
+        serviceability_data.exchanges.insert(
+            xchi_exchange_pk,
+            Exchange {
+                code: "xchi".to_string(),
+                ..Default::default()
+            },
+        );
+        serviceability_data.exchanges.insert(
+            xpit_exchange_pk,
+            Exchange {
+                code: "xpit".to_string(),
+                ..Default::default()
+            },
+        );
+
+        // Add locations
+        serviceability_data.locations.insert(
+            chi_location_pk,
+            Location {
+                code: "chi".to_string(),
+                ..Default::default()
+            },
+        );
+        serviceability_data.locations.insert(
+            pit_location_pk,
+            Location {
+                code: "pit".to_string(),
+                ..Default::default()
+            },
+        );
+
+        // Add devices that link exchanges to locations
+        serviceability_data.devices.insert(
+            chi_device_pk,
+            Device {
+                exchange_pk: xchi_exchange_pk,
+                location_pk: chi_location_pk,
+                ..Default::default()
+            },
+        );
+        serviceability_data.devices.insert(
+            pit_device_pk,
+            Device {
+                exchange_pk: xpit_exchange_pk,
+                location_pk: pit_location_pk,
+                ..Default::default()
+            },
+        );
+
         let fetch_data = FetchData {
-            dz_serviceability: DZServiceabilityData::default(),
+            dz_serviceability: serviceability_data,
             ..Default::default()
         };
 

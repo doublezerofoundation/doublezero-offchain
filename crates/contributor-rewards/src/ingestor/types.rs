@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use doublezero_program_common::serializer;
 use doublezero_serviceability::state::{
@@ -113,6 +113,24 @@ pub struct DZServiceabilityData {
         deserialize_with = "serializer::deserialize_pubkey_map"
     )]
     pub contributors: HashMap<Pubkey, DZContributor>,
+}
+
+pub fn serialize_pubkey_map<S, T>(
+    map: &HashMap<Pubkey, T>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+    T: Serialize,
+{
+    use serde::ser::SerializeMap;
+
+    let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
+    for (k, v) in map {
+        // Convert Pubkey to string representation
+        map_serializer.serialize_entry(&k.to_string(), v)?;
+    }
+    map_serializer.end()
 }
 
 /// DB representation of DeviceLatencySamples
