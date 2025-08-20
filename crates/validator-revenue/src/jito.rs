@@ -1,6 +1,6 @@
 use crate::fee_payment_calculator::ValidatorRewards;
-use anyhow::{anyhow, Result};
-use futures::{stream, StreamExt};
+use anyhow::{Result, anyhow};
+use futures::{StreamExt, stream};
 use serde::Deserialize;
 use std::collections::HashMap;
 
