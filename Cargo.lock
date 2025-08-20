@@ -1837,27 +1837,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "doublezero-solana-validator-revenue"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "borsh 1.5.7",
- "chrono",
- "doublezero-record",
- "doublezero_sdk",
- "futures",
- "mockall",
- "reqwest",
- "serde",
- "solana-client",
- "solana-sdk",
- "solana-transaction-status-client-types",
- "svm-hash",
- "tokio",
-]
-
-[[package]]
 name = "doublezero-telemetry"
 version = "0.5.0"
 source = "git+ssh://git@github.com/malbeclabs/doublezero?rev=115c447f526c6f14bb98903d076030c191c4f7f9#115c447f526c6f14bb98903d076030c191c4f7f9"
@@ -8834,6 +8813,27 @@ checksum = "f33196643e165781c20a5ead5582283a7dacbb87855d867fbc2df3f81eddc1be"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "validator-revenue"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "borsh 1.5.7",
+ "chrono",
+ "doublezero-record",
+ "doublezero_sdk",
+ "futures",
+ "mockall",
+ "reqwest",
+ "serde",
+ "solana-client",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "svm-hash",
+ "tokio",
 ]
 
 [[package]]
