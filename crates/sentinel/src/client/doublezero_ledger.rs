@@ -44,37 +44,24 @@ impl DzRpcClient {
     pub async fn fund_authorized_user(
         &self,
         service_key: &Pubkey,
-        client_ip: &Ipv4Addr,
         onboarding_lamports: u64,
     ) -> Result<Signature> {
         let recent_blockhash = self.client.get_latest_blockhash().await?;
 
-        let (pass_pk, _) = get_accesspass_pda(&self.serviceability_id, client_ip, service_key);
-
-        let rent = if self
-            .client
-            .get_account_with_commitment(&pass_pk, self.client.commitment())
-            .await?
-            .value
-            .is_none()
-        {
-            self.client
+        let onboarding_balance = onboarding_lamports
+            + self
+                .client
                 .get_minimum_balance_for_rent_exemption(user_size())
-                .await?
-        } else {
-            0
-        };
+                .await?;
+        let current_balance = self.client.get_balance(service_key).await?;
+        let deposit = onboarding_balance.saturating_sub(current_balance);
 
-        let xfr = instruction::transfer(
-            &self.payer.pubkey(),
-            service_key,
-            onboarding_lamports.saturating_add(rent),
-        );
+        let xfr = instruction::transfer(&self.payer.pubkey(), service_key, deposit);
 
         let txn = new_transaction(&[xfr], &[&self.payer], recent_blockhash);
 
         let signature = self.client.send_and_confirm_transaction(&txn).await?;
-        info!(rent, onboarding_lamports, validator = %service_key, %signature, "funded authorized validator");
+        info!(deposit, validator = %service_key, %signature, "funded authorized validator");
 
         Ok(signature)
     }
