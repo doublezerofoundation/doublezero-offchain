@@ -3,85 +3,6 @@ use doublezero_record::state::RecordData;
 use doublezero_sdk::record::{self, client, state::read_record_data};
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcSendTransactionConfig};
 use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer, signer::keypair::Keypair};
-use std::fmt;
-
-/// Result of a write operation
-#[derive(Debug)]
-pub enum WriteResult {
-    Success(String),
-    Failed(String, String), // (description, error)
-}
-
-/// Summary of all ledger writes
-#[derive(Debug, Default)]
-pub struct WriteSummary {
-    pub results: Vec<WriteResult>,
-}
-
-impl WriteSummary {
-    pub fn add_success(&mut self, description: String) {
-        self.results.push(WriteResult::Success(description));
-    }
-
-    pub fn add_failure(&mut self, description: String, error: String) {
-        self.results.push(WriteResult::Failed(description, error));
-    }
-
-    pub fn successful_count(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|r| matches!(r, WriteResult::Success(_)))
-            .count()
-    }
-
-    pub fn failed_count(&self) -> usize {
-        self.results
-            .iter()
-            .filter(|r| matches!(r, WriteResult::Failed(_, _)))
-            .count()
-    }
-
-    pub fn total_count(&self) -> usize {
-        self.results.len()
-    }
-
-    pub fn all_successful(&self) -> bool {
-        self.failed_count() == 0
-    }
-}
-
-impl fmt::Display for WriteSummary {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "=========================================")?;
-        writeln!(f, "Ledger Write Summary")?;
-        writeln!(f, "=========================================")?;
-        writeln!(
-            f,
-            "Total: {}/{} successful",
-            self.successful_count(),
-            self.total_count()
-        )?;
-
-        if !self.all_successful() {
-            writeln!(f, " Failed writes:")?;
-            for result in &self.results {
-                if let WriteResult::Failed(desc, error) = result {
-                    writeln!(f, "  ❌ {desc}: {error}")?;
-                }
-            }
-        }
-        writeln!(f, " All writes:")?;
-        for result in &self.results {
-            match result {
-                WriteResult::Success(desc) => writeln!(f, "  ✅ {desc}")?,
-                WriteResult::Failed(desc, _) => writeln!(f, "  ❌ {desc}")?,
-            }
-        }
-
-        writeln!(f, "=========================================")?;
-        Ok(())
-    }
-}
 
 pub async fn write_record_to_ledger<T: borsh::BorshSerialize>(
     rpc_client: &RpcClient,
@@ -116,7 +37,6 @@ pub async fn write_record_to_ledger<T: borsh::BorshSerialize>(
                 },
             )
             .await?;
-        // println!("Successfully wrote {} to {}", data_type, record_key);
     }
 
     Ok(())
