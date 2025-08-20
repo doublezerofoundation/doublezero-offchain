@@ -115,24 +115,6 @@ pub struct DZServiceabilityData {
     pub contributors: HashMap<Pubkey, DZContributor>,
 }
 
-pub fn serialize_pubkey_map<S, T>(
-    map: &HashMap<Pubkey, T>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: Serializer,
-    T: Serialize,
-{
-    use serde::ser::SerializeMap;
-
-    let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
-    for (k, v) in map {
-        // Convert Pubkey to string representation
-        map_serializer.serialize_entry(&k.to_string(), v)?;
-    }
-    map_serializer.end()
-}
-
 /// DB representation of DeviceLatencySamples
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DZDeviceLatencySamples {

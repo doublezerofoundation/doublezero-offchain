@@ -79,7 +79,7 @@ impl Fetcher {
         };
 
         // TODO: remove
-        serde_json::to_writer_pretty(std::fs::File::create("/tmp/data.json")?, &data)?;
+        serde_json::to_writer_pretty(std::fs::File::create("/tmp/snapshot.json")?, &data)?;
 
         Ok((epoch, data))
     }
