@@ -58,7 +58,7 @@ pub async fn read_from_ledger(
 
     let record_account_info = get_account_response
         .value
-        .ok_or_else(|| anyhow::anyhow!("Record acconut not found at address {record_key}"))?;
+        .ok_or_else(|| anyhow::anyhow!("Record account not found at address {record_key}"))?;
 
     let (record_header, record_body) = read_record_data(&record_account_info.data)
         .with_context(|| format!("Failed to parse record data from account {record_key}"))?;
