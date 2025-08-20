@@ -9,7 +9,7 @@ use crate::block;
 use crate::inflation;
 use crate::jito;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use serde::Deserialize;
 use solana_sdk::clock::DEFAULT_SLOTS_PER_EPOCH;
 use std::collections::HashMap;

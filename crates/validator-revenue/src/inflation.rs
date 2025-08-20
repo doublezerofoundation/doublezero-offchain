@@ -1,5 +1,5 @@
 use crate::fee_payment_calculator::ValidatorRewards;
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use solana_sdk::pubkey::Pubkey;
 use std::{collections::HashMap, str::FromStr};
 

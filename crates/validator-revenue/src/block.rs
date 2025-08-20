@@ -1,6 +1,6 @@
 use crate::fee_payment_calculator::ValidatorRewards;
-use anyhow::{Result, bail};
-use futures::{StreamExt, TryStreamExt, stream};
+use anyhow::{bail, Result};
+use futures::{stream, StreamExt, TryStreamExt};
 use solana_sdk::{clock::DEFAULT_SLOTS_PER_EPOCH, reward_type::RewardType::Fee};
 
 use std::collections::HashMap;

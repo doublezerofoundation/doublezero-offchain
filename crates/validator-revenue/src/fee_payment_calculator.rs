@@ -1,6 +1,6 @@
 use std::{collections::HashMap, error::Error};
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use mockall::automock;
 use serde::de::DeserializeOwned;

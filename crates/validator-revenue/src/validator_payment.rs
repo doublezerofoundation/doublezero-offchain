@@ -1,6 +1,6 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_sdk::pubkey::Pubkey;
-use svm_hash::merkle::{MerkleProof, merkle_root_from_byte_ref_leaves};
+use svm_hash::merkle::{merkle_root_from_byte_ref_leaves, MerkleProof};
 
 #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
 pub struct ComputedSolanaValidatorPayments {
