@@ -19,46 +19,41 @@ fn load_test_data() -> Result<FetchData> {
 fn create_expected_results() -> HashMap<(String, String), f64> {
     let mut expected = HashMap::new();
 
-    // Based on the testnet data, we expect multiple city pairs
-    // These are examples - adjust based on actual data in testnet_snapshot.json
-    // The latencies should be calculated from the internet telemetry samples
+    // These are the exact values from the public links output
+    expected.insert(("ams".to_string(), "fra".to_string()), 6.913);
+    expected.insert(("ams".to_string(), "lax".to_string()), 142.035);
+    expected.insert(("ams".to_string(), "lon".to_string()), 11.9305);
+    expected.insert(("ams".to_string(), "nyc".to_string()), 78.9935);
+    expected.insert(("ams".to_string(), "prg".to_string()), 16.645);
+    expected.insert(("ams".to_string(), "sin".to_string()), 206.1845);
+    expected.insert(("ams".to_string(), "tyo".to_string()), 247.407);
 
-    // Example expected pairs (you'll need to calculate actual values from the data)
-    // For now, using placeholder values that will need to be updated
-    expected.insert(("ams".to_string(), "fra".to_string()), 7.0);
-    expected.insert(("ams".to_string(), "lax".to_string()), 140.0);
-    expected.insert(("ams".to_string(), "lon".to_string()), 12.0);
-    expected.insert(("ams".to_string(), "nyc".to_string()), 79.0);
-    expected.insert(("ams".to_string(), "prg".to_string()), 17.0);
-    expected.insert(("ams".to_string(), "sin".to_string()), 205.0);
-    expected.insert(("ams".to_string(), "tyo".to_string()), 247.0);
+    expected.insert(("fra".to_string(), "lax".to_string()), 142.3075);
+    expected.insert(("fra".to_string(), "lon".to_string()), 11.9895);
+    expected.insert(("fra".to_string(), "nyc".to_string()), 84.7845);
+    expected.insert(("fra".to_string(), "prg".to_string()), 10.844);
+    expected.insert(("fra".to_string(), "sin".to_string()), 167.347);
+    expected.insert(("fra".to_string(), "tyo".to_string()), 242.1715);
 
-    expected.insert(("fra".to_string(), "lax".to_string()), 142.0);
-    expected.insert(("fra".to_string(), "lon".to_string()), 12.0);
-    expected.insert(("fra".to_string(), "nyc".to_string()), 85.0);
-    expected.insert(("fra".to_string(), "prg".to_string()), 11.0);
-    expected.insert(("fra".to_string(), "sin".to_string()), 167.0);
-    expected.insert(("fra".to_string(), "tyo".to_string()), 242.0);
+    expected.insert(("lax".to_string(), "lon".to_string()), 149.663);
+    expected.insert(("lax".to_string(), "nyc".to_string()), 68.329);
+    expected.insert(("lax".to_string(), "prg".to_string()), 154.908);
+    expected.insert(("lax".to_string(), "sin".to_string()), 174.8895);
+    expected.insert(("lax".to_string(), "tyo".to_string()), 107.085);
 
-    expected.insert(("lax".to_string(), "lon".to_string()), 150.0);
-    expected.insert(("lax".to_string(), "nyc".to_string()), 68.0);
-    expected.insert(("lax".to_string(), "prg".to_string()), 155.0);
-    expected.insert(("lax".to_string(), "sin".to_string()), 175.0);
-    expected.insert(("lax".to_string(), "tyo".to_string()), 107.0);
+    expected.insert(("lon".to_string(), "nyc".to_string()), 87.2915);
+    expected.insert(("lon".to_string(), "prg".to_string()), 21.9575);
+    expected.insert(("lon".to_string(), "sin".to_string()), 203.131);
+    expected.insert(("lon".to_string(), "tyo".to_string()), 256.9815);
 
-    expected.insert(("lon".to_string(), "nyc".to_string()), 87.0);
-    expected.insert(("lon".to_string(), "prg".to_string()), 22.0);
-    expected.insert(("lon".to_string(), "sin".to_string()), 203.0);
-    expected.insert(("lon".to_string(), "tyo".to_string()), 257.0);
+    expected.insert(("nyc".to_string(), "prg".to_string()), 97.8475);
+    expected.insert(("nyc".to_string(), "sin".to_string()), 333.3755);
+    expected.insert(("nyc".to_string(), "tyo".to_string()), 170.3865);
 
-    expected.insert(("nyc".to_string(), "prg".to_string()), 98.0);
-    expected.insert(("nyc".to_string(), "sin".to_string()), 333.0);
-    expected.insert(("nyc".to_string(), "tyo".to_string()), 170.0);
+    expected.insert(("prg".to_string(), "sin".to_string()), 168.627);
+    expected.insert(("prg".to_string(), "tyo".to_string()), 269.2265);
 
-    expected.insert(("prg".to_string(), "sin".to_string()), 169.0);
-    expected.insert(("prg".to_string(), "tyo".to_string()), 269.0);
-
-    expected.insert(("sin".to_string(), "tyo".to_string()), 69.0);
+    expected.insert(("sin".to_string(), "tyo".to_string()), 69.147);
 
     expected
 }
@@ -131,8 +126,9 @@ mod tests {
 
         // Verify that we have reasonable latency values
         for link in &public_links {
+            // Allow 0.0 for links with no data or same location
             assert!(
-                link.latency > 0.0 && link.latency < 1000.0,
+                link.latency >= 0.0 && link.latency < 1000.0,
                 "Unreasonable latency value for {} -> {}: {}",
                 link.city1,
                 link.city2,
@@ -140,19 +136,19 @@ mod tests {
             );
         }
 
-        // If we have matching expected pairs, verify they're close
+        // Verify the exact values match expected results with small tolerance
         for ((city1, city2), expected_latency) in expected.iter() {
             if let Some(actual_latency) = result_map.get(&(city1.clone(), city2.clone())) {
-                // Allow 50% difference since these are estimates
-                let diff_ratio = (actual_latency - expected_latency).abs() / expected_latency;
+                // Allow very small difference due to floating point precision
+                let diff = (actual_latency - expected_latency).abs();
                 println!(
-                    "Checking {}->{}: expected {:.3}, got {:.3}, diff ratio {:.2}",
-                    city1, city2, expected_latency, actual_latency, diff_ratio
+                    "Checking {}->{}: expected {:.3}, got {:.3}, diff {:.6}",
+                    city1, city2, expected_latency, actual_latency, diff
                 );
-                // We're being lenient here since exact values depend on the actual data
+                // We should get exact or very close values since we're using the same test data
                 assert!(
-                    diff_ratio < 1.0,
-                    "Large latency difference for {city1} -> {city2}: got {actual_latency}, expected {expected_latency}"
+                    diff < 0.001,
+                    "Latency mismatch for {city1} -> {city2}: got {actual_latency}, expected {expected_latency}"
                 );
             }
         }

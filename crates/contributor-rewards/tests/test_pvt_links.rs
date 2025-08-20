@@ -19,44 +19,85 @@ fn load_test_data() -> Result<FetchData> {
 fn create_expected_results() -> HashMap<(String, String), ExpectedLink> {
     let mut expected = HashMap::new();
 
-    // Based on the testnet data, we expect certain device-to-device links
-    // These are examples based on the link structure in testnet_snapshot.json
+    // These are the exact values from the private links output
+    expected.insert(
+        ("lon-dz001".to_string(), "sin-dz001".to_string()),
+        ExpectedLink {
+            latency_ms: 154.73174532006806,
+            bandwidth_gbps: 10.0,
+            uptime: 0.9996656840260435,
+        },
+    );
 
-    // Example: fra-dz001 to another device
     expected.insert(
         ("fra-dz001".to_string(), "fra-dz-001-x".to_string()),
         ExpectedLink {
-            latency_ms: 0.0, // Should be near 0 for same location
+            latency_ms: 0.0,
             bandwidth_gbps: 10.0,
-            uptime: 0.999, // High uptime expected
-        },
-    );
-
-    // Add more expected links based on the actual data
-    expected.insert(
-        ("lax-dz001".to_string(), "tyo-dz001".to_string()),
-        ExpectedLink {
-            latency_ms: 98.0, // Approximate from telemetry
-            bandwidth_gbps: 10.0,
-            uptime: 0.999,
+            uptime: 0.9992076620475003,
         },
     );
 
     expected.insert(
-        ("lon-dz001".to_string(), "fra-dz001".to_string()),
+        ("ams-dz001".to_string(), "lon-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 11.0, // Approximate from telemetry
+            latency_ms: 5.764570886241655,
             bandwidth_gbps: 10.0,
-            uptime: 0.999,
+            uptime: 0.9996656840260435,
         },
     );
 
     expected.insert(
         ("sin-dz001".to_string(), "tyo-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 67.0, // Approximate from telemetry
+            latency_ms: 67.09318597800471,
             bandwidth_gbps: 10.0,
-            uptime: 0.999,
+            uptime: 0.9995348206036025,
+        },
+    );
+
+    expected.insert(
+        ("lax-dz001".to_string(), "nyc-dz001".to_string()),
+        ExpectedLink {
+            latency_ms: 68.43714752488214,
+            bandwidth_gbps: 10.0,
+            uptime: 0.9992730937587208,
+        },
+    );
+
+    expected.insert(
+        ("nyc-dz001".to_string(), "lon-dz001".to_string()),
+        ExpectedLink {
+            latency_ms: 67.31665028825996,
+            bandwidth_gbps: 10.0,
+            uptime: 0.9987496400689572,
+        },
+    );
+
+    expected.insert(
+        ("fra-dz-001-x".to_string(), "prg-dz-001-x".to_string()),
+        ExpectedLink {
+            latency_ms: 1000.0,
+            bandwidth_gbps: 10.0,
+            uptime: 0.0,
+        },
+    );
+
+    expected.insert(
+        ("lon-dz001".to_string(), "fra-dz001".to_string()),
+        ExpectedLink {
+            latency_ms: 11.041989854693023,
+            bandwidth_gbps: 10.0,
+            uptime: 0.9996656840260435,
+        },
+    );
+
+    expected.insert(
+        ("tyo-dz001".to_string(), "lax-dz001".to_string()),
+        ExpectedLink {
+            latency_ms: 98.75333643207856,
+            bandwidth_gbps: 10.0,
+            uptime: 0.9994693888923821,
         },
     );
 
@@ -154,48 +195,60 @@ mod tests {
             );
         }
 
-        // Check if expected links exist and have reasonable values
+        // Verify all expected links exist with exact values
         for ((device1, device2), expected_link) in expected.iter() {
-            if let Some((actual_latency, actual_bandwidth, actual_uptime)) =
-                result_map.get(&(device1.clone(), device2.clone()))
-            {
-                println!("\nChecking link {} -> {}:", device1, device2);
-                println!(
-                    "  Latency: expected {:.1}ms, got {:.1}ms",
-                    expected_link.latency_ms, actual_latency
-                );
-                println!(
-                    "  Bandwidth: expected {:.1}Gbps, got {:.1}Gbps",
-                    expected_link.bandwidth_gbps, actual_bandwidth
-                );
-                println!(
-                    "  Uptime: expected {:.3}, got {:.3}",
-                    expected_link.uptime, actual_uptime
-                );
+            let actual = result_map.get(&(device1.clone(), device2.clone()));
+            assert!(
+                actual.is_some(),
+                "Missing expected link: {} -> {}",
+                device1,
+                device2
+            );
 
-                // Allow some variance in latency (50ms or 50%)
-                let latency_diff = (actual_latency - expected_link.latency_ms).abs();
-                let latency_threshold = f64::max(50.0, expected_link.latency_ms * 0.5);
-                assert!(
-                    latency_diff < latency_threshold,
-                    "Large latency difference for {} -> {}: got {}, expected {}",
-                    device1,
-                    device2,
-                    actual_latency,
-                    expected_link.latency_ms
-                );
+            let (actual_latency, actual_bandwidth, actual_uptime) = actual.unwrap();
 
-                // Bandwidth should match closely (within 20%)
-                let bandwidth_diff = (actual_bandwidth - expected_link.bandwidth_gbps).abs();
-                assert!(
-                    bandwidth_diff < expected_link.bandwidth_gbps * 0.2,
-                    "Bandwidth mismatch for {} -> {}: got {}, expected {}",
-                    device1,
-                    device2,
-                    actual_bandwidth,
-                    expected_link.bandwidth_gbps
-                );
-            }
+            println!("\nChecking link {} -> {}:", device1, device2);
+            println!(
+                "  Latency: expected {:.6}ms, got {:.6}ms",
+                expected_link.latency_ms, actual_latency
+            );
+            println!(
+                "  Bandwidth: expected {:.1}Gbps, got {:.1}Gbps",
+                expected_link.bandwidth_gbps, actual_bandwidth
+            );
+            println!(
+                "  Uptime: expected {:.10}, got {:.10}",
+                expected_link.uptime, actual_uptime
+            );
+
+            // Check latency with very small tolerance for floating point precision
+            let latency_diff = (actual_latency - expected_link.latency_ms).abs();
+            assert!(
+                latency_diff < 0.000001,
+                "Latency mismatch for {} -> {}: got {}, expected {}",
+                device1,
+                device2,
+                actual_latency,
+                expected_link.latency_ms
+            );
+
+            // Bandwidth should be exact
+            assert_eq!(
+                *actual_bandwidth, expected_link.bandwidth_gbps,
+                "Bandwidth mismatch for {} -> {}",
+                device1, device2
+            );
+
+            // Check uptime with very small tolerance for floating point precision
+            let uptime_diff = (actual_uptime - expected_link.uptime).abs();
+            assert!(
+                uptime_diff < 0.000001,
+                "Uptime mismatch for {} -> {}: got {}, expected {}",
+                device1,
+                device2,
+                actual_uptime,
+                expected_link.uptime
+            );
         }
 
         Ok(())
@@ -206,7 +259,7 @@ mod tests {
         let fetch_data = load_test_data()?;
 
         // Verify links reference valid devices
-        for (_link_pk, link) in &fetch_data.dz_serviceability.links {
+        for link in fetch_data.dz_serviceability.links.values() {
             // Check that both sides of the link reference valid devices
             let side_a_exists = fetch_data
                 .dz_serviceability
