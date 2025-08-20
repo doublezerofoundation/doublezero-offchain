@@ -5,7 +5,7 @@ use crate::{
 };
 use doublezero_passport::instruction::AccessMode;
 use solana_sdk::signature::{Keypair, Signature};
-use std::{sync::Arc, time::Duration};
+use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc::UnboundedReceiver, time::interval};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
@@ -73,17 +73,8 @@ impl Sentinel {
     }
 
     async fn handle_access_request(&self, access_ids: AccessIds) -> Result<()> {
-        let AccessMode::SolanaValidator {
-            service_key,
-            validator_id,
-            ..
-        } = access_ids.mode;
-        if verify_access_request(&access_ids.mode).is_ok()
-            && self
-                .sol_rpc_client
-                .check_leader_schedule(&validator_id, self.previous_leader_epochs)
-                .await?
-        {
+        let AccessMode::SolanaValidator { service_key, .. } = access_ids.mode;
+        if let Some(validator_ip) = self.verify_qualifiers(&access_ids.mode).await? {
             self.dz_rpc_client
                 .fund_authorized_user(&service_key, self.onboarding_lamports)
                 .await?;
@@ -103,5 +94,19 @@ impl Sentinel {
         }
 
         Ok(())
+    }
+
+    async fn verify_qualifiers(&self, access_mode: &AccessMode) -> Result<Option<Ipv4Addr>> {
+        let AccessMode::SolanaValidator { validator_id, .. } = access_mode;
+        if verify_access_request(access_mode).is_ok()
+            && self
+                .sol_rpc_client
+                .check_leader_schedule(validator_id, self.previous_leader_epochs)
+                .await?
+        {
+            self.sol_rpc_client.get_validator_ip(validator_id).await
+        } else {
+            Ok(None)
+        }
     }
 }
