@@ -101,11 +101,6 @@ pub async fn get_total_rewards(
         epoch,
         rewards: validator_rewards,
     };
-    // let rewards: HashMap<String, Reward> = validator_ids
-    //     .iter()
-    //     .cloned()
-    //     .zip(validator_rewards)
-    //     .collect();
     Ok(rewards)
 }
 
