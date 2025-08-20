@@ -65,7 +65,7 @@ pub fn print_internet_stats(map: &InternetTelemetryStatMap) -> String {
 
 impl InternetTelemetryProcessor {
     pub fn process(fetch_data: &FetchData) -> Result<InternetTelemetryStatMap> {
-        // Build exchange PK to code mapping (internet telemetry now uses exchange PKs)
+        // Build exchange PK to xchange code mapping (internet telemetry uses exchange PKs)
         let exchange_pk_to_code: HashMap<Pubkey, String> = fetch_data
             .dz_serviceability
             .exchanges
@@ -112,6 +112,7 @@ impl InternetTelemetryProcessor {
             if let (Some(origin_pk), Some(target_pk)) = (origin_exchange_pk, target_exchange_pk) {
                 // Check if these PKs are actually exchanges (not deprecated location PKs)
                 // Skip samples using the old location PK format
+                // This is holdover fix for mixed telem data (but should be safe to keep regardless)
                 let origin_exchange_code = match exchange_pk_to_code.get(&origin_pk) {
                     Some(code) => code.clone(),
                     None => {

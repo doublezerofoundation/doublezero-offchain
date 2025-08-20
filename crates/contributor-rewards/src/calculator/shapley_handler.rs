@@ -83,6 +83,7 @@ pub fn build_public_links(
         // Map exchange codes to location codes
         // Since we're now only processing valid exchange codes in the processor,
         // we should always have a mapping. If not, skip this entry.
+        // Skipping is safer than defaults.
         let origin_location = match exchange_to_location.get(&stats.origin_exchange_code) {
             Some(loc) => loc.clone(),
             None => {
