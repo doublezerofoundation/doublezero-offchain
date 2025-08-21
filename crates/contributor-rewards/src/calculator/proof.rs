@@ -4,7 +4,7 @@ use network_shapley::shapley::ShapleyOutput;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 use svm_hash::{
-    merkle::{MerkleProof, merkle_root_from_byte_ref_leaves},
+    merkle::{MerkleProof, merkle_root_from_indexed_byte_ref_leaves},
     sha2::Hash,
 };
 
@@ -92,7 +92,7 @@ impl ContributorRewardsMerkleTree {
 
     /// Compute the merkle root for all contributor rewards
     pub fn compute_root(&self) -> Result<Hash> {
-        merkle_root_from_byte_ref_leaves(&self.leaves, Some(LEAF_PREFIX))
+        merkle_root_from_indexed_byte_ref_leaves(&self.leaves, Some(LEAF_PREFIX))
             .ok_or_else(|| anyhow!("Failed to compute merkle root for epoch {}", self.epoch))
     }
 
@@ -107,14 +107,18 @@ impl ContributorRewardsMerkleTree {
             ));
         }
 
-        MerkleProof::from_byte_ref_leaves(&self.leaves, contributor_index as u32, Some(LEAF_PREFIX))
-            .ok_or_else(|| {
-                anyhow!(
-                    "Failed to generate proof for contributor {} at epoch {}",
-                    contributor_index,
-                    self.epoch
-                )
-            })
+        MerkleProof::from_indexed_byte_ref_leaves(
+            &self.leaves,
+            contributor_index as u32,
+            Some(LEAF_PREFIX),
+        )
+        .ok_or_else(|| {
+            anyhow!(
+                "Failed to generate proof for contributor {} at epoch {}",
+                contributor_index,
+                self.epoch
+            )
+        })
     }
 
     /// Get reward detail by index (for verification)
@@ -174,8 +178,8 @@ pub fn generate_proof_from_shapley(
         .map(|r| borsh::to_vec(r).map_err(|e| anyhow!("Failed to serialize reward: {}", e)))
         .collect::<Result<Vec<_>>>()?;
 
-    // Generate the proof
-    let proof = MerkleProof::from_byte_ref_leaves(&leaves, index as u32, Some(LEAF_PREFIX))
+    // Generate the proof using indexed function
+    let proof = MerkleProof::from_indexed_byte_ref_leaves(&leaves, index as u32, Some(LEAF_PREFIX))
         .ok_or_else(|| {
             anyhow!(
                 "Failed to generate proof for contributor at index {}",
@@ -184,7 +188,7 @@ pub fn generate_proof_from_shapley(
         })?;
 
     // Compute the root for verification
-    let root = merkle_root_from_byte_ref_leaves(&leaves, Some(LEAF_PREFIX))
+    let root = merkle_root_from_indexed_byte_ref_leaves(&leaves, Some(LEAF_PREFIX))
         .ok_or_else(|| anyhow!("Failed to compute merkle root"))?;
 
     Ok((proof, reward, root))
