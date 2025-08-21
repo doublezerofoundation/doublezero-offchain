@@ -15,8 +15,8 @@ use solana_client::{
     rpc_filter::{Memcmp, RpcFilterType},
 };
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
-use std::{str::FromStr, time::Duration};
-use tracing::{debug, info, warn};
+use std::{collections::HashSet, str::FromStr, time::Duration};
+use tracing::{debug, error, info, warn};
 
 // Use the correct discriminator value from the AccountType enum
 // AccountType::InternetLatencySamples = 4
@@ -134,6 +134,154 @@ pub async fn fetch(
     Ok(DZInternetData {
         internet_latency_samples,
     })
+}
+
+/// Calculate coverage of internet telemetry data
+/// Returns a value between 0.0 and 1.0 representing the percentage of expected links with valid data
+fn calculate_coverage(data: &DZInternetData, expected_links: usize, min_samples: usize) -> f64 {
+    if expected_links == 0 {
+        return 0.0;
+    }
+
+    // Count unique origin-target pairs with sufficient samples
+    let valid_links: HashSet<(Pubkey, Pubkey)> = data
+        .internet_latency_samples
+        .iter()
+        .filter(|sample| sample.samples.len() >= min_samples)
+        .map(|sample| (sample.origin_exchange_pk, sample.target_exchange_pk))
+        .collect();
+
+    valid_links.len() as f64 / expected_links as f64
+}
+
+/// Fetch internet telemetry data with threshold checking
+/// Will attempt to fetch data from the target epoch, and if coverage is insufficient,
+/// will look back through previous epochs up to max_epochs_lookback
+pub async fn fetch_with_threshold(
+    rpc_client: &RpcClient,
+    settings: &Settings,
+    target_epoch: u64,
+    expected_links: usize,
+) -> Result<(u64, DZInternetData)> {
+    let min_coverage = settings.internet_telemetry.min_coverage_threshold;
+    let max_lookback = settings.internet_telemetry.max_epochs_lookback;
+    let min_samples = settings.internet_telemetry.min_samples_per_link;
+
+    info!(
+        "Checking internet telemetry for target epoch {}...",
+        target_epoch
+    );
+
+    let mut best_epoch = target_epoch;
+    let mut best_data = DZInternetData::default();
+    let mut best_coverage = 0.0;
+
+    // Try epochs from target_epoch down to (target_epoch - max_lookback + 1)
+    for i in 0..max_lookback {
+        let current_epoch = target_epoch.saturating_sub(i);
+
+        // Fetch data for this epoch
+        let data = fetch(rpc_client, settings, current_epoch).await?;
+
+        // Calculate coverage
+        let coverage = calculate_coverage(&data, expected_links, min_samples);
+
+        // Track best coverage seen so far
+        if coverage > best_coverage {
+            best_epoch = current_epoch;
+            best_data = data.clone();
+            best_coverage = coverage;
+        }
+
+        if data.internet_latency_samples.is_empty() {
+            if i == 0 {
+                warn!(
+                    "Epoch {} has no internet telemetry data. Looking back...",
+                    current_epoch
+                );
+            } else {
+                warn!(
+                    "Epoch {} has no internet telemetry data. Continuing search...",
+                    current_epoch
+                );
+            }
+        } else {
+            let coverage_pct = coverage * 100.0;
+            let threshold_pct = min_coverage * 100.0;
+
+            if coverage >= min_coverage {
+                if i == 0 {
+                    info!(
+                        "Epoch {} coverage is {:.1}% (meets {:.0}% threshold). Using current epoch data.",
+                        current_epoch, coverage_pct, threshold_pct
+                    );
+                } else {
+                    info!(
+                        "Epoch {} coverage is {:.1}% (meets threshold). Using data from epoch {}.",
+                        current_epoch, coverage_pct, current_epoch
+                    );
+                    info!(
+                        "Using serviceability mapping from current epoch {} with telemetry data from epoch {}",
+                        target_epoch, current_epoch
+                    );
+                }
+                return Ok((current_epoch, data));
+            } else if i == 0 {
+                warn!(
+                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold). Looking back...",
+                    current_epoch, coverage_pct, threshold_pct
+                );
+            } else if i < max_lookback - 1 {
+                info!(
+                    "Checking internet telemetry for historical epoch {}...",
+                    current_epoch.saturating_sub(1)
+                );
+                warn!(
+                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold). Continuing search...",
+                    current_epoch, coverage_pct, threshold_pct
+                );
+            } else {
+                warn!(
+                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold). Reached max lookback.",
+                    current_epoch, coverage_pct, threshold_pct
+                );
+            }
+        }
+
+        // If this is not the last iteration, show we're checking the next epoch
+        if i < max_lookback - 1 && coverage < min_coverage {
+            let next_epoch = target_epoch.saturating_sub(i + 1);
+            if next_epoch > 0 {
+                info!(
+                    "Checking internet telemetry for historical epoch {}...",
+                    next_epoch
+                );
+            }
+        }
+    }
+
+    // No epoch met the threshold, use best available
+    if best_coverage > 0.0 {
+        let coverage_pct = best_coverage * 100.0;
+        error!(
+            "No suitable internet telemetry found within max lookback of {} epochs. Using best available data from epoch {} with {:.1}% coverage.",
+            max_lookback, best_epoch, coverage_pct
+        );
+        warn!(
+            "Rewards calculation proceeding with incomplete data. Results may not fully reflect network performance."
+        );
+        Ok((best_epoch, best_data))
+    } else {
+        error!(
+            "CRITICAL: No internet telemetry data found in any of the last {} epochs. Cannot proceed with rewards calculation.",
+            max_lookback
+        );
+        Err(anyhow::anyhow!(
+            "No internet telemetry data available within {} epochs of epoch {}",
+            max_lookback,
+            target_epoch
+        ))
+    }
 }
 
 #[cfg(test)]
