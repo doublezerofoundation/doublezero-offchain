@@ -1,12 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Args, Subcommand};
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
 use doublezero_revenue_distribution::{
+    ID,
     instruction::{
-        account::InitializeContributorRewardsAccounts, RevenueDistributionInstructionData,
+        RevenueDistributionInstructionData, account::InitializeContributorRewardsAccounts,
     },
     state::{ContributorRewards, Journal, ProgramConfig},
-    ID,
 };
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 

@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{Args, Subcommand};
 use doublezero_passport::state::ProgramConfig;
 use doublezero_program_tools::zero_copy;
