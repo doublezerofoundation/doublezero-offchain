@@ -35,6 +35,7 @@ doublezero_sdk = { git = "ssh://git@github.com/malbeclabs/doublezero" }
 doublezero-passport = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
 doublezero-program-tools = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana" }
 doublezero-revenue-distribution = { git = "ssh://git@github.com/doublezerofoundation/doublezero-solana", features = ["no-entrypoint"] }
+futures = "0"
 futures-util = "0"
 governor = "0"
 itertools = "0"

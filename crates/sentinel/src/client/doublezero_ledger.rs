@@ -1,5 +1,6 @@
 use crate::{Result, new_transaction};
 
+use doublezero_program_common::types::NetworkV4;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_serviceability::{
     pda::{get_accesspass_pda, get_globalstate_pda},
@@ -9,7 +10,6 @@ use doublezero_serviceability::{
         accounttype::{AccountType, AccountTypeInfo},
         user::User,
     },
-    types::network_v4::NetworkV4,
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
@@ -76,7 +76,7 @@ impl DzRpcClient {
         let args = SetAccessPassArgs {
             accesspass_type: AccessPassType::SolanaValidator,
             client_ip: *client_ip,
-            payer: *service_key,
+            user_payer: *service_key,
             last_access_epoch: u64::MAX,
         };
         let accounts = vec![
