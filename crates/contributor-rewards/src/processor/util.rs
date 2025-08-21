@@ -15,6 +15,7 @@ pub struct RttStats {
 pub struct JitterStats {
     pub avg_jitter_us: f64,
     pub max_jitter_us: f64,
+    pub ewma_jitter_us: f64,
 }
 
 pub fn display_us_as_ms(us: &f64) -> String {
@@ -82,31 +83,59 @@ pub fn calculate_jitter_statistics(
         return Ok(JitterStats {
             avg_jitter_us: 0.0,
             max_jitter_us: 0.0,
+            ewma_jitter_us: 0.0,
         });
     }
 
     let actual_end_idx = end_idx.min(samples.len());
-    let mut jitters = Vec::new();
 
-    for i in (start_idx + 1)..actual_end_idx {
-        let diff = (samples[i] as f64 - samples[i - 1] as f64).abs();
-        jitters.push(diff);
+    // Extract non-zero samples (successful RTT measurements)
+    let mut ordered: Vec<f64> = Vec::new();
+    for &sample in samples.iter().take(actual_end_idx).skip(start_idx) {
+        if sample > 0 {
+            ordered.push(sample as f64);
+        }
     }
 
-    if jitters.is_empty() {
+    if ordered.len() < 2 {
         return Ok(JitterStats {
             avg_jitter_us: 0.0,
             max_jitter_us: 0.0,
+            ewma_jitter_us: 0.0,
         });
     }
 
-    let sum: f64 = jitters.iter().sum();
-    let avg = sum / jitters.len() as f64;
-    let max = jitters.iter().cloned().fold(0.0, f64::max);
+    // Calculate deltas and absolute deltas (IPDV methodology)
+    let mut abs_deltas = Vec::new();
+
+    // Initialize EWMA with first absolute delta
+    let first_abs = (ordered[1] - ordered[0]).abs();
+    let mut ewma = first_abs;
+    let mut max_abs = first_abs;
+    abs_deltas.push(first_abs);
+
+    // Process remaining samples with EWMA calculation
+    for i in 2..ordered.len() {
+        let delta = ordered[i] - ordered[i - 1];
+        let abs_delta = delta.abs();
+        abs_deltas.push(abs_delta);
+
+        // EWMA update with α = 1/16 (matching Go implementation)
+        ewma += (abs_delta - ewma) / 16.0;
+
+        if abs_delta > max_abs {
+            max_abs = abs_delta;
+        }
+    }
+
+    // Calculate average of absolute deltas
+    let sum: f64 = abs_deltas.iter().sum();
+    let avg = sum / abs_deltas.len() as f64;
 
     Ok(JitterStats {
         avg_jitter_us: avg,
-        max_jitter_us: max,
+        max_jitter_us: max_abs,
+        ewma_jitter_us: ewma,
     })
 }
 
@@ -168,8 +197,54 @@ mod tests {
         let samples = vec![100, 150, 140, 180, 170];
         let stats = calculate_jitter_statistics(&samples, 0, 5).unwrap();
 
-        assert!(stats.avg_jitter_us > 0.0);
+        // Verify average jitter
+        let expected_deltas = [50.0, 10.0, 40.0, 10.0];
+        let expected_avg = expected_deltas.iter().sum::<f64>() / expected_deltas.len() as f64;
+        assert!((stats.avg_jitter_us - expected_avg).abs() < 0.001);
+
+        // Verify max jitter
         assert_eq!(stats.max_jitter_us, 50.0); // 150 - 100
+
+        // Verify EWMA calculation
+        // EWMA starts at 50, then updates with each delta
+        let mut ewma = 50.0; // First delta
+        ewma += (10.0 - ewma) / 16.0; // Second delta
+        ewma += (40.0 - ewma) / 16.0; // Third delta
+        ewma += (10.0 - ewma) / 16.0; // Fourth delta
+        assert!((stats.ewma_jitter_us - ewma).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_ipdv_with_packet_loss() {
+        // Test with some zero values (packet loss)
+        let samples = vec![100, 0, 150, 140, 0, 180];
+        let stats = calculate_jitter_statistics(&samples, 0, 6).unwrap();
+
+        // Should only process non-zero samples: [100, 150, 140, 180]
+        // Deltas: |150-100|=50, |140-150|=10, |180-140|=40
+        assert_eq!(stats.max_jitter_us, 50.0);
+        let expected_avg = (50.0 + 10.0 + 40.0) / 3.0;
+        assert!((stats.avg_jitter_us - expected_avg).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_ipdv_single_sample() {
+        let samples = vec![100];
+        let stats = calculate_jitter_statistics(&samples, 0, 1).unwrap();
+
+        assert_eq!(stats.avg_jitter_us, 0.0);
+        assert_eq!(stats.max_jitter_us, 0.0);
+        assert_eq!(stats.ewma_jitter_us, 0.0);
+    }
+
+    #[test]
+    fn test_ipdv_two_samples() {
+        let samples = vec![100, 120];
+        let stats = calculate_jitter_statistics(&samples, 0, 2).unwrap();
+
+        assert_eq!(stats.avg_jitter_us, 20.0);
+        assert_eq!(stats.max_jitter_us, 20.0);
+        assert_eq!(stats.ewma_jitter_us, 20.0); // Only one delta, so EWMA = delta
     }
 
     #[test]

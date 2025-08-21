@@ -13,6 +13,7 @@ pub struct TelemetryStatistics {
     pub rtt_p99_us: f64,
     pub avg_jitter_us: f64,
     pub max_jitter_us: f64,
+    pub ewma_jitter_us: f64,
     pub packet_loss: f64,
     pub total_samples: usize,
 }

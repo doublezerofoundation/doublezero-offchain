@@ -55,6 +55,8 @@ pub struct InternetTelemetryStats {
     pub rtt_p99_us: f64,
     #[tabled(display = "display_us_as_ms", rename = "avg_jitter(ms)")]
     pub avg_jitter_us: f64,
+    #[tabled(display = "display_us_as_ms", rename = "ewma_jitter(ms)")]
+    pub jitter_ewma_us: f64,
     #[tabled(display = "display_us_as_ms", rename = "max_jitter(ms)")]
     pub max_jitter_us: f64,
     pub packet_loss: f64,
@@ -170,6 +172,7 @@ impl InternetTelemetryProcessor {
                     rtt_p95_us: stats.rtt_p95_us,
                     rtt_p99_us: stats.rtt_p99_us,
                     avg_jitter_us: stats.avg_jitter_us,
+                    jitter_ewma_us: stats.ewma_jitter_us,
                     max_jitter_us: stats.max_jitter_us,
                     packet_loss: stats.packet_loss,
                     total_samples: stats.total_samples,

@@ -153,6 +153,7 @@ fn calculate_statistics_common(
         rtt_p99_us: rtt_stats.p99_us,
         avg_jitter_us: jitter_stats.avg_jitter_us,
         max_jitter_us: jitter_stats.max_jitter_us,
+        ewma_jitter_us: jitter_stats.ewma_jitter_us,
         packet_loss,
         total_samples: total_samples_in_range,
     })
@@ -160,29 +161,39 @@ fn calculate_statistics_common(
 
 /// Calculate combined jitter statistics from multiple sample sets
 fn calculate_combined_jitter(jitter_indices: &[(&[u32], usize, usize)]) -> Result<JitterStats> {
-    let mut all_jitters = Vec::new();
+    let mut all_avg_jitters = Vec::new();
+    let mut all_max_jitters = Vec::new();
+    let mut all_ewma_jitters = Vec::new();
 
     for (samples, start_idx, end_idx) in jitter_indices {
         if *end_idx > *start_idx && *start_idx < samples.len() {
             let jitter_stats = calculate_jitter_statistics(samples, *start_idx, *end_idx)?;
-            all_jitters.push(jitter_stats.avg_jitter_us);
-            all_jitters.push(jitter_stats.max_jitter_us);
+            if jitter_stats.avg_jitter_us > 0.0 {
+                all_avg_jitters.push(jitter_stats.avg_jitter_us);
+                all_max_jitters.push(jitter_stats.max_jitter_us);
+                all_ewma_jitters.push(jitter_stats.ewma_jitter_us);
+            }
         }
     }
 
-    if all_jitters.is_empty() {
+    if all_avg_jitters.is_empty() {
         return Ok(JitterStats {
             avg_jitter_us: 0.0,
             max_jitter_us: 0.0,
+            ewma_jitter_us: 0.0,
         });
     }
 
     // Calculate overall jitter statistics
-    let avg_jitter = all_jitters.iter().sum::<f64>() / all_jitters.len() as f64;
-    let max_jitter = all_jitters.iter().fold(0.0f64, |max, &val| val.max(max));
+    let avg_jitter = all_avg_jitters.iter().sum::<f64>() / all_avg_jitters.len() as f64;
+    let max_jitter = all_max_jitters
+        .iter()
+        .fold(0.0f64, |max, &val| val.max(max));
+    let ewma_jitter = all_ewma_jitters.iter().sum::<f64>() / all_ewma_jitters.len() as f64;
 
     Ok(JitterStats {
         avg_jitter_us: avg_jitter,
         max_jitter_us: max_jitter,
+        ewma_jitter_us: ewma_jitter,
     })
 }
