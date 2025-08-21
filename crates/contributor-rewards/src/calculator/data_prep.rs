@@ -27,7 +27,7 @@ impl PreparedData {
     /// Returns: (epoch, device_telemetry, internet_telemetry, shapley_inputs)
     pub async fn new(fetcher: &Fetcher, epoch: Option<u64>) -> Result<PreparedData> {
         // NOTE: Always fetch current epoch's serviceability data first
-        // This ensures we have the correct exchange_pk → device → location mappings
+        // This ensures we have the correct exchange_pk -> device -> location mappings
         let (fetch_epoch, mut fetch_data) = match epoch {
             None => fetcher.fetch().await?,
             Some(epoch_num) => fetcher.with_epoch(epoch_num).await?,
@@ -180,6 +180,6 @@ fn calculate_expected_links(fetch_data: &FetchData) -> usize {
 
     // For internet telemetry, we expect directional data.
     // This calculation counts all possible directed (unidirectional) links between distinct locations.
-    // For every pair of locations (A, B), both A→B and B→A are counted, resulting in n * (n - 1) total links.
+    // For every pair of locations (A, B), both A -> B and B -> A are counted, resulting in n * (n - 1) total links.
     n * (n - 1)
 }

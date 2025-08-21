@@ -285,6 +285,8 @@ pub async fn fetch_with_threshold(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ingestor::types::DZInternetLatencySamples;
+    use solana_sdk::pubkey::Pubkey;
 
     #[test]
     fn test_account_type_discriminator() {
@@ -296,5 +298,165 @@ mod tests {
 
         // Also verify the AccountType enum value
         assert_eq!(AccountType::InternetLatencySamples as u8, 4);
+    }
+
+    // Helper function to create test internet data
+    fn create_test_internet_data(num_links: usize, samples_per_link: usize) -> DZInternetData {
+        let mut samples = Vec::new();
+
+        // Simply create num_links unique origin-target pairs
+        for _i in 0..num_links {
+            let origin = Pubkey::new_unique();
+            let target = Pubkey::new_unique();
+
+            // Create Vec<u32> for latency samples (microseconds as u32)
+            let mut latency_samples = Vec::new();
+            for j in 0..samples_per_link {
+                latency_samples.push(50000 + (j as u32 * 1000)); // 50ms + variance in microseconds
+            }
+
+            samples.push(DZInternetLatencySamples {
+                pubkey: Pubkey::new_unique(),
+                epoch: 100,
+                data_provider_name: "test_provider".to_string(),
+                oracle_agent_pk: Pubkey::new_unique(),
+                origin_exchange_pk: origin,
+                target_exchange_pk: target,
+                sampling_interval_us: 1000000,  // 1 second
+                start_timestamp_us: 1000000000, // arbitrary start time
+                samples: latency_samples,
+                sample_count: samples_per_link as u32,
+            });
+        }
+
+        DZInternetData {
+            internet_latency_samples: samples,
+        }
+    }
+
+    #[test]
+    fn test_calculate_coverage_full_coverage() {
+        // Test with all expected links having sufficient samples
+        let data = create_test_internet_data(6, 10); // 6 unique links with 10 samples each
+        let coverage = calculate_coverage(&data, 6, 5);
+
+        assert_eq!(
+            coverage, 1.0,
+            "Should have 100% coverage with all links present"
+        );
+    }
+
+    #[test]
+    fn test_calculate_coverage_partial_coverage() {
+        // Test with only some links having data
+        let data = create_test_internet_data(3, 10); // Only 3 out of 6 expected links
+        let coverage = calculate_coverage(&data, 6, 5);
+
+        assert_eq!(
+            coverage, 0.5,
+            "Should have 50% coverage with half the links"
+        );
+    }
+
+    #[test]
+    fn test_calculate_coverage_insufficient_samples() {
+        // Test with links that have too few samples
+        let data = create_test_internet_data(6, 3); // Only 3 samples per link
+        let coverage = calculate_coverage(&data, 6, 5); // Require 5 samples minimum
+
+        assert_eq!(
+            coverage, 0.0,
+            "Should have 0% coverage when samples are below minimum"
+        );
+    }
+
+    #[test]
+    fn test_calculate_coverage_mixed_samples() {
+        // Test with some links having enough samples, others not
+        let mut data = create_test_internet_data(4, 10); // 4 links with 10 samples each
+
+        // Add 2 more links with insufficient samples
+        let exchange4 = Pubkey::new_unique();
+        let exchange5 = Pubkey::new_unique();
+
+        data.internet_latency_samples
+            .push(DZInternetLatencySamples {
+                pubkey: Pubkey::new_unique(),
+                epoch: 100,
+                data_provider_name: "test_provider".to_string(),
+                oracle_agent_pk: Pubkey::new_unique(),
+                origin_exchange_pk: exchange4,
+                target_exchange_pk: exchange5,
+                sampling_interval_us: 1000000,
+                start_timestamp_us: 1000000000,
+                samples: vec![50000, 51000], // Only 2 samples (as u32 microseconds)
+                sample_count: 2,
+            });
+
+        let coverage = calculate_coverage(&data, 6, 5);
+        assert!(
+            (coverage - 0.666).abs() < 0.01,
+            "Should have ~66.6% coverage with 4 out of 6 valid links"
+        );
+    }
+
+    #[test]
+    fn test_calculate_coverage_empty_data() {
+        // Test with no data
+        let data = DZInternetData {
+            internet_latency_samples: vec![],
+        };
+        let coverage = calculate_coverage(&data, 6, 5);
+
+        assert_eq!(coverage, 0.0, "Should have 0% coverage with no data");
+    }
+
+    #[test]
+    fn test_calculate_coverage_zero_expected_links() {
+        // Test edge case with zero expected links
+        let data = create_test_internet_data(6, 10);
+        let coverage = calculate_coverage(&data, 0, 5);
+
+        assert_eq!(coverage, 0.0, "Should return 0% when no links are expected");
+    }
+
+    #[test]
+    fn test_calculate_coverage_duplicate_links() {
+        // Test that duplicate links are counted only once
+        let exchange1 = Pubkey::new_unique();
+        let exchange2 = Pubkey::new_unique();
+
+        let data = DZInternetData {
+            internet_latency_samples: vec![
+                DZInternetLatencySamples {
+                    pubkey: Pubkey::new_unique(),
+                    epoch: 100,
+                    data_provider_name: "test_provider".to_string(),
+                    oracle_agent_pk: Pubkey::new_unique(),
+                    origin_exchange_pk: exchange1,
+                    target_exchange_pk: exchange2,
+                    sampling_interval_us: 1000000,
+                    start_timestamp_us: 1000000000,
+                    samples: vec![50000, 51000, 52000, 53000, 54000], // 5 samples
+                    sample_count: 5,
+                },
+                // Duplicate of the same link
+                DZInternetLatencySamples {
+                    pubkey: Pubkey::new_unique(),
+                    epoch: 100,
+                    data_provider_name: "test_provider".to_string(),
+                    oracle_agent_pk: Pubkey::new_unique(),
+                    origin_exchange_pk: exchange1,
+                    target_exchange_pk: exchange2,
+                    sampling_interval_us: 1000000,
+                    start_timestamp_us: 2000000000,
+                    samples: vec![55000, 56000, 57000, 58000, 59000], // 5 samples
+                    sample_count: 5,
+                },
+            ],
+        };
+
+        let coverage = calculate_coverage(&data, 2, 5);
+        assert_eq!(coverage, 0.5, "Duplicate links should only be counted once");
     }
 }
