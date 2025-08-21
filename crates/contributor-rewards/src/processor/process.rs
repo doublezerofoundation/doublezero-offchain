@@ -101,9 +101,7 @@ fn calculate_device_group_statistics(
             jitter_indices.push((&sample.samples[..], start_idx, end_idx));
 
             // Collect raw samples for packet loss calculation
-            for i in start_idx..end_idx.min(sample.samples.len()) {
-                all_raw_samples.push(sample.samples[i]);
-            }
+            all_raw_samples.extend(&sample.samples[start_idx..end_idx]);
         }
     }
 
@@ -137,9 +135,7 @@ fn calculate_internet_group_statistics(
             jitter_indices.push((&sample.samples[..], start_idx, end_idx));
 
             // Collect raw samples for packet loss calculation
-            for i in start_idx..end_idx.min(sample.samples.len()) {
-                all_raw_samples.push(sample.samples[i]);
-            }
+            all_raw_samples.extend(&sample.samples[start_idx..end_idx]);
         }
     }
 
