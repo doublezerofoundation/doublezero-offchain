@@ -178,7 +178,10 @@ pub fn generate_proof_from_shapley(
         .map(|r| borsh::to_vec(r).map_err(|e| anyhow!("Failed to serialize reward: {}", e)))
         .collect::<Result<Vec<_>>>()?;
 
-    // Generate the proof using indexed function
+    // Use the indexed Merkle proof function to ensure the proof matches the contributor's position
+    // in the rewards list.
+    // This is necessary because Merkle proofs depend on the leaf's index; using indexed
+    // leaves guarantees correct verification.
     let proof = MerkleProof::from_indexed_byte_ref_leaves(&leaves, index as u32, Some(LEAF_PREFIX))
         .ok_or_else(|| {
             anyhow!(
