@@ -61,7 +61,7 @@ pub struct OperationalSettings {
     pub slot_duration_us: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct InternetTelemetrySettings {
     /// Minimum coverage threshold (0.0-1.0)
     /// e.g., 0.7 means at least 70% of expected links must have data

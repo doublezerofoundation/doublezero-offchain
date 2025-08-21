@@ -251,12 +251,10 @@ pub async fn fetch_with_threshold(
         // If this is not the last iteration, show we're checking the next epoch
         if i < max_lookback - 1 && coverage < min_coverage {
             let next_epoch = target_epoch.saturating_sub(i + 1);
-            if next_epoch > 0 {
-                info!(
-                    "Checking internet telemetry for historical epoch {}...",
-                    next_epoch
-                );
-            }
+            info!(
+                "Checking internet telemetry for historical epoch {}...",
+                next_epoch
+            );
         }
     }
 

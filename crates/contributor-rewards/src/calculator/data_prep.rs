@@ -178,7 +178,8 @@ fn calculate_expected_links(fetch_data: &FetchData) -> usize {
         return 0;
     }
 
-    // For internet telemetry, we expect directional data
-    // So total links = n * (n - 1) (each location pair has two directions)
+    // For internet telemetry, we expect directional data.
+    // This calculation counts all possible directed (unidirectional) links between distinct locations.
+    // For every pair of locations (A, B), both A→B and B→A are counted, resulting in n * (n - 1) total links.
     n * (n - 1)
 }
