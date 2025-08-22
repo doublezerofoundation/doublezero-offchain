@@ -2,7 +2,7 @@
 
 set -eu
 
-CLI_BIN=target/release/2z
+CLI_BIN=target/debug/2z
 
 $CLI_BIN -h
 echo
@@ -32,6 +32,11 @@ echo
 echo "solana-keygen new --silent --no-bip39-passphrase -o service_key_2.json"
 solana-keygen new --silent --no-bip39-passphrase -o service_key_2.json
 solana airdrop -u l 1 -k service_key_2.json
+echo
+
+echo "solana-keygen new --silent --no-bip39-passphrase -o validator_node_id.json"
+solana-keygen new --silent --no-bip39-passphrase -o validator_node_id.json
+solana airdrop -u l 1 -k validator_node_id.json
 echo
 
 ### Admin commands.
@@ -84,6 +89,26 @@ echo
 
 echo "2z admin passport configure -u l -v --unpause"
 $CLI_BIN admin passport configure -u l -v --unpause
+echo
+
+### Request Solana validator access.
+
+echo "2z passport request-solana-validator-access -h"
+$CLI_BIN passport request-solana-validator-access -h
+echo
+
+# Generate the signature using solana sign-offchain-message
+NODE_ID=$(solana address -k validator_node_id.json)
+MESSAGE="service_key=$DUMMY_KEY"
+SIGNATURE=$(echo -n "$MESSAGE" | solana sign-offchain-message -k validator_node_id.json /dev/stdin)
+
+echo "2z passport request-solana-validator-access -u l -v --node-id $NODE_ID --signature $SIGNATURE $DUMMY_KEY"
+$CLI_BIN passport request-solana-validator-access \
+    -u l \
+    -v \
+    --node-id $NODE_ID \
+    --signature $SIGNATURE \
+    $DUMMY_KEY
 echo
 
 ### Revenue distribution admin commands.
