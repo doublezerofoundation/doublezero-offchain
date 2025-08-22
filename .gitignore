@@ -1,5 +1,8 @@
 /target
 
+# IDE
+.vscode
+
 # Secrets
 .env
 .envrc
