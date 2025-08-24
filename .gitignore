@@ -28,6 +28,7 @@ cache/
 
 # Local test data
 test-data/
+test-ledger/
 *.parquet
 *.json.gz
 *.info
