@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use doublezero_passport::{
     ID,
@@ -6,7 +6,7 @@ use doublezero_passport::{
     state::{AccessRequest, ProgramConfig},
 };
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
-use solana_sdk::{bs58, compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
+use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signature::Signature};
 
 use crate::{
     payer::{SolanaPayerOptions, Wallet},
@@ -108,16 +108,14 @@ async fn execute_request_solana_validator_access(
     let wallet = Wallet::try_from(solana_payer_options)?;
     let wallet_key = wallet.pubkey();
 
-    let decoded_signature = bs58::decode(&signature)
-        .into_vec()
-        .map_err(|_| anyhow!("Invalid base58 string"))?;
+    let ed25519_signature = Signature::try_from(signature.as_bytes())?;
 
-    if decoded_signature.len() != 64 {
-        return Err(anyhow!("Invalid signature length"));
+    // Verify the signature.
+    let message = AccessRequest::access_request_message(&service_key);
+
+    if !ed25519_signature.verify(node_id.as_array(), message.as_bytes()) {
+        bail!("Signature verification failed");
     }
-
-    let mut ed25519_signature = [0u8; 64];
-    ed25519_signature.copy_from_slice(&decoded_signature);
 
     let request_access_ix = try_build_instruction(
         &ID,
@@ -125,7 +123,7 @@ async fn execute_request_solana_validator_access(
         &PassportInstructionData::RequestAccess(AccessMode::SolanaValidator {
             validator_id: node_id,
             service_key,
-            ed25519_signature,
+            ed25519_signature: ed25519_signature.into(),
         }),
     )?;
 
