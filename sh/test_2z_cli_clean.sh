@@ -7,7 +7,12 @@ CLI_BIN=target/debug/2z
 $CLI_BIN -h
 echo
 
-DUMMY_KEY=devgM7SXHvoHH6jPXRsjn97gygPUo58XEnc9bqY1jpj
+echo "solana-keygen new --silent --no-bip39-passphrase -o dummy.json"
+solana-keygen new --silent --no-bip39-passphrase -o dummy.json
+solana airdrop -u l 1 -k dummy.json
+echo
+
+DUMMY_KEY=$(solana address -k dummy.json)
 
 ### Establish another payer.
 
@@ -55,7 +60,7 @@ $CLI_BIN admin passport initialize -u l -v
 echo
 
 ### Set admin to bogus address.
-echo "2z admin passport set-admin -u l -v devgM7SXHvoHH6jPXRsjn97gygPUo58XEnc9bqY1jpj"
+echo "2z admin passport set-admin -u l -v $DUMMY_KEY"
 $CLI_BIN admin passport set-admin \
     -u l \
     -v \
@@ -122,7 +127,7 @@ $CLI_BIN admin revenue-distribution initialize -u l -v
 echo
 
 ### Set admin to bogus address.
-echo "2z admin revenue-distribution set-admin -u l -v devgM7SXHvoHH6jPXRsjn97gygPUo58XEnc9bqY1jpj"
+echo "2z admin revenue-distribution set-admin -u l -v $DUMMY_KEY"
 $CLI_BIN admin revenue-distribution set-admin \
     -u l \
     -v \
@@ -257,5 +262,12 @@ echo
 
 ### Clean up.
 
-echo "rm another_payer.json"
-rm another_payer.json
+echo "rm dummy.json another_payer.json rewards_manager.json " \
+     "service_key_1.json service_key_2.json validator_node_id.json"
+rm \
+    dummy.json \
+    another_payer.json \
+    rewards_manager.json \
+    service_key_1.json \
+    service_key_2.json \
+    validator_node_id.json
