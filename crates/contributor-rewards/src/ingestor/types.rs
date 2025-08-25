@@ -1,3 +1,4 @@
+use crate::serializer as btree_serializer;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use doublezero_program_common::serializer;
@@ -12,7 +13,7 @@ use doublezero_telemetry::state::{
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     fmt::{Display, Formatter},
 };
 
@@ -79,40 +80,40 @@ impl FetchData {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DZServiceabilityData {
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub locations: HashMap<Pubkey, DZLocation>,
+    pub locations: BTreeMap<Pubkey, DZLocation>,
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub exchanges: HashMap<Pubkey, DZExchange>,
+    pub exchanges: BTreeMap<Pubkey, DZExchange>,
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub devices: HashMap<Pubkey, DZDevice>,
+    pub devices: BTreeMap<Pubkey, DZDevice>,
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub links: HashMap<Pubkey, DZLink>,
+    pub links: BTreeMap<Pubkey, DZLink>,
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub users: HashMap<Pubkey, DZUser>,
+    pub users: BTreeMap<Pubkey, DZUser>,
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub multicast_groups: HashMap<Pubkey, DZMulticastGroup>,
+    pub multicast_groups: BTreeMap<Pubkey, DZMulticastGroup>,
     #[serde(
-        serialize_with = "serializer::serialize_pubkey_map",
-        deserialize_with = "serializer::deserialize_pubkey_map"
+        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
+        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
     )]
-    pub contributors: HashMap<Pubkey, DZContributor>,
+    pub contributors: BTreeMap<Pubkey, DZContributor>,
 }
 
 /// DB representation of DeviceLatencySamples
