@@ -217,44 +217,26 @@ pub async fn fetch_with_threshold(
                     );
                 } else {
                     info!(
-                        "Epoch {} coverage is {:.1}% (meets threshold). Using data from epoch {}.",
-                        current_epoch, coverage_pct, current_epoch
+                        "Epoch {current_epoch} coverage is {coverage_pct:.1}% (meets {threshold_pct:.0}% threshold)"
                     );
                     info!(
-                        "Using serviceability mapping from current epoch {} with telemetry data from epoch {}",
-                        target_epoch, current_epoch
+                        "Using historical data from epoch {current_epoch} (target was {target_epoch})."
                     );
                 }
                 return Ok((current_epoch, data));
-            } else if i == 0 {
-                warn!(
-                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold). Looking back...",
-                    current_epoch, coverage_pct, threshold_pct
-                );
-            } else if i < max_lookback - 1 {
-                info!(
-                    "Checking internet telemetry for historical epoch {}...",
-                    current_epoch.saturating_sub(1)
-                );
-                warn!(
-                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold). Continuing search...",
-                    current_epoch, coverage_pct, threshold_pct
-                );
             } else {
                 warn!(
-                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold). Reached max lookback.",
-                    current_epoch, coverage_pct, threshold_pct
+                    "Epoch {} coverage is {:.1}% (below {:.0}% threshold).{}",
+                    current_epoch,
+                    coverage_pct,
+                    threshold_pct,
+                    if i < max_lookback - 1 {
+                        " Looking back..."
+                    } else {
+                        " Reached max lookback."
+                    }
                 );
             }
-        }
-
-        // If this is not the last iteration, show we're checking the next epoch
-        if i < max_lookback - 1 && coverage < min_coverage {
-            let next_epoch = target_epoch.saturating_sub(i + 1);
-            info!(
-                "Checking internet telemetry for historical epoch {}...",
-                next_epoch
-            );
         }
     }
 

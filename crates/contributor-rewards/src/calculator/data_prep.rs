@@ -159,27 +159,28 @@ async fn build_and_log_demands(
 /// based on the current serviceability data
 fn calculate_expected_links(fetch_data: &FetchData) -> usize {
     // Build set of unique location PKs that have exchanges
-    // We go through exchange -> device -> location mapping
     let mut location_pks = HashSet::new();
 
-    for exchange_pk in fetch_data.dz_serviceability.exchanges.keys() {
-        // Find devices that belong to this exchange
-        for device in fetch_data.dz_serviceability.devices.values() {
-            if device.exchange_pk == *exchange_pk {
-                // Add the device's location to our set
-                location_pks.insert(device.location_pk);
-            }
+    // Build location_pks
+    for device in fetch_data.dz_serviceability.devices.values() {
+        if fetch_data
+            .dz_serviceability
+            .exchanges
+            .contains_key(&device.exchange_pk)
+        {
+            location_pks.insert(device.location_pk);
         }
     }
 
-    // Calculate number of unique directional links
+    // Calculate number of bidirectional links
     let n = location_pks.len();
     if n <= 1 {
         return 0;
     }
 
-    // For internet telemetry, we expect directional data.
-    // This calculation counts all possible directed (unidirectional) links between distinct locations.
-    // For every pair of locations (A, B), both A -> B and B -> A are counted, resulting in n * (n - 1) total links.
+    // For internet telemetry, we track bidirectional performance metrics.
+    // Since network performance can differ by direction (A -> B latency != B -> A latency),
+    // we count both directions separately: n * (n - 1) total directional links.
+    // This includes both A -> B and B -> A for each pair of distinct locations.
     n * (n - 1)
 }
