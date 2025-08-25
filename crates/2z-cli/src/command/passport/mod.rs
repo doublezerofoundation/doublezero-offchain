@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use doublezero_passport::{
@@ -6,7 +8,10 @@ use doublezero_passport::{
     state::{AccessRequest, ProgramConfig},
 };
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
-use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction, offchain_message::OffchainMessage, pubkey::Pubkey,
+    signature::Signature,
+};
 
 use crate::{
     payer::{SolanaPayerOptions, Wallet},
@@ -38,6 +43,10 @@ pub enum PassportSubCommand {
         #[arg(long, short = 's', value_name = "BASE58_STRING")]
         signature: String,
 
+        /// Offchain message version. ONLY 0 IS SUPPORTED.
+        #[arg(long, value_name = "U8", default_value = "0")]
+        message_version: u8,
+
         #[command(flatten)]
         solana_payer_options: SolanaPayerOptions,
     },
@@ -54,12 +63,14 @@ impl PassportSubCommand {
                 service_key,
                 node_id,
                 signature,
+                message_version,
                 solana_payer_options,
             } => {
                 execute_request_solana_validator_access(
                     service_key,
                     node_id,
                     signature,
+                    message_version,
                     solana_payer_options,
                 )
                 .await
@@ -103,18 +114,30 @@ async fn execute_request_solana_validator_access(
     service_key: Pubkey,
     node_id: Pubkey,
     signature: String,
+    message_version: u8,
     solana_payer_options: SolanaPayerOptions,
 ) -> Result<()> {
+    let verbose = solana_payer_options.signer_options.verbose;
+
     let wallet = Wallet::try_from(solana_payer_options)?;
     let wallet_key = wallet.pubkey();
 
-    let ed25519_signature = Signature::try_from(signature.as_bytes())?;
+    let ed25519_signature = Signature::from_str(&signature)?;
 
     // Verify the signature.
-    let message = AccessRequest::access_request_message(&service_key);
+    let raw_message = AccessRequest::access_request_message(&service_key);
 
-    if !ed25519_signature.verify(node_id.as_array(), message.as_bytes()) {
+    if verbose {
+        println!("Raw message: {raw_message}");
+    }
+
+    let message = OffchainMessage::new(message_version, raw_message.as_bytes())?;
+    let serialized_message = message.serialize()?;
+
+    if !ed25519_signature.verify(node_id.as_array(), &serialized_message) {
         bail!("Signature verification failed");
+    } else if verbose {
+        println!("Signature recovers node ID: {node_id}");
     }
 
     let request_access_ix = try_build_instruction(
