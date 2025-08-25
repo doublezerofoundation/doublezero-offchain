@@ -1,4 +1,3 @@
-use crate::serializer as btree_serializer;
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use doublezero_program_common::serializer;
@@ -80,38 +79,38 @@ impl FetchData {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DZServiceabilityData {
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub locations: BTreeMap<Pubkey, DZLocation>,
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub exchanges: BTreeMap<Pubkey, DZExchange>,
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub devices: BTreeMap<Pubkey, DZDevice>,
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub links: BTreeMap<Pubkey, DZLink>,
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub users: BTreeMap<Pubkey, DZUser>,
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub multicast_groups: BTreeMap<Pubkey, DZMulticastGroup>,
     #[serde(
-        serialize_with = "btree_serializer::serialize_pubkey_btreemap",
-        deserialize_with = "btree_serializer::deserialize_pubkey_btreemap"
+        serialize_with = "serializer::serialize_pubkey_btreemap",
+        deserialize_with = "serializer::deserialize_pubkey_btreemap"
     )]
     pub contributors: BTreeMap<Pubkey, DZContributor>,
 }
