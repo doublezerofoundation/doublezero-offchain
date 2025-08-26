@@ -1241,6 +1241,7 @@ dependencies = [
  "csv",
  "doublezero-program-common",
  "doublezero-record",
+ "doublezero-revenue-distribution",
  "doublezero-serviceability",
  "doublezero-telemetry",
  "governor 0.10.1",
