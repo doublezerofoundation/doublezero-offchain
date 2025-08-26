@@ -31,6 +31,7 @@ pub struct RecordResult {
 
 pub async fn write_payments<T: ValidatorRewards>(
     fee_payment_calculator: &T,
+    signer: Keypair,
     validator_ids: Vec<String>,
 ) -> Result<RecordResult> {
     let record_result: RecordResult;
@@ -84,7 +85,6 @@ pub async fn write_payments<T: ValidatorRewards>(
     let data = computed_solana_validator_payments.merkle_root();
 
     // TODO: need to comment out until local validator running in CI
-    let signer = try_load_keypair(None).unwrap();
     let transaction = transaction::Transaction::new(signer, false);
     let initialized_transaction = transaction
         .initialize_distribution(
@@ -140,24 +140,6 @@ pub async fn write_payments<T: ValidatorRewards>(
     Ok(record_result)
 }
 
-/// Taken from a Solana cookbook to load a keypair from a user's Solana config
-/// location.
-fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
-    let home_path = std::env::var_os("HOME").unwrap();
-    let default_keypair_path = ".config/solana/id.json";
-
-    let keypair_path = path.unwrap_or_else(|| PathBuf::from(home_path).join(default_keypair_path));
-    try_load_specified_keypair(&keypair_path)
-}
-
-fn try_load_specified_keypair(path: &PathBuf) -> Result<Keypair> {
-    let keypair_file = std::fs::read_to_string(path)?;
-    let keypair_bytes = serde_json::from_str::<Vec<u8>>(&keypair_file)?;
-    let default_keypair = Keypair::try_from(keypair_bytes.as_slice())?;
-
-    Ok(default_keypair)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +154,25 @@ mod tests {
     use solana_sdk::{epoch_info::EpochInfo, reward_type::RewardType::Fee};
     use solana_transaction_status_client_types::UiConfirmedBlock;
     use std::collections::HashMap;
+
+    /// Taken from a Solana cookbook to load a keypair from a user's Solana config
+    /// location.
+    fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
+        let home_path = std::env::var_os("HOME").unwrap();
+        let default_keypair_path = ".config/solana/id.json";
+
+        let keypair_path =
+            path.unwrap_or_else(|| PathBuf::from(home_path).join(default_keypair_path));
+        try_load_specified_keypair(&keypair_path)
+    }
+
+    fn try_load_specified_keypair(path: &PathBuf) -> Result<Keypair> {
+        let keypair_file = std::fs::read_to_string(path)?;
+        let keypair_bytes = serde_json::from_str::<Vec<u8>>(&keypair_file)?;
+        let default_keypair = Keypair::try_from(keypair_bytes.as_slice())?;
+
+        Ok(default_keypair)
+    }
 
     #[ignore] // this will fail without local validator
     #[tokio::test]
@@ -292,7 +293,10 @@ mod tests {
                 })
             });
 
-        let record_result = write_payments(&mock_fee_payment_calculator, validator_ids).await?;
+        let signer = try_load_keypair(None).unwrap();
+
+        let record_result =
+            write_payments(&mock_fee_payment_calculator, signer, validator_ids).await?;
 
         assert_eq!(
             record_result.last_written_epoch.unwrap(),

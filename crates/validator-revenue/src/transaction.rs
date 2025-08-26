@@ -3,6 +3,7 @@ use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
 
 use doublezero_revenue_distribution::{
     ID,
+    // TODO: add env var to load correct key
     env::development::DOUBLEZERO_MINT_KEY,
     instruction::{
         account::{ConfigureDistributionPaymentsAccounts, InitializeDistributionAccounts},
@@ -48,9 +49,7 @@ impl Transaction {
         let fetched_dz_epoch = fetched_dz_epoch_info.epoch;
 
         if fetched_dz_epoch >= dz_epoch {
-            return Err(anyhow!(
-                "Fetched DZ epoch {fetched_dz_epoch} >= parameter {dz_epoch}"
-            ));
+            anyhow::bail!("Fetched DZ epoch {fetched_dz_epoch} >= parameter {dz_epoch}");
         }
 
         let account = solana_rpc_client
