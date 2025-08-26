@@ -11,6 +11,21 @@ use solana_client::{
 };
 use solana_sdk::{epoch_info::EpochInfo, pubkey::Pubkey};
 use solana_transaction_status_client_types::UiConfirmedBlock;
+use std::env;
+
+pub fn ledger_rpc() -> String {
+    match env::var("LEDGER_RPC") {
+        Ok(rpc) => rpc,
+        Err(_) => "http://localhost:8899".to_string(),
+    }
+}
+
+pub fn solana_rpc() -> String {
+    match env::var("SOLANA_RPC") {
+        Ok(rpc) => rpc,
+        Err(_) => "http://localhost:8899".to_string(),
+    }
+}
 
 #[automock]
 #[async_trait]
