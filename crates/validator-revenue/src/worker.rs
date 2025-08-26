@@ -15,7 +15,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use doublezero_revenue_distribution::instruction::DistributionPaymentsConfiguration::UpdateSolanaValidatorPayments;
 use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::keypair::Keypair};
-use std::{path::PathBuf, str::FromStr};
+use std::str::FromStr;
 
 use svm_hash::sha2::Hash;
 
@@ -153,7 +153,7 @@ mod tests {
     use solana_sdk::commitment_config::CommitmentConfig;
     use solana_sdk::{epoch_info::EpochInfo, reward_type::RewardType::Fee};
     use solana_transaction_status_client_types::UiConfirmedBlock;
-    use std::collections::HashMap;
+    use std::{collections::HashMap, path::PathBuf};
 
     /// Taken from a Solana cookbook to load a keypair from a user's Solana config
     /// location.
