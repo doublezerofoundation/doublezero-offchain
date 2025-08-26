@@ -130,8 +130,12 @@ pub async fn write_payments<T: ValidatorRewards>(
         last_check: Some(now),
         data_written: data,
         computed_payments: Some(computed_solana_validator_payments),
-        tx_submitted_sig: Some(tx_submitted_sig.unwrap()),
-        tx_initialized_sig: Some(tx_initialized_sig.unwrap()),
+        tx_submitted_sig: Some(tx_submitted_sig.ok_or_else(|| {
+            anyhow::anyhow!("send_or_simulate_transaction returned None for tx_submitted_sig")
+        })?),
+        tx_initialized_sig: Some(tx_initialized_sig.ok_or_else(|| {
+            anyhow::anyhow!("send_or_simulate_transaction returned None for tx_initialized_sig")
+        })?),
     };
     Ok(record_result)
 }

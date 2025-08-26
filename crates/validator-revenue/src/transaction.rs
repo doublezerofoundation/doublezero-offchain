@@ -35,8 +35,7 @@ impl Transaction {
     pub fn pubkey(&self) -> Pubkey {
         self.signer.pubkey()
     }
-    // TOOD: check against DZ ledger
-    // TODO:
+    // TODO: check against DZ ledger
     pub async fn initialize_distribution(
         &self,
         ledger_rpc_client: &RpcClient,
@@ -277,11 +276,10 @@ mod tests {
             .submit_distribution(&solana_rpc_client, dz_epoch, debt)
             .await?;
 
-        let tr = transaction
+        let _tr = transaction
             .send_or_simulate_transaction(&solana_rpc_client, &t)
             .await?;
 
-        dbg!(tr);
         let _rt = transaction.read_distribution(0, &solana_rpc_client).await?;
 
         Ok(())

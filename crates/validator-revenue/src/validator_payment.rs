@@ -88,8 +88,6 @@ mod tests {
         let leaves_ref: Vec<&[u8]> = leaves.iter().map(|v| v.as_slice()).collect();
         let root = payments.merkle_root().unwrap();
 
-        dbg!(&root);
-
         let proof_left = payments
             .find_payment_proof(&payments.payments[0].node_id)
             .unwrap();
