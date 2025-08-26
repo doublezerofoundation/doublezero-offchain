@@ -1,5 +1,5 @@
 [package]
-name = "doublezero-solana-validator-revenue"
+name = "validator-revenue"
 
 description = "Crate that processes revenue for validators"
 
@@ -9,6 +9,11 @@ license.workspace = true
 readme.workspace = true
 repository.workspace = true
 version.workspace = true
+
+
+[lib]
+name = "validator_revenue"
+path = "src/lib.rs"
 
 [dependencies]
 anyhow.workspace = true
