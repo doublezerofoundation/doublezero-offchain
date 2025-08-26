@@ -79,8 +79,7 @@ impl Transaction {
             &[initialize_distribution_ix],
             &[],
             recent_blockhash,
-        )
-        .unwrap();
+        )?;
 
         let new_transaction =
             VersionedTransaction::try_new(VersionedMessage::V0(message), &[&self.signer]).unwrap();
