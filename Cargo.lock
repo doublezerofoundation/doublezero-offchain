@@ -1240,6 +1240,7 @@ dependencies = [
  "config",
  "csv",
  "doublezero-program-common",
+ "doublezero-program-tools",
  "doublezero-record",
  "doublezero-revenue-distribution",
  "doublezero-serviceability",
