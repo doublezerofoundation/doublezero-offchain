@@ -70,7 +70,7 @@ pub async fn read_from_ledger(
 mod tests {
     use super::*;
     use crate::rewards::{EpochRewards, Reward};
-    use crate::solana_debt_calculator::{ValidatorDebts, ledger_rpc, solana_rpc};
+    use crate::solana_debt_calculator::{SolanaDebtCalculator, ledger_rpc, solana_rpc};
 
     use solana_client::{
         nonblocking::rpc_client::RpcClient,
@@ -102,7 +102,7 @@ mod tests {
             commitment: None,
             max_supported_transaction_version: Some(0),
         };
-        let fpc = ValidatorDebts::new(
+        let fpc = SolanaDebtCalculator::new(
             ledger_rpc_client,
             solana_rpc_client,
             rpc_block_config,
