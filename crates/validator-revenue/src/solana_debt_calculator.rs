@@ -59,14 +59,14 @@ pub trait ValidatorRewards {
     ) -> Result<i64, solana_client::client_error::ClientError>;
 }
 
-pub struct FeePaymentCalculator {
+pub struct ValidatorDebts {
     pub ledger_rpc_client: RpcClient,
     pub solana_rpc_client: RpcClient,
     pub vote_accounts_config: RpcGetVoteAccountsConfig,
     pub rpc_block_config: RpcBlockConfig,
 }
 
-impl FeePaymentCalculator {
+impl ValidatorDebts {
     pub fn new(
         ledger_rpc_client: RpcClient,
         solana_rpc_client: RpcClient,
@@ -83,7 +83,7 @@ impl FeePaymentCalculator {
 }
 
 #[async_trait]
-impl ValidatorRewards for FeePaymentCalculator {
+impl ValidatorRewards for ValidatorDebts {
     fn solana_rpc_client(&self) -> &RpcClient {
         &self.solana_rpc_client
     }
