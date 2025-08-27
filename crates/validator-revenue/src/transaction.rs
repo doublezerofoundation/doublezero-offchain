@@ -30,7 +30,13 @@ pub struct Transaction {
 
 fn mint_key() -> Pubkey {
     match env::var("MINT_KEY_ENVIRONMENT") {
-        Ok(_) => doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY,
+        Ok(val) => {
+            if val == "mainnet-beta" {
+                doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
+            } else {
+                doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
+            }
+        }
         Err(_) => doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY,
     }
 }
