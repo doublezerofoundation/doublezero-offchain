@@ -79,7 +79,7 @@ pub enum Commands {
     },
     /// Realloc a record account
     ReallocRecord {
-        /// Type of record to realloc (device-telemetry, internet-telemetry, reward-input, shapley-storage)
+        /// Type of record to realloc (device-telemetry, internet-telemetry, reward-input, contributor-rewards)
         #[arg(short = 't', long)]
         r#type: String,
 
@@ -97,6 +97,24 @@ pub enum Commands {
 
         /// Path to the keypair file to use for signing transactions
         #[arg(short, long)]
+        keypair: Option<PathBuf>,
+    },
+    /// Close a record account
+    CloseRecord {
+        /// Type of record to close (device-telemetry, internet-telemetry, reward-input, contributor-rewards)
+        #[arg(short = 't', long)]
+        r#type: String,
+
+        /// DZ Epoch
+        #[arg(short, long)]
+        epoch: u64,
+
+        /// Run in dry-run mode
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Path to the keypair file to use for signing transactions
+        #[arg(short = 'k', long)]
         keypair: Option<PathBuf>,
     },
 }
@@ -157,6 +175,16 @@ impl Cli {
             } => {
                 orchestrator
                     .realloc_record(r#type, epoch, size, keypair, dry_run)
+                    .await
+            }
+            Commands::CloseRecord {
+                r#type,
+                epoch,
+                keypair,
+                dry_run,
+            } => {
+                orchestrator
+                    .close_record(r#type, epoch, keypair, dry_run)
                     .await
             }
         }

@@ -335,4 +335,14 @@ impl Orchestrator {
         ledger_operations::realloc_record(&self.settings, &r#type, epoch, size, keypair, dry_run)
             .await
     }
+
+    pub async fn close_record(
+        &self,
+        r#type: String,
+        epoch: u64,
+        keypair_path: Option<PathBuf>,
+        dry_run: bool,
+    ) -> Result<()> {
+        ledger_operations::close_record(&self.settings, &r#type, epoch, keypair_path, dry_run).await
+    }
 }
