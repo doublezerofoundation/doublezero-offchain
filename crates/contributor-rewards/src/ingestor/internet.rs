@@ -1,5 +1,8 @@
 use crate::{
-    ingestor::types::{DZInternetData, DZInternetLatencySamples},
+    ingestor::{
+        inet_accumulator::{EpochData, InetLookbackAccumulator, InetLookbackConfig},
+        types::{DZInternetData, DZInternetLatencySamples},
+    },
     settings::Settings,
 };
 use anyhow::{Context, Result};
@@ -154,6 +157,115 @@ fn calculate_coverage(data: &DZInternetData, expected_links: usize, min_samples:
     valid_links.len() as f64 / expected_links as f64
 }
 
+/// Fetch internet telemetry data using the lookback accumulator
+/// Intelligently combines data from multiple epochs to meet coverage threshold
+async fn fetch_with_accumulator(
+    rpc_client: &RpcClient,
+    settings: &Settings,
+    target_epoch: u64,
+    expected_links: usize,
+) -> Result<(u64, DZInternetData)> {
+    let config = InetLookbackConfig {
+        min_coverage_ratio: settings.inet_lookback.min_coverage_threshold,
+        min_samples_per_route: settings.inet_lookback.min_samples_per_link,
+        dedup_window_us: settings.inet_lookback.dedup_window_us,
+    };
+
+    let mut accumulator = InetLookbackAccumulator::new(config, expected_links);
+
+    info!(
+        "Using lookback accumulator for target epoch {} (threshold: {:.0}%)",
+        target_epoch,
+        settings.inet_lookback.min_coverage_threshold * 100.0
+    );
+
+    // Try epochs from target_epoch down to (target_epoch - max_lookback + 1)
+    for i in 0..settings.inet_lookback.max_epochs_lookback {
+        let current_epoch = target_epoch.saturating_sub(i);
+
+        // Fetch data for this epoch
+        let data = fetch(rpc_client, settings, current_epoch).await?;
+
+        if data.internet_latency_samples.is_empty() {
+            warn!(
+                "Epoch {} has no internet telemetry data. Continuing...",
+                current_epoch
+            );
+            continue;
+        }
+
+        let epoch_data = EpochData::new(current_epoch, data);
+
+        // Calculate coverage gain (how many NEW routes this epoch would add)
+        let gain = accumulator.calculate_coverage_gain(&epoch_data);
+        let current_coverage = accumulator.coverage_ratio() * 100.0;
+
+        if gain > 0.0 {
+            info!(
+                "Epoch {} adds {:.1}% new route coverage (current: {:.1}%)",
+                current_epoch,
+                gain * 100.0,
+                current_coverage
+            );
+        } else {
+            info!(
+                "Epoch {} adds no new routes but may pad sample gaps (current: {:.1}%)",
+                current_epoch, current_coverage
+            );
+        }
+
+        // Always add epoch - even with 0% new routes, it helps fill temporal gaps
+        // Example: epoch 80 has lax->nyc at times 1000-1200, epoch 79 has lax->nyc at 1400-1600
+        // We combine both to get better (not necessarily complete) temporal coverage
+        accumulator.add_epoch(epoch_data);
+
+        // Check if we've met the route coverage threshold (e.g., 80% of expected routes)
+        // Note: This is about route coverage, not temporal coverage within routes
+        if accumulator.is_threshold_met() {
+            let final_coverage = accumulator.coverage_ratio() * 100.0;
+            let epochs_used = accumulator.get_epochs_used();
+
+            info!(
+                "Route coverage threshold met at {:.1}% using epochs: {:?}",
+                final_coverage, epochs_used
+            );
+
+            // Merge all epochs - combines samples, deduplicates temporal overlaps
+            // Missing time windows are OK - we don't need 100% temporal coverage
+            let merged_data = accumulator.merge_all()?;
+
+            // Return the most recent epoch used
+            let effective_epoch = epochs_used.into_iter().max().unwrap_or(target_epoch);
+            return Ok((effective_epoch, merged_data));
+        }
+    }
+
+    // Didn't reach threshold, use what we have
+    let final_coverage = accumulator.coverage_ratio() * 100.0;
+    let epochs_used = accumulator.get_epochs_used();
+
+    if !epochs_used.is_empty() {
+        warn!(
+            "Coverage threshold not met. Using {:.1}% coverage from epochs: {:?}",
+            final_coverage, epochs_used
+        );
+
+        let merged_data = accumulator.merge_all()?;
+        let effective_epoch = epochs_used.into_iter().max().unwrap_or(target_epoch);
+        Ok((effective_epoch, merged_data))
+    } else {
+        error!(
+            "No internet telemetry data found in any of the last {} epochs",
+            settings.inet_lookback.max_epochs_lookback
+        );
+        Err(anyhow::anyhow!(
+            "No internet telemetry data available within {} epochs of epoch {}",
+            settings.inet_lookback.max_epochs_lookback,
+            target_epoch
+        ))
+    }
+}
+
 /// Fetch internet telemetry data with threshold checking
 /// Will attempt to fetch data from the target epoch, and if coverage is insufficient,
 /// will look back through previous epochs up to max_epochs_lookback
@@ -163,9 +275,15 @@ pub async fn fetch_with_threshold(
     target_epoch: u64,
     expected_links: usize,
 ) -> Result<(u64, DZInternetData)> {
-    let min_coverage = settings.internet_telemetry.min_coverage_threshold;
-    let max_lookback = settings.internet_telemetry.max_epochs_lookback;
-    let min_samples = settings.internet_telemetry.min_samples_per_link;
+    // Use accumulator if enabled
+    if settings.inet_lookback.enable_accumulator {
+        return fetch_with_accumulator(rpc_client, settings, target_epoch, expected_links).await;
+    }
+
+    // Otherwise use the original implementation
+    let min_coverage = settings.inet_lookback.min_coverage_threshold;
+    let max_lookback = settings.inet_lookback.max_epochs_lookback;
+    let min_samples = settings.inet_lookback.min_samples_per_link;
 
     info!(
         "Checking internet telemetry for target epoch {}...",
