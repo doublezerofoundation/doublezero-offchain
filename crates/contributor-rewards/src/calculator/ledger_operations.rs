@@ -23,7 +23,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, message::Message, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
 };
-use std::{fmt, mem::size_of, path::PathBuf, str::FromStr, time::Duration};
+use std::{fmt, fs, mem::size_of, path::PathBuf, str::FromStr, time::Duration};
 use tabled::{Table, Tabled, settings::Style};
 use tracing::{debug, info, warn};
 
@@ -163,6 +163,14 @@ pub async fn read_telemetry_aggregates(
     telemetry_type: &str,
     output_csv: Option<PathBuf>,
 ) -> Result<()> {
+    // Validate type parameter
+    if telemetry_type != "device" && telemetry_type != "internet" && telemetry_type != "all" {
+        bail!(
+            "Invalid telemetry type '{}'. Must be 'device', 'internet', or 'all'",
+            telemetry_type
+        );
+    }
+
     // Create fetcher
     let fetcher = Fetcher::from_settings(settings)?;
 
@@ -176,7 +184,7 @@ pub async fn read_telemetry_aggregates(
         let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
         let record_key = compute_record_address(payer_pubkey, seeds)?;
 
-        info!("Re-created record_key: {record_key}");
+        debug!("Re-created record_key: {record_key}");
 
         let maybe_account = (|| async {
             fetcher
@@ -211,7 +219,7 @@ pub async fn read_telemetry_aggregates(
         let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
         let record_key = compute_record_address(payer_pubkey, seeds)?;
 
-        info!("Re-created record_key: {record_key}");
+        debug!("Re-created record_key: {record_key}");
 
         let maybe_account = (|| async {
             fetcher
@@ -245,7 +253,13 @@ pub async fn read_telemetry_aggregates(
 
         // Create parent directories if they don't exist
         if let Some(parent) = output_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(|e| {
+                anyhow!(
+                    "Failed to create output directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
         }
 
         // Export device telemetry if available
@@ -262,54 +276,23 @@ pub async fn read_telemetry_aggregates(
                 output_path.clone()
             };
 
-            let mut writer = Writer::from_path(&device_file)?;
-            // Write headers
-            writer.write_record([
-                "circuit",
-                "link_pubkey",
-                "origin_device",
-                "target_device",
-                "rtt_mean_us",
-                "rtt_median_us",
-                "rtt_min_us",
-                "rtt_max_us",
-                "rtt_p90_us",
-                "rtt_p95_us",
-                "rtt_p99_us",
-                "rtt_stddev_us",
-                "avg_jitter_us",
-                "jitter_ewma_us",
-                "max_jitter_us",
-                "packet_loss",
-                "loss_count",
-                "success_count",
-                "total_samples",
-            ])?;
+            let mut writer = Writer::from_path(&device_file).map_err(|e| {
+                anyhow!(
+                    "Failed to create CSV writer for {}: {}",
+                    device_file.display(),
+                    e
+                )
+            })?;
 
-            for (_, stats) in device_data.iter() {
-                writer.write_record([
-                    &stats.circuit,
-                    &stats.link_pubkey.to_string(),
-                    &stats.origin_device.to_string(),
-                    &stats.target_device.to_string(),
-                    &stats.rtt_mean_us.to_string(),
-                    &stats.rtt_median_us.to_string(),
-                    &stats.rtt_min_us.to_string(),
-                    &stats.rtt_max_us.to_string(),
-                    &stats.rtt_p90_us.to_string(),
-                    &stats.rtt_p95_us.to_string(),
-                    &stats.rtt_p99_us.to_string(),
-                    &stats.rtt_stddev_us.to_string(),
-                    &stats.avg_jitter_us.to_string(),
-                    &stats.jitter_ewma_us.to_string(),
-                    &stats.max_jitter_us.to_string(),
-                    &stats.packet_loss.to_string(),
-                    &stats.loss_count.to_string(),
-                    &stats.success_count.to_string(),
-                    &stats.total_samples.to_string(),
-                ])?;
+            // Write to CSV
+            for stats in device_data.values() {
+                writer
+                    .serialize(stats)
+                    .map_err(|e| anyhow!("Failed to write device telemetry record: {}", e))?;
             }
-            writer.flush()?;
+            writer
+                .flush()
+                .map_err(|e| anyhow!("Failed to flush device telemetry CSV: {}", e))?;
             info!("Device telemetry exported to: {}", device_file.display());
         }
 
@@ -327,73 +310,28 @@ pub async fn read_telemetry_aggregates(
                 output_path.clone()
             };
 
-            let mut writer = Writer::from_path(&internet_file)?;
-            // Write headers
-            writer.write_record([
-                "circuit",
-                "origin_exchange_code",
-                "target_exchange_code",
-                "data_provider_name",
-                "oracle_agent_pk",
-                "origin_exchange_pk",
-                "target_exchange_pk",
-                "rtt_mean_us",
-                "rtt_median_us",
-                "rtt_min_us",
-                "rtt_max_us",
-                "rtt_p90_us",
-                "rtt_p95_us",
-                "rtt_p99_us",
-                "rtt_stddev_us",
-                "avg_jitter_us",
-                "jitter_ewma_us",
-                "max_jitter_us",
-                "packet_loss",
-                "loss_count",
-                "success_count",
-                "total_samples",
-            ])?;
+            let mut writer = Writer::from_path(&internet_file).map_err(|e| {
+                anyhow!(
+                    "Failed to create CSV writer for {}: {}",
+                    internet_file.display(),
+                    e
+                )
+            })?;
 
-            for (_, stats) in internet_data.iter() {
-                writer.write_record([
-                    &stats.circuit,
-                    &stats.origin_exchange_code,
-                    &stats.target_exchange_code,
-                    &stats.data_provider_name,
-                    &stats.oracle_agent_pk.to_string(),
-                    &stats.origin_exchange_pk.to_string(),
-                    &stats.target_exchange_pk.to_string(),
-                    &stats.rtt_mean_us.to_string(),
-                    &stats.rtt_median_us.to_string(),
-                    &stats.rtt_min_us.to_string(),
-                    &stats.rtt_max_us.to_string(),
-                    &stats.rtt_p90_us.to_string(),
-                    &stats.rtt_p95_us.to_string(),
-                    &stats.rtt_p99_us.to_string(),
-                    &stats.rtt_stddev_us.to_string(),
-                    &stats.avg_jitter_us.to_string(),
-                    &stats.jitter_ewma_us.to_string(),
-                    &stats.max_jitter_us.to_string(),
-                    &stats.packet_loss.to_string(),
-                    &stats.loss_count.to_string(),
-                    &stats.success_count.to_string(),
-                    &stats.total_samples.to_string(),
-                ])?;
+            // Write to CSV
+            for stats in internet_data.values() {
+                writer
+                    .serialize(stats)
+                    .map_err(|e| anyhow!("Failed to write internet telemetry record: {}", e))?;
             }
-            writer.flush()?;
+            writer
+                .flush()
+                .map_err(|e| anyhow::anyhow!("Failed to flush internet telemetry CSV: {}", e))?;
             info!(
                 "Internet telemetry exported to: {}",
                 internet_file.display()
             );
         }
-    }
-
-    // Validate type parameter
-    if telemetry_type != "device" && telemetry_type != "internet" && telemetry_type != "all" {
-        bail!(
-            "Invalid telemetry type '{}'. Must be 'device', 'internet', or 'all'",
-            telemetry_type
-        );
     }
 
     Ok(())
@@ -413,7 +351,7 @@ pub async fn read_reward_input(
     let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
     let record_key = compute_record_address(payer_pubkey, seeds)?;
 
-    info!("Fetching calculation input from: {}", record_key);
+    debug!("Fetching calculation input from: {}", record_key);
 
     let maybe_account = (|| async {
         fetcher
@@ -492,18 +430,7 @@ pub async fn read_reward_input(
         },
     ];
 
-    println!("Reward Calculation Input Configuration");
-    println!("=========================================");
-    println!(
-        "{}",
-        Table::new(input_data).with(Style::psql().remove_horizontals())
-    );
-
-    // Optionally validate checksums if telemetry data is available
-    info!(
-        "Successfully retrieved calculation input for epoch {}",
-        epoch
-    );
+    println!("{}", Table::new(input_data).with(Style::psql()));
 
     Ok(())
 }
@@ -523,7 +450,7 @@ pub async fn check_contributor_reward(
     let shapley_storage = read_shapley_output(settings, epoch, payer_pubkey).await?;
 
     // Generate proof dynamically
-    info!(
+    debug!(
         "Generating proof dynamically for contributor: {}",
         contributor
     );
@@ -592,15 +519,10 @@ pub async fn check_contributor_reward(
         },
     ];
 
-    println!("Contributor Reward Verification");
-    println!("=========================================");
-    println!(
-        "{}",
-        Table::new(verification_data).with(Style::psql().remove_horizontals())
-    );
+    println!("{}", Table::new(verification_data).with(Style::psql()));
 
     if !verification_result {
-        anyhow::bail!("Merkle proof verification failed");
+        bail!("Merkle proof verification failed");
     }
 
     Ok(())
@@ -649,7 +571,7 @@ pub async fn read_shapley_output(
     let seeds: &[&[u8]] = &[&prefix, &epoch_bytes, b"shapley_output"];
     let storage_key = compute_record_address(payer_pubkey, seeds)?;
 
-    info!("Fetching shapley output from: {}", storage_key);
+    debug!("Fetching shapley output from: {}", storage_key);
 
     let maybe_account = (|| async {
         fetcher
@@ -980,12 +902,7 @@ pub async fn inspect_records(
         });
     }
 
-    println!("Record Accounts for Epoch {epoch}");
-    println!("=========================================");
-    println!(
-        "{}",
-        Table::new(records).with(Style::psql().remove_horizontals())
-    );
+    println!("{}", Table::new(records).with(Style::psql()));
 
     Ok(())
 }

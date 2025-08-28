@@ -113,7 +113,7 @@ impl Orchestrator {
                 // Print per-city table
                 let table = TableBuilder::from(output.clone())
                     .build()
-                    .with(Style::psql().remove_horizontals())
+                    .with(Style::psql())
                     .to_string();
                 info!("Shapley Output for {city}:\n{}", table);
 
@@ -151,10 +151,7 @@ impl Orchestrator {
                 ]);
             }
 
-            let table = table_builder
-                .build()
-                .with(Style::psql().remove_horizontals())
-                .to_string();
+            let table = table_builder.build().with(Style::psql()).to_string();
             info!("Shapley Output:\n{}", table);
 
             // Write shapley output CSV if output directory is specified

@@ -78,9 +78,7 @@ pub struct InternetTelemetryProcessor;
 // Helper function to print stats in table fmt
 pub fn print_internet_stats(map: &InternetTelemetryStatMap) -> String {
     let stats: Vec<InternetTelemetryStats> = map.values().cloned().collect();
-    Table::new(stats)
-        .with(Style::psql().remove_horizontals())
-        .to_string()
+    Table::new(stats).with(Style::psql()).to_string()
 }
 
 impl InternetTelemetryProcessor {

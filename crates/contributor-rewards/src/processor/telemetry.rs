@@ -72,9 +72,7 @@ pub struct DZDTelemetryProcessor;
 // Helper function to print stats in table fmt
 pub fn print_telemetry_stats(map: &DZDTelemetryStatMap) -> String {
     let stats: Vec<DZDTelemetryStats> = map.values().cloned().collect();
-    Table::new(stats)
-        .with(Style::psql().remove_horizontals())
-        .to_string()
+    Table::new(stats).with(Style::psql()).to_string()
 }
 
 impl DZDTelemetryProcessor {
