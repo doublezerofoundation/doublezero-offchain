@@ -836,12 +836,15 @@ pub async fn inspect_records(
         record_type: String,
         #[tabled(rename = "Address")]
         address: String,
-        #[tabled(rename = "Size (bytes)")]
-        size: String,
+        #[tabled(rename = "Data Size (bytes)")]
+        data_size: String,
+        #[tabled(rename = "Header Size (bytes)")]
+        header_size: String,
         #[tabled(rename = "Status")]
         status: String,
     }
 
+    let header_size = size_of::<RecordData>();
     let mut records = Vec::new();
 
     for r_type in record_types {
@@ -882,14 +885,15 @@ pub async fn inspect_records(
         })
         .await?;
 
-        let (size, status) = match maybe_account.value {
-            None => ("0".to_string(), "Not found".to_string()),
+        let (data_size, status) = match maybe_account.value {
+            None => (0, "Not found".to_string()),
             Some(acc) => {
                 let data_size = acc.data.len();
-                if data_size <= size_of::<RecordData>() {
-                    (data_size.to_string(), "Empty (header only)".to_string())
+                let actual_size = data_size - header_size;
+                if actual_size == 0 {
+                    (actual_size, "Empty".to_string())
                 } else {
-                    (data_size.to_string(), "Contains data".to_string())
+                    (actual_size, "Non Empty".to_string())
                 }
             }
         };
@@ -897,7 +901,8 @@ pub async fn inspect_records(
         records.push(RecordInfo {
             record_type: r_type,
             address: record_key.to_string(),
-            size,
+            data_size: data_size.to_string(),
+            header_size: header_size.to_string(),
             status,
         });
     }
