@@ -24,7 +24,8 @@ use solana_sdk::{
     signer::Signer, transaction::Transaction,
 };
 use std::{fmt, mem::size_of, path::PathBuf, str::FromStr, time::Duration};
-use tracing::{info, warn};
+use tabled::{Table, Tabled, settings::Style};
+use tracing::{debug, info, warn};
 
 // Helper functions to get prefixes from config
 fn get_device_telemetry_prefix(settings: &Settings) -> Result<Vec<u8>> {
@@ -104,15 +105,15 @@ impl fmt::Display for WriteSummary {
             writeln!(f, " Failed writes:")?;
             for result in &self.results {
                 if let WriteResult::Failed(desc, error) = result {
-                    writeln!(f, "  ❌ {desc}: {error}")?;
+                    writeln!(f, "  [FAILED] {desc}: {error}")?;
                 }
             }
         }
         writeln!(f, " All writes:")?;
         for result in &self.results {
             match result {
-                WriteResult::Success(desc) => writeln!(f, "  ✅ {desc}")?,
-                WriteResult::Failed(desc, _) => writeln!(f, "  ❌ {desc}")?,
+                WriteResult::Success(desc) => writeln!(f, "  [OK] {desc}")?,
+                WriteResult::Failed(desc, _) => writeln!(f, "  [FAILED] {desc}")?,
             }
         }
 
@@ -142,11 +143,11 @@ pub async fn write_and_track<T: BorshSerialize>(
     .await
     {
         Ok(_) => {
-            info!("✅ Successfully wrote {}", description);
+            info!("[OK] Successfully wrote {}", description);
             summary.add_success(description.to_string());
         }
         Err(e) => {
-            warn!("❌ Failed to write {}: {}", description, e);
+            warn!("[FAILED] Failed to write {}: {}", description, e);
             summary.add_failure(description.to_string(), e.to_string());
         }
     }
@@ -159,12 +160,17 @@ pub async fn read_telemetry_aggregates(
     settings: &Settings,
     epoch: u64,
     payer_pubkey: &Pubkey,
+    telemetry_type: &str,
+    output_csv: Option<PathBuf>,
 ) -> Result<()> {
     // Create fetcher
     let fetcher = Fetcher::from_settings(settings)?;
 
-    // Read device telemetry
-    {
+    let mut device_stats: Option<DZDTelemetryStatMap> = None;
+    let mut internet_stats: Option<InternetTelemetryStatMap> = None;
+
+    // Read device telemetry if requested
+    if telemetry_type == "device" || telemetry_type == "all" {
         let prefix = get_device_telemetry_prefix(settings)?;
         let epoch_bytes = epoch.to_le_bytes();
         let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
@@ -189,7 +195,8 @@ pub async fn read_telemetry_aggregates(
             Some(acc) => {
                 let stats: DZDTelemetryStatMap =
                     borsh::from_slice(&acc.data[size_of::<RecordData>()..])?;
-                info!(
+                device_stats = Some(stats.clone());
+                println!(
                     "Device Telemetry Aggregates:\n{}",
                     print_telemetry_stats(&stats)
                 );
@@ -197,8 +204,8 @@ pub async fn read_telemetry_aggregates(
         }
     }
 
-    // Read internet telemetry
-    {
+    // Read internet telemetry if requested
+    if telemetry_type == "internet" || telemetry_type == "all" {
         let prefix = get_internet_telemetry_prefix(settings)?;
         let epoch_bytes = epoch.to_le_bytes();
         let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
@@ -223,12 +230,170 @@ pub async fn read_telemetry_aggregates(
             Some(acc) => {
                 let stats: InternetTelemetryStatMap =
                     borsh::from_slice(&acc.data[size_of::<RecordData>()..])?;
-                info!(
+                internet_stats = Some(stats.clone());
+                println!(
                     "Internet Telemetry Aggregates:\n{}",
                     print_internet_stats(&stats)
                 );
             }
         }
+    }
+
+    // Export to CSV if requested
+    if let Some(output_path) = output_csv {
+        use csv::Writer;
+
+        // Create parent directories if they don't exist
+        if let Some(parent) = output_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Export device telemetry if available
+        if let Some(device_data) = device_stats {
+            let device_file = if telemetry_type == "all" {
+                output_path.with_file_name(format!(
+                    "{}_device.csv",
+                    output_path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                ))
+            } else {
+                output_path.clone()
+            };
+
+            let mut writer = Writer::from_path(&device_file)?;
+            // Write headers
+            writer.write_record([
+                "circuit",
+                "link_pubkey",
+                "origin_device",
+                "target_device",
+                "rtt_mean_us",
+                "rtt_median_us",
+                "rtt_min_us",
+                "rtt_max_us",
+                "rtt_p90_us",
+                "rtt_p95_us",
+                "rtt_p99_us",
+                "rtt_stddev_us",
+                "avg_jitter_us",
+                "jitter_ewma_us",
+                "max_jitter_us",
+                "packet_loss",
+                "loss_count",
+                "success_count",
+                "total_samples",
+            ])?;
+
+            for (_, stats) in device_data.iter() {
+                writer.write_record([
+                    &stats.circuit,
+                    &stats.link_pubkey.to_string(),
+                    &stats.origin_device.to_string(),
+                    &stats.target_device.to_string(),
+                    &stats.rtt_mean_us.to_string(),
+                    &stats.rtt_median_us.to_string(),
+                    &stats.rtt_min_us.to_string(),
+                    &stats.rtt_max_us.to_string(),
+                    &stats.rtt_p90_us.to_string(),
+                    &stats.rtt_p95_us.to_string(),
+                    &stats.rtt_p99_us.to_string(),
+                    &stats.rtt_stddev_us.to_string(),
+                    &stats.avg_jitter_us.to_string(),
+                    &stats.jitter_ewma_us.to_string(),
+                    &stats.max_jitter_us.to_string(),
+                    &stats.packet_loss.to_string(),
+                    &stats.loss_count.to_string(),
+                    &stats.success_count.to_string(),
+                    &stats.total_samples.to_string(),
+                ])?;
+            }
+            writer.flush()?;
+            info!("Device telemetry exported to: {}", device_file.display());
+        }
+
+        // Export internet telemetry if available
+        if let Some(internet_data) = internet_stats {
+            let internet_file = if telemetry_type == "all" {
+                output_path.with_file_name(format!(
+                    "{}_internet.csv",
+                    output_path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                ))
+            } else {
+                output_path.clone()
+            };
+
+            let mut writer = Writer::from_path(&internet_file)?;
+            // Write headers
+            writer.write_record([
+                "circuit",
+                "origin_exchange_code",
+                "target_exchange_code",
+                "data_provider_name",
+                "oracle_agent_pk",
+                "origin_exchange_pk",
+                "target_exchange_pk",
+                "rtt_mean_us",
+                "rtt_median_us",
+                "rtt_min_us",
+                "rtt_max_us",
+                "rtt_p90_us",
+                "rtt_p95_us",
+                "rtt_p99_us",
+                "rtt_stddev_us",
+                "avg_jitter_us",
+                "jitter_ewma_us",
+                "max_jitter_us",
+                "packet_loss",
+                "loss_count",
+                "success_count",
+                "total_samples",
+            ])?;
+
+            for (_, stats) in internet_data.iter() {
+                writer.write_record([
+                    &stats.circuit,
+                    &stats.origin_exchange_code,
+                    &stats.target_exchange_code,
+                    &stats.data_provider_name,
+                    &stats.oracle_agent_pk.to_string(),
+                    &stats.origin_exchange_pk.to_string(),
+                    &stats.target_exchange_pk.to_string(),
+                    &stats.rtt_mean_us.to_string(),
+                    &stats.rtt_median_us.to_string(),
+                    &stats.rtt_min_us.to_string(),
+                    &stats.rtt_max_us.to_string(),
+                    &stats.rtt_p90_us.to_string(),
+                    &stats.rtt_p95_us.to_string(),
+                    &stats.rtt_p99_us.to_string(),
+                    &stats.rtt_stddev_us.to_string(),
+                    &stats.avg_jitter_us.to_string(),
+                    &stats.jitter_ewma_us.to_string(),
+                    &stats.max_jitter_us.to_string(),
+                    &stats.packet_loss.to_string(),
+                    &stats.loss_count.to_string(),
+                    &stats.success_count.to_string(),
+                    &stats.total_samples.to_string(),
+                ])?;
+            }
+            writer.flush()?;
+            info!(
+                "Internet telemetry exported to: {}",
+                internet_file.display()
+            );
+        }
+    }
+
+    // Validate type parameter
+    if telemetry_type != "device" && telemetry_type != "internet" && telemetry_type != "all" {
+        bail!(
+            "Invalid telemetry type '{}'. Must be 'device', 'internet', or 'all'",
+            telemetry_type
+        );
     }
 
     Ok(())
@@ -274,12 +439,65 @@ pub async fn read_reward_input(
         }
     };
 
-    // Display the configuration
-    println!("=========================================");
+    // Display the configuration using tabled
+
+    #[derive(Tabled)]
+    struct RewardInputDisplay {
+        #[tabled(rename = "Field")]
+        field: String,
+        #[tabled(rename = "Value")]
+        value: String,
+    }
+
+    let input_data = vec![
+        RewardInputDisplay {
+            field: "Epoch".to_string(),
+            value: input_config.epoch.to_string(),
+        },
+        RewardInputDisplay {
+            field: "Timestamp".to_string(),
+            value: input_config.timestamp.to_string(),
+        },
+        RewardInputDisplay {
+            field: "Devices".to_string(),
+            value: input_config.devices.len().to_string(),
+        },
+        RewardInputDisplay {
+            field: "Private Links".to_string(),
+            value: input_config.private_links.len().to_string(),
+        },
+        RewardInputDisplay {
+            field: "Public Links".to_string(),
+            value: input_config.public_links.len().to_string(),
+        },
+        RewardInputDisplay {
+            field: "Demands".to_string(),
+            value: input_config.demands.len().to_string(),
+        },
+        RewardInputDisplay {
+            field: "Cities".to_string(),
+            value: input_config.city_summaries.len().to_string(),
+        },
+        RewardInputDisplay {
+            field: "Operator Uptime".to_string(),
+            value: input_config.shapley_settings.operator_uptime.to_string(),
+        },
+        RewardInputDisplay {
+            field: "Contiguity Bonus".to_string(),
+            value: input_config.shapley_settings.contiguity_bonus.to_string(),
+        },
+        RewardInputDisplay {
+            field: "Demand Multiplier".to_string(),
+            value: input_config.shapley_settings.demand_multiplier.to_string(),
+        },
+    ];
+
     println!("Reward Calculation Input Configuration");
     println!("=========================================");
-    println!("{}", input_config.summary());
-    println!("========================================= ");
+    println!(
+        "{}",
+        Table::new(input_data).with(Style::psql().remove_horizontals())
+    );
 
     // Optionally validate checksums if telemetry data is available
     info!(
@@ -311,7 +529,7 @@ pub async fn check_contributor_reward(
     );
     let (proof, reward, computed_root) =
         generate_proof_from_shapley(&shapley_storage, &contributor_pubkey)?;
-    info!("proof: {:?}", proof);
+    debug!("proof: {:?}", proof);
 
     // POD-based proof verification is handled by comparing roots
     // POD verification - check that the proof is valid by comparing roots
@@ -324,37 +542,66 @@ pub async fn check_contributor_reward(
     .unwrap();
     let verification_result = verification_root == computed_root;
 
-    // Display results
-    println!("=========================================");
-    println!("Contributor Reward Verification");
-    println!("=========================================");
-    println!("Epoch:        {epoch}");
-    println!("Contributor:  {contributor}");
-    println!();
-    println!("Reward Details:");
-    println!("  Pubkey:     {}", reward.contributor_key);
-    println!(
-        "  Proportion: {:.9} ({:.6}%)",
-        reward.unit_share as f64 / 1_000_000_000.0,
-        (reward.unit_share as f64 / 1_000_000_000.0) * 100.0
-    );
-    println!();
-    println!("Merkle Root:  {computed_root:?}");
-    println!("Total Contributors: {}", shapley_storage.rewards.len());
-    println!(
-        "Total Proportions: {} (should be 1,000,000,000)",
-        shapley_storage.total_unit_shares
-    );
-    println!();
-
-    if verification_result {
-        println!("✅ Verification: VALID - Proof verified successfully!");
-    } else {
-        println!("❌ Verification: INVALID - Proof verification failed!");
-        anyhow::bail!("Merkle proof verification failed");
+    #[derive(Tabled)]
+    struct RewardVerification {
+        #[tabled(rename = "Field")]
+        field: String,
+        #[tabled(rename = "Value")]
+        value: String,
     }
 
+    let verification_data = vec![
+        RewardVerification {
+            field: "Epoch".to_string(),
+            value: epoch.to_string(),
+        },
+        RewardVerification {
+            field: "Contributor".to_string(),
+            value: contributor.to_string(),
+        },
+        RewardVerification {
+            field: "Pubkey".to_string(),
+            value: reward.contributor_key.to_string(),
+        },
+        RewardVerification {
+            field: "Unit Share".to_string(),
+            value: format!("{}", reward.unit_share),
+        },
+        RewardVerification {
+            field: "Merkle Root".to_string(),
+            value: format!("{computed_root:?}"),
+        },
+        RewardVerification {
+            field: "Total Contributors".to_string(),
+            value: shapley_storage.rewards.len().to_string(),
+        },
+        RewardVerification {
+            field: "Total Units".to_string(),
+            value: format!(
+                "{} (should be 1,000,000,000)",
+                shapley_storage.total_unit_shares
+            ),
+        },
+        RewardVerification {
+            field: "Verification Status".to_string(),
+            value: if verification_result {
+                "[VALID] Proof verified successfully!".to_string()
+            } else {
+                "[INVALID] Proof verification failed!".to_string()
+            },
+        },
+    ];
+
+    println!("Contributor Reward Verification");
     println!("=========================================");
+    println!(
+        "{}",
+        Table::new(verification_data).with(Style::psql().remove_horizontals())
+    );
+
+    if !verification_result {
+        anyhow::bail!("Merkle proof verification failed");
+    }
 
     Ok(())
 }
@@ -635,6 +882,110 @@ pub async fn close_record(
     } else {
         info!("DRY-RUN mode, would have sent {:#?}", transaction)
     }
+
+    Ok(())
+}
+
+/// Inspect record accounts for a given epoch
+pub async fn inspect_records(
+    settings: &Settings,
+    epoch: u64,
+    payer_pubkey: &Pubkey,
+    record_type: Option<String>,
+) -> Result<()> {
+    let fetcher = Fetcher::from_settings(settings)?;
+    let epoch_bytes = epoch.to_le_bytes();
+
+    // Define all record types to inspect
+    let record_types = if let Some(specific_type) = record_type {
+        vec![specific_type]
+    } else {
+        vec![
+            "device-telemetry".to_string(),
+            "internet-telemetry".to_string(),
+            "reward-input".to_string(),
+            "contributor-rewards".to_string(),
+        ]
+    };
+
+    #[derive(Tabled)]
+    struct RecordInfo {
+        #[tabled(rename = "Type")]
+        record_type: String,
+        #[tabled(rename = "Address")]
+        address: String,
+        #[tabled(rename = "Size (bytes)")]
+        size: String,
+        #[tabled(rename = "Status")]
+        status: String,
+    }
+
+    let mut records = Vec::new();
+
+    for r_type in record_types {
+        let record_key = match r_type.as_str() {
+            "device-telemetry" => {
+                let prefix = get_device_telemetry_prefix(settings)?;
+                let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
+                compute_record_address(payer_pubkey, seeds)?
+            }
+            "internet-telemetry" => {
+                let prefix = get_internet_telemetry_prefix(settings)?;
+                let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
+                compute_record_address(payer_pubkey, seeds)?
+            }
+            "reward-input" => {
+                let prefix = get_reward_input_prefix(settings)?;
+                let seeds: &[&[u8]] = &[&prefix, &epoch_bytes];
+                compute_record_address(payer_pubkey, seeds)?
+            }
+            "contributor-rewards" => {
+                let prefix = get_contributor_rewards_prefix(settings)?;
+                let seeds: &[&[u8]] = &[&prefix, &epoch_bytes, b"shapley_output"];
+                compute_record_address(payer_pubkey, seeds)?
+            }
+            _ => bail!("Unknown record type: {}", r_type),
+        };
+
+        // Try to fetch the account
+        let maybe_account = (|| async {
+            fetcher
+                .rpc_client
+                .get_account_with_commitment(&record_key, CommitmentConfig::confirmed())
+                .await
+        })
+        .retry(&ExponentialBuilder::default().with_jitter())
+        .notify(|err: &SolanaClientError, dur: Duration| {
+            info!("retrying error: {:?} with sleeping {:?}", err, dur)
+        })
+        .await?;
+
+        let (size, status) = match maybe_account.value {
+            None => ("0".to_string(), "Not found".to_string()),
+            Some(acc) => {
+                let data_size = acc.data.len();
+                if data_size <= size_of::<RecordData>() {
+                    (data_size.to_string(), "Empty (header only)".to_string())
+                } else {
+                    (data_size.to_string(), "Contains data".to_string())
+                }
+            }
+        };
+
+        records.push(RecordInfo {
+            record_type: r_type,
+            address: record_key.to_string(),
+            size,
+            status,
+        });
+    }
+
+    println!("Record Accounts for Epoch {epoch}");
+    println!("=========================================");
+    println!(
+        "{}",
+        Table::new(records).with(Style::psql().remove_horizontals())
+    );
 
     Ok(())
 }
