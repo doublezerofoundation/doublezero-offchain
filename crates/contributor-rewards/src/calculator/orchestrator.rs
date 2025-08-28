@@ -322,7 +322,7 @@ impl Orchestrator {
 
     pub async fn check_contributor_reward(
         &self,
-        contributor: &str,
+        contributor: &Pubkey,
         epoch: u64,
         payer_pubkey: &Pubkey,
     ) -> Result<()> {

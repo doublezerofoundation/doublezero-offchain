@@ -23,7 +23,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, message::Message, pubkey::Pubkey, signature::Keypair,
     signer::Signer, transaction::Transaction,
 };
-use std::{fmt, fs, mem::size_of, path::PathBuf, str::FromStr, time::Duration};
+use std::{fmt, fs, mem::size_of, path::PathBuf, time::Duration};
 use tabled::{Table, Tabled, settings::Style};
 use tracing::{debug, info, warn};
 
@@ -441,24 +441,20 @@ pub async fn read_reward_input(
 /// Check contributor reward and verify merkle proof dynamically
 pub async fn check_contributor_reward(
     settings: &Settings,
-    contributor: &str,
+    contributor_pubkey: &Pubkey,
     epoch: u64,
     payer_pubkey: &Pubkey,
 ) -> Result<()> {
-    // Parse contributor as a Pubkey
-    let contributor_pubkey = Pubkey::from_str(contributor)
-        .map_err(|e| anyhow!("Invalid contributor pubkey '{}': {}", contributor, e))?;
-
     // Fetch the shapley output storage
     let shapley_storage = read_shapley_output(settings, epoch, payer_pubkey).await?;
 
     // Generate proof dynamically
     debug!(
         "Generating proof dynamically for contributor: {}",
-        contributor
+        contributor_pubkey
     );
     let (proof, reward, computed_root) =
-        generate_proof_from_shapley(&shapley_storage, &contributor_pubkey)?;
+        generate_proof_from_shapley(&shapley_storage, contributor_pubkey)?;
     debug!("proof: {:?}", proof);
 
     // POD-based proof verification is handled by comparing roots
@@ -486,11 +482,7 @@ pub async fn check_contributor_reward(
             value: epoch.to_string(),
         },
         RewardVerification {
-            field: "Contributor".to_string(),
-            value: contributor.to_string(),
-        },
-        RewardVerification {
-            field: "Pubkey".to_string(),
+            field: "Contributor Pubkey".to_string(),
             value: reward.contributor_key.to_string(),
         },
         RewardVerification {

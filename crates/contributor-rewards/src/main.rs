@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use contributor_rewards::{calculator::orchestrator::Orchestrator, settings::Settings};
 use solana_sdk::pubkey::Pubkey;
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -51,7 +51,7 @@ pub enum Commands {
 
         /// Payer's public key (e.g., DZF's public key) used for address derivation. Required.
         #[arg(short = 'p', long)]
-        payer_pubkey: String,
+        payer_pubkey: Pubkey,
 
         /// Type of telemetry to read (choose between: device, internet, or all). Optional. Default to all.
         #[arg(short = 't', long, default_value = "all")]
@@ -65,7 +65,7 @@ pub enum Commands {
     CheckReward {
         /// Contributor public key (base58 string). Required.
         #[arg(short, long)]
-        contributor: String,
+        contributor: Pubkey,
 
         /// DZ Epoch (e.g. 79). Required.
         #[arg(short, long)]
@@ -73,7 +73,7 @@ pub enum Commands {
 
         /// Payer's public key (e.g., DZF's public key) used for address derivation (base58 string). Required.
         #[arg(short = 'p', long)]
-        payer_pubkey: String,
+        payer_pubkey: Pubkey,
     },
     /// Read reward input configuration from the ledger
     ReadRewardInput {
@@ -83,7 +83,7 @@ pub enum Commands {
 
         /// Payer's public key (e.g., DZF's public key) used for address derivation (base58 string). Required.
         #[arg(short = 'p', long)]
-        payer_pubkey: String,
+        payer_pubkey: Pubkey,
     },
     /// Realloc a record account
     ReallocRecord {
@@ -151,7 +151,7 @@ pub enum Commands {
 
         /// Payer's public key (e.g., DZF's public key) used for address derivation (base58 string). Required.
         #[arg(short = 'p', long)]
-        payer_pubkey: String,
+        payer_pubkey: Pubkey,
 
         /// Type of record to inspect (optional, shows all if not specified). Optional.
         #[arg(short = 't', long)]
@@ -178,9 +178,8 @@ impl Cli {
                 r#type,
                 output_csv,
             } => {
-                let pubkey = Pubkey::from_str(&payer_pubkey)?;
                 orchestrator
-                    .read_telemetry_aggregates(epoch, &pubkey, &r#type, output_csv)
+                    .read_telemetry_aggregates(epoch, &payer_pubkey, &r#type, output_csv)
                     .await
             }
             Commands::CheckReward {
@@ -188,18 +187,14 @@ impl Cli {
                 epoch,
                 payer_pubkey,
             } => {
-                let pubkey = Pubkey::from_str(&payer_pubkey)?;
                 orchestrator
-                    .check_contributor_reward(&contributor, epoch, &pubkey)
+                    .check_contributor_reward(&contributor, epoch, &payer_pubkey)
                     .await
             }
             Commands::ReadRewardInput {
                 epoch,
                 payer_pubkey,
-            } => {
-                let pubkey = Pubkey::from_str(&payer_pubkey)?;
-                orchestrator.read_reward_input(epoch, &pubkey).await
-            }
+            } => orchestrator.read_reward_input(epoch, &payer_pubkey).await,
             Commands::CalculateRewards {
                 epoch,
                 output_dir,
@@ -246,8 +241,9 @@ impl Cli {
                 payer_pubkey,
                 r#type,
             } => {
-                let pubkey = Pubkey::from_str(&payer_pubkey)?;
-                orchestrator.inspect_records(epoch, &pubkey, r#type).await
+                orchestrator
+                    .inspect_records(epoch, &payer_pubkey, r#type)
+                    .await
             }
         }
     }
