@@ -33,32 +33,31 @@ impl PreparedData {
             Some(epoch_num) => fetcher.with_epoch(epoch_num).await?,
         };
 
-        // Calculate expected internet telemetry links
-        let expected_inet_samples = expected_inet_links(&fetch_data);
+        if fetcher.settings.inet_lookback.enable_accumulator {
+            // Calculate expected internet telemetry links
+            let expected_inet_samples = expected_inet_links(&fetch_data);
+            let (inet_epoch, internet_data) = internet::fetch_with_accumulator(
+                &fetcher.rpc_client,
+                &fetcher.settings,
+                fetch_epoch,
+                expected_inet_samples,
+            )
+            .await?;
 
-        // Fetch internet data with threshold checking
-        // NOTE: May return historical telem data, but mappings use current serviceability
-        let (inet_epoch, internet_data) = internet::fetch_with_threshold(
-            &fetcher.rpc_client,
-            &fetcher.settings,
-            fetch_epoch,
-            expected_inet_samples,
-        )
-        .await?;
+            if inet_epoch != fetch_epoch {
+                warn!(
+                    "Using historical internet telemetry from epoch {} (target was {})",
+                    inet_epoch, fetch_epoch
+                );
+                info!(
+                    "Using serviceability mapping from current epoch {} with telemetry data from epoch {}",
+                    fetch_epoch, inet_epoch
+                );
+            }
 
-        if inet_epoch != fetch_epoch {
-            warn!(
-                "Using historical internet telemetry from epoch {} (target was {})",
-                inet_epoch, fetch_epoch
-            );
-            info!(
-                "Using serviceability mapping from current epoch {} with telemetry data from epoch {}",
-                fetch_epoch, inet_epoch
-            );
-        }
-
-        // Update fetch_data with the potentially historical internet data
-        fetch_data.dz_internet = internet_data;
+            // Update fetch_data with the potentially historical internet data
+            fetch_data.dz_internet = internet_data;
+        };
 
         // Process device telemetry
         let device_telemetry = process_device_telemetry(&fetch_data)?;
