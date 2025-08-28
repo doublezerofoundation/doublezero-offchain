@@ -50,7 +50,7 @@ pub fn print_devices(devices: &[Device]) -> String {
 
     TableBuilder::from(printable)
         .build()
-        .with(Style::psql())
+        .with(Style::psql().remove_horizontals())
         .to_string()
 }
 
@@ -72,7 +72,7 @@ pub fn print_public_links(public_links: &[PublicLink]) -> String {
 
     TableBuilder::from(printable)
         .build()
-        .with(Style::psql())
+        .with(Style::psql().remove_horizontals())
         .to_string()
 }
 
@@ -100,7 +100,7 @@ pub fn print_private_links(private_links: &[PrivateLink]) -> String {
 
     TableBuilder::from(printable)
         .build()
-        .with(Style::psql())
+        .with(Style::psql().remove_horizontals())
         .to_string()
 }
 
@@ -130,6 +130,6 @@ pub fn print_demands(demands: &[Demand], k: usize) -> String {
 
     TableBuilder::from(printable)
         .build()
-        .with(Style::psql())
+        .with(Style::psql().remove_horizontals())
         .to_string()
 }

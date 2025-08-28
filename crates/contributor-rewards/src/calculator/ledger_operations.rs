@@ -430,7 +430,10 @@ pub async fn read_reward_input(
         },
     ];
 
-    println!("{}", Table::new(input_data).with(Style::psql()));
+    println!(
+        "{}",
+        Table::new(input_data).with(Style::psql().remove_horizontals())
+    );
 
     Ok(())
 }
@@ -519,7 +522,10 @@ pub async fn check_contributor_reward(
         },
     ];
 
-    println!("{}", Table::new(verification_data).with(Style::psql()));
+    println!(
+        "{}",
+        Table::new(verification_data).with(Style::psql().remove_horizontals())
+    );
 
     if !verification_result {
         bail!("Merkle proof verification failed");
@@ -907,7 +913,10 @@ pub async fn inspect_records(
         });
     }
 
-    println!("{}", Table::new(records).with(Style::psql()));
+    println!(
+        "{}",
+        Table::new(records).with(Style::psql().remove_horizontals())
+    );
 
     Ok(())
 }
