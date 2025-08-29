@@ -47,10 +47,10 @@ pub struct ShapleySettings {
 pub struct RpcSettings {
     /// DoubleZero ledger RPC URL
     pub dz_url: String,
-    /// Solana mainnet RPC endpoint
-    pub solana_mainnet_url: String,
-    /// Solana testnet RPC endpoint (for development/testing)
-    pub solana_testnet_url: String,
+    /// Solana read RPC endpoint (for reading chain data like leader schedules)
+    pub solana_read_url: String,
+    /// Solana write RPC endpoint (for writing rewards and merkle roots)
+    pub solana_write_url: String,
     /// Transaction commitment level ("confirmed", "finalized", etc.)
     pub commitment: String,
     /// Rate limit for RPC requests per second
@@ -173,8 +173,8 @@ impl fmt::Display for Settings {
              \tNetwork: {:?}\n\
              \tLog Level: {}\n\
              \tDZ RPC URL: {}\n\
-             \tSolana Mainnet RPC URL: {}\n\
-             \tSolana Testnet RPC URL: {}\n\
+             \tSolana Read RPC URL: {}\n\
+             \tSolana Write RPC URL: {}\n\
              \tRPS Limit: {}\n\
              \tShapley Operator Uptime: {}\n\
              \tShapley Contiguity Bonus: {}\n\
@@ -183,8 +183,8 @@ impl fmt::Display for Settings {
             self.network,
             self.log_level,
             self.rpc.dz_url,
-            self.rpc.solana_mainnet_url,
-            self.rpc.solana_testnet_url,
+            self.rpc.solana_read_url,
+            self.rpc.solana_write_url,
             self.rpc.rps_limit,
             self.shapley.operator_uptime,
             self.shapley.contiguity_bonus,
