@@ -1,9 +1,9 @@
 use crate::ingestor::{epoch::EpochFinder, fetcher::Fetcher, types::FetchData};
 use anyhow::{Result, anyhow, bail};
-use doublezero_serviceability::state::user::User as DZUser;
+use doublezero_serviceability::state::{accesspass::AccessPassType, user::User as DZUser};
 use network_shapley::types::{Demand, Demands};
 use rayon::prelude::*;
-use solana_sdk::system_program::ID as SystemProgramID;
+use solana_sdk::{pubkey::Pubkey, system_program::ID as SystemProgramID};
 use std::collections::BTreeMap;
 use tracing::info;
 
@@ -87,14 +87,28 @@ pub fn build_with_schedule(
     leader_schedule: BTreeMap<String, usize>,
 ) -> Result<DemandBuildOutput> {
     // Build validator to user mapping
+
+    let client_to_validator: BTreeMap<Pubkey, Pubkey> = fetch_data
+        .dz_serviceability
+        .access_passes
+        .iter()
+        .filter_map(|(_access_pass_pk, access_pass)| {
+            if let AccessPassType::SolanaValidator(validator_pk) = access_pass.accesspass_type {
+                Some((access_pass.user_payer, validator_pk))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     let validator_to_user: BTreeMap<String, &DZUser> = fetch_data
         .dz_serviceability
         .users
         .par_iter()
         .filter_map(|(_user_pk, user)| {
+            let validator_pk = client_to_validator.get(&user.owner).unwrap_or(&user.owner);
             // Ensure that validator is not the system program
-            (user.validator_pubkey != SystemProgramID)
-                .then_some((user.validator_pubkey.to_string(), user))
+            (*validator_pk != SystemProgramID).then_some((validator_pk.to_string(), user))
         })
         .collect();
 

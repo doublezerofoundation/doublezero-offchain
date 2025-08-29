@@ -4,7 +4,10 @@ use contributor_rewards::ingestor::{
     types::{DZServiceabilityData, FetchData},
 };
 use doublezero_serviceability::state::{
-    device::Device as DZDevice, location::Location as DZLocation, user::User as DZUser,
+    accesspass::{AccessPass as DZAccessPass, AccessPassStatus, AccessPassType},
+    device::Device as DZDevice,
+    location::Location as DZLocation,
+    user::User as DZUser,
 };
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
@@ -118,7 +121,6 @@ fn convert_to_fetch_data(test_data: &TestData) -> Result<FetchData> {
     // Convert users
     for (pk_str, test_user) in test_data.users.iter() {
         let pk = Pubkey::from_str(pk_str)?;
-        let validator_pubkey = Pubkey::from_str(&test_user.validator_pubkey)?;
         let device_pk = Pubkey::from_str(&test_user.device_pk)?;
 
         // minimal User struct
@@ -138,10 +140,30 @@ fn convert_to_fetch_data(test_data: &TestData) -> Result<FetchData> {
             status: doublezero_serviceability::state::user::UserStatus::Activated,
             publishers: vec![],
             subscribers: vec![],
-            validator_pubkey,
         };
 
         users.insert(pk, user);
+    }
+
+    // Convert access passes
+    let mut access_passes = BTreeMap::new();
+    for (pk_str, test_user) in test_data.users.iter() {
+        let pk = Pubkey::from_str(pk_str)?;
+        let validator_pubkey = Pubkey::from_str(&test_user.validator_pubkey)?;
+
+        // minimal AccessPass struct
+        let access_pass = DZAccessPass {
+            account_type: doublezero_serviceability::state::accounttype::AccountType::AccessPass,
+            owner: Pubkey::default(),
+            bump_seed: 0,
+            accesspass_type: AccessPassType::SolanaValidator(validator_pubkey),
+            client_ip: std::net::Ipv4Addr::new(0, 0, 0, 0),
+            user_payer: pk,
+            last_access_epoch: 0,
+            connection_count: 0,
+            status: AccessPassStatus::Connected,
+        };
+        access_passes.insert(pk, access_pass);
     }
 
     let serviceability_data = DZServiceabilityData {
@@ -152,6 +174,7 @@ fn convert_to_fetch_data(test_data: &TestData) -> Result<FetchData> {
         users,
         multicast_groups: BTreeMap::new(),
         contributors: BTreeMap::new(),
+        access_passes,
     };
 
     Ok(FetchData {
