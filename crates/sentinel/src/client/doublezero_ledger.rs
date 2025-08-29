@@ -45,7 +45,7 @@ impl DzRpcClient {
         let (globalstate_pk, _) = get_globalstate_pda(&self.serviceability_id);
         let (pass_pk, _) = get_accesspass_pda(&self.serviceability_id, client_ip, service_key);
         let args = DoubleZeroInstruction::SetAccessPass(SetAccessPassArgs {
-            accesspass_type: AccessPassType::SolanaValidator,
+            accesspass_type: AccessPassType::SolanaValidator(*service_key),
             client_ip: *client_ip,
             last_access_epoch: u64::MAX,
         });
