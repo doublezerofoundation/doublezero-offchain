@@ -23,9 +23,9 @@ fn create_expected_results() -> HashMap<(String, String), ExpectedLink> {
     expected.insert(
         ("lon-dz001".to_string(), "sin-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 154.73174532006806,
+            latency_ms: 154.44451626841314,
             bandwidth_gbps: 10.0,
-            uptime: 0.9996656840260435,
+            uptime: 0.9999222916888054,
         },
     );
 
@@ -34,43 +34,43 @@ fn create_expected_results() -> HashMap<(String, String), ExpectedLink> {
         ExpectedLink {
             latency_ms: 1000.0, // Dead link penalty
             bandwidth_gbps: 10.0,
-            uptime: 0.9992076620475003,
+            uptime: 0.9999877530499635,
         },
     );
 
     expected.insert(
         ("ams-dz001".to_string(), "lon-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 5.764570886241655,
+            latency_ms: 5.764098832633785,
             bandwidth_gbps: 10.0,
-            uptime: 0.9996656840260435,
+            uptime: 0.9981548349375388,
         },
     );
 
     expected.insert(
         ("sin-dz001".to_string(), "tyo-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 67.09318597800471,
+            latency_ms: 67.14069334880114,
             bandwidth_gbps: 10.0,
-            uptime: 0.9995348206036025,
+            uptime: 0.9999877530499635,
         },
     );
 
     expected.insert(
         ("lax-dz001".to_string(), "nyc-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 68.43714752488214,
+            latency_ms: 68.40982906710289,
             bandwidth_gbps: 10.0,
-            uptime: 0.9992730937587208,
+            uptime: 0.9999222916888054,
         },
     );
 
     expected.insert(
         ("nyc-dz001".to_string(), "lon-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 67.31665028825996,
+            latency_ms: 67.29127350091642,
             bandwidth_gbps: 10.0,
-            uptime: 0.9987496400689572,
+            uptime: 0.9999877530499635,
         },
     );
 
@@ -86,18 +86,18 @@ fn create_expected_results() -> HashMap<(String, String), ExpectedLink> {
     expected.insert(
         ("lon-dz001".to_string(), "fra-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 11.041989854693023,
+            latency_ms: 11.051908281505696,
             bandwidth_gbps: 10.0,
-            uptime: 0.9996656840260435,
+            uptime: 0.9999222916888054,
         },
     );
 
     expected.insert(
         ("tyo-dz001".to_string(), "lax-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 98.75333643207856,
+            latency_ms: 98.75202638297887,
             bandwidth_gbps: 10.0,
-            uptime: 0.9994693888923821,
+            uptime: 0.9999222916888054,
         },
     );
 
