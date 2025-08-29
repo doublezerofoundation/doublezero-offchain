@@ -6,6 +6,7 @@
 # Secrets
 .env
 .envrc
+config.toml
 
 # Local configuration
 config/local.toml
