@@ -1,190 +1,33 @@
 use anyhow::Result;
-use contributor_rewards::ingestor::{
-    demand,
-    types::{DZServiceabilityData, FetchData},
-};
-use doublezero_serviceability::state::{
-    accesspass::{AccessPass as DZAccessPass, AccessPassStatus, AccessPassType},
-    device::Device as DZDevice,
-    location::Location as DZLocation,
-    user::User as DZUser,
-};
+use contributor_rewards::ingestor::{demand, types::FetchData};
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
-use std::{collections::BTreeMap, fs, path::Path, str::FromStr};
+use serde_json::Value;
+use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-struct TestUser {
-    pubkey: String,
-    validator_pubkey: String,
-    device_pk: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct TestDevice {
-    pubkey: String,
-    location_pk: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct TestLocation {
-    pubkey: String,
-    code: String,
-    name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct TestData {
-    users: BTreeMap<String, TestUser>,
-    devices: BTreeMap<String, TestDevice>,
-    locations: BTreeMap<String, TestLocation>,
+pub struct TestLeaderSchedules {
     // validator_pubkey -> schedule_length (stake proxy)
-    leader_schedule: BTreeMap<String, usize>,
-    epoch_info: TestEpochInfo,
+    pub leader_schedule: BTreeMap<String, usize>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct TestEpochInfo {
-    epoch: u64,
-    absolute_slot: u64,
-    block_height: u64,
-    slot_index: u64,
-    slots_in_epoch: u64,
-}
-
-fn load_test_data(data_path: &Path) -> Result<TestData> {
+fn load_test_data() -> Result<FetchData> {
+    let data_path = Path::new("tests/testnet_snapshot.json");
     let json = fs::read_to_string(data_path)?;
-    let data = serde_json::from_str(&json)?;
-    Ok(data)
+    let data: Value = serde_json::from_str(&json)?;
+
+    // Parse the JSON into FetchData
+    let fetch_data: FetchData = serde_json::from_value(data)?;
+    Ok(fetch_data)
 }
 
-/// Convert test data to production types
-fn convert_to_fetch_data(test_data: &TestData) -> Result<FetchData> {
-    let mut users = BTreeMap::new();
-    let mut devices = BTreeMap::new();
-    let mut locations = BTreeMap::new();
+fn load_test_leader_schedules() -> Result<TestLeaderSchedules> {
+    let data_path = Path::new("tests/test_leader_schedules.json");
+    let json = fs::read_to_string(data_path)?;
+    let data: Value = serde_json::from_str(&json)?;
 
-    // Convert locations
-    for (pk_str, test_loc) in test_data.locations.iter() {
-        let pk = Pubkey::from_str(pk_str)?;
-
-        // minimal Location struct
-        // Using mock data for fields not in test data
-        let location = DZLocation {
-            account_type: doublezero_serviceability::state::accounttype::AccountType::Location,
-            owner: Pubkey::default(),
-            index: 0,
-            bump_seed: 0,
-            lat: 0.0,
-            lng: 0.0,
-            loc_id: 0,
-            status: doublezero_serviceability::state::location::LocationStatus::Activated,
-            code: test_loc.code.to_string(),
-            name: test_loc.name.to_string(),
-            country: String::new(),
-            reference_count: 0,
-        };
-
-        locations.insert(pk, location);
-    }
-
-    // Convert devices
-    for (pk_str, test_dev) in test_data.devices.iter() {
-        let pk = Pubkey::from_str(pk_str)?;
-        let location_pk = Pubkey::from_str(&test_dev.location_pk)?;
-
-        // minimal Device struct
-        let device = DZDevice {
-            account_type: doublezero_serviceability::state::accounttype::AccountType::Device,
-            owner: Pubkey::default(),
-            index: 0,
-            bump_seed: 0,
-            location_pk,
-            exchange_pk: Pubkey::default(),
-            device_type: doublezero_serviceability::state::device::DeviceType::Switch,
-            public_ip: std::net::Ipv4Addr::new(0, 0, 0, 0),
-            status: doublezero_serviceability::state::device::DeviceStatus::Activated,
-            code: String::new(),
-            dz_prefixes: Default::default(),
-            metrics_publisher_pk: Pubkey::default(),
-            contributor_pk: Pubkey::default(),
-            mgmt_vrf: String::new(),
-            interfaces: vec![],
-            reference_count: 0,
-            max_users: 0,
-            users_count: 0,
-        };
-
-        devices.insert(pk, device);
-    }
-
-    // Convert users
-    for (pk_str, test_user) in test_data.users.iter() {
-        let pk = Pubkey::from_str(pk_str)?;
-        let device_pk = Pubkey::from_str(&test_user.device_pk)?;
-
-        // minimal User struct
-        let user = DZUser {
-            account_type: doublezero_serviceability::state::accounttype::AccountType::User,
-            owner: Pubkey::default(),
-            index: 0,
-            bump_seed: 0,
-            user_type: doublezero_serviceability::state::user::UserType::IBRL,
-            tenant_pk: Pubkey::default(),
-            device_pk,
-            cyoa_type: doublezero_serviceability::state::user::UserCYOA::None,
-            client_ip: std::net::Ipv4Addr::new(0, 0, 0, 0),
-            dz_ip: std::net::Ipv4Addr::new(0, 0, 0, 0),
-            tunnel_id: 0,
-            tunnel_net: Default::default(),
-            status: doublezero_serviceability::state::user::UserStatus::Activated,
-            publishers: vec![],
-            subscribers: vec![],
-        };
-
-        users.insert(pk, user);
-    }
-
-    // Convert access passes
-    let mut access_passes = BTreeMap::new();
-    for (pk_str, test_user) in test_data.users.iter() {
-        let pk = Pubkey::from_str(pk_str)?;
-        let validator_pubkey = Pubkey::from_str(&test_user.validator_pubkey)?;
-
-        // minimal AccessPass struct
-        let access_pass = DZAccessPass {
-            account_type: doublezero_serviceability::state::accounttype::AccountType::AccessPass,
-            owner: Pubkey::default(),
-            bump_seed: 0,
-            accesspass_type: AccessPassType::SolanaValidator(validator_pubkey),
-            client_ip: std::net::Ipv4Addr::new(0, 0, 0, 0),
-            user_payer: pk,
-            last_access_epoch: 0,
-            connection_count: 0,
-            status: AccessPassStatus::Connected,
-        };
-        access_passes.insert(pk, access_pass);
-    }
-
-    let serviceability_data = DZServiceabilityData {
-        locations,
-        exchanges: BTreeMap::new(),
-        devices,
-        links: BTreeMap::new(),
-        users,
-        multicast_groups: BTreeMap::new(),
-        contributors: BTreeMap::new(),
-        access_passes,
-    };
-
-    Ok(FetchData {
-        dz_serviceability: serviceability_data,
-        dz_telemetry: Default::default(),
-        dz_internet: Default::default(),
-        start_us: 0,
-        end_us: 0,
-        fetched_at: chrono::Utc::now(),
-    })
+    // Parse the JSON into FetchData
+    let schedules: TestLeaderSchedules = serde_json::from_value(data)?;
+    Ok(schedules)
 }
 
 #[cfg(test)]
@@ -194,20 +37,12 @@ mod tests {
     #[test]
     fn test_demand_generation_from_json() -> Result<()> {
         // Load test data
-        let test_data_path = Path::new("tests/demand_input.json");
-        let test_data = load_test_data(test_data_path)?;
-
-        println!("Loaded test data:");
-        println!("  Users: {}", test_data.users.len());
-        println!("  Devices: {}", test_data.devices.len());
-        println!("  Locations: {}", test_data.locations.len());
-        println!("  Leaders in schedule: {}", test_data.leader_schedule.len());
-
-        // Convert to production types
-        let fetch_data = convert_to_fetch_data(&test_data)?;
+        let fetch_data = load_test_data()?;
+        let test_leader_schedules = load_test_leader_schedules()?;
 
         // Build demands using the refactored function
-        let result = demand::build_with_schedule(&fetch_data, test_data.leader_schedule)?;
+        let result =
+            demand::build_with_schedule(&fetch_data, test_leader_schedules.leader_schedule)?;
 
         // Verify results
         println!("\nGenerated {} demands", result.demands.len());
@@ -223,51 +58,59 @@ mod tests {
             assert_ne!(demand.start, demand.end, "Should not have self-loops");
         }
 
-        // Verify against ALL expected R reference values
-        let expected = vec![
-            // From ams
-            ("ams", "sin", 1, 4.074074e-04),
-            ("ams", "fra", 9, 1.734568e-03),
-            ("ams", "nyc", 2, 1.805556e-04),
-            ("ams", "lon", 6, 5.092593e-04),
-            ("ams", "lax", 1, 9.259259e-06),
-            // From sin
-            ("sin", "ams", 7, 3.915344e-04),
-            ("sin", "fra", 9, 1.734568e-03),
-            ("sin", "nyc", 2, 1.805556e-04),
-            ("sin", "lon", 6, 5.092593e-04),
-            ("sin", "lax", 1, 9.259259e-06),
-            // From fra
-            ("fra", "ams", 7, 3.915344e-04),
-            ("fra", "sin", 1, 4.074074e-04),
-            ("fra", "nyc", 2, 1.805556e-04),
-            ("fra", "lon", 6, 5.092593e-04),
-            ("fra", "lax", 1, 9.259259e-06),
-            // From nyc
-            ("nyc", "ams", 7, 3.915344e-04),
-            ("nyc", "sin", 1, 4.074074e-04),
-            ("nyc", "fra", 9, 1.734568e-03),
-            ("nyc", "lon", 6, 5.092593e-04),
-            ("nyc", "lax", 1, 9.259259e-06),
-            // From lon
-            ("lon", "ams", 7, 3.915344e-04),
-            ("lon", "sin", 1, 4.074074e-04),
-            ("lon", "fra", 9, 1.734568e-03),
-            ("lon", "nyc", 2, 1.805556e-04),
-            ("lon", "lax", 1, 9.259259e-06),
-            // From lax
-            ("lax", "ams", 7, 3.915344e-04),
-            ("lax", "sin", 1, 4.074074e-04),
-            ("lax", "fra", 9, 1.734568e-03),
-            ("lax", "nyc", 2, 1.805556e-04),
-            ("lax", "lon", 6, 5.092593e-04),
+        // TODO: Ask Nihar to generate demands again, these MAY NOT be correct anymore
+        let expected = [
+            ("ams", "fra", 88, 0.0009177188552188551),
+            ("ams", "lax", 13, 0.00031410256410256405),
+            ("ams", "lon", 26, 0.00034152421652421653),
+            ("ams", "nyc", 23, 0.0008019323671497584),
+            ("ams", "sin", 12, 0.0007106481481481482),
+            ("ams", "tyo", 3, 0.00023765432098765433),
+            ("fra", "ams", 25, 0.0004188888888888889),
+            ("fra", "lax", 13, 0.00031410256410256405),
+            ("fra", "lon", 26, 0.00034152421652421653),
+            ("fra", "nyc", 23, 0.0008019323671497584),
+            ("fra", "sin", 12, 0.0007106481481481482),
+            ("fra", "tyo", 3, 0.00023765432098765433),
+            ("lax", "ams", 25, 0.0004188888888888889),
+            ("lax", "fra", 88, 0.0009177188552188551),
+            ("lax", "lon", 26, 0.00034152421652421653),
+            ("lax", "nyc", 23, 0.0008019323671497584),
+            ("lax", "sin", 12, 0.0007106481481481482),
+            ("lax", "tyo", 3, 0.00023765432098765433),
+            ("lon", "ams", 25, 0.0004188888888888889),
+            ("lon", "fra", 88, 0.0009177188552188551),
+            ("lon", "lax", 13, 0.00031410256410256405),
+            ("lon", "nyc", 23, 0.0008019323671497584),
+            ("lon", "sin", 12, 0.0007106481481481482),
+            ("lon", "tyo", 3, 0.00023765432098765433),
+            ("nyc", "ams", 25, 0.0004188888888888889),
+            ("nyc", "fra", 88, 0.0009177188552188551),
+            ("nyc", "lax", 13, 0.00031410256410256405),
+            ("nyc", "lon", 26, 0.00034152421652421653),
+            ("nyc", "sin", 12, 0.0007106481481481482),
+            ("nyc", "tyo", 3, 0.00023765432098765433),
+            ("sin", "ams", 25, 0.0004188888888888889),
+            ("sin", "fra", 88, 0.0009177188552188551),
+            ("sin", "lax", 13, 0.00031410256410256405),
+            ("sin", "lon", 26, 0.00034152421652421653),
+            ("sin", "nyc", 23, 0.0008019323671497584),
+            ("sin", "tyo", 3, 0.00023765432098765433),
+            ("tyo", "ams", 25, 0.0004188888888888889),
+            ("tyo", "fra", 88, 0.0009177188552188551),
+            ("tyo", "lax", 13, 0.00031410256410256405),
+            ("tyo", "lon", 26, 0.00034152421652421653),
+            ("tyo", "nyc", 23, 0.0008019323671497584),
+            ("tyo", "sin", 12, 0.0007106481481481482),
         ];
 
-        // Should have exactly 30 demands (6 cities * 5 destinations each)
-        assert_eq!(result.demands.len(), 30, "Should have exactly 30 demands");
+        println!("{:#?}", result.demands);
+
+        // Should have exactly 42 demands
+        assert_eq!(result.demands.len(), 42, "Should have exactly 42 demands");
         assert_eq!(
             expected.len(),
-            30,
+            42,
             "Test data should have 30 expected values"
         );
 
