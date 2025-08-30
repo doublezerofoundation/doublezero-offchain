@@ -33,6 +33,10 @@ impl Orchestrator {
         }
     }
 
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
     pub async fn calculate_rewards(
         &self,
         epoch: Option<u64>,
