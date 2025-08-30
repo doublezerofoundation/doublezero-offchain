@@ -51,6 +51,11 @@ pub enum Commands {
     Rewards(RewardsCommands),
     #[command(flatten)]
     Shapley(ShapleyCommands),
+    /// Export raw chain data snapshots for debugging and analysis
+    Snapshot {
+        #[command(subcommand)]
+        cmd: cli::snapshot::SnapshotCommands,
+    },
 }
 
 impl Cli {
@@ -68,6 +73,7 @@ impl Cli {
         match self.command {
             Commands::Rewards(cmd) => cli::rewards::handle(&orchestrator, cmd).await,
             Commands::Shapley(cmd) => cli::shapley::handle(&orchestrator, cmd).await,
+            Commands::Snapshot { cmd } => cli::snapshot::handle(&orchestrator, cmd).await,
         }
     }
 }
