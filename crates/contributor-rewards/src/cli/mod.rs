@@ -2,6 +2,7 @@ pub mod demand_strategies;
 pub mod export;
 pub mod rewards;
 pub mod shapley;
+pub mod snapshot;
 
 use anyhow::Result;
 use clap::ValueEnum;
