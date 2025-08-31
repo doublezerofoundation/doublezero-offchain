@@ -4,7 +4,7 @@ mod cli;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use cli::{rewards::RewardsCommands, shapley::ShapleyCommands};
+use cli::{inspect::InspectCommands, rewards::RewardsCommands};
 use contributor_rewards::{calculator::orchestrator::Orchestrator, settings::Settings};
 use std::path::PathBuf;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
@@ -49,12 +49,20 @@ pub struct Cli {
 pub enum Commands {
     #[command(flatten)]
     Rewards(RewardsCommands),
-    #[command(flatten)]
-    Shapley(ShapleyCommands),
+    /// Inspect rewards and Shapley calculations
+    Inspect {
+        #[command(subcommand)]
+        cmd: InspectCommands,
+    },
     /// Export raw chain data snapshots for debugging and analysis
     Snapshot {
         #[command(subcommand)]
         cmd: cli::snapshot::SnapshotCommands,
+    },
+    /// Analyze telemetry data (internet or device)
+    Telemetry {
+        #[command(subcommand)]
+        cmd: cli::telemetry::TelemetryCommands,
     },
 }
 
@@ -72,8 +80,9 @@ impl Cli {
         // Route to module handlers
         match self.command {
             Commands::Rewards(cmd) => cli::rewards::handle(&orchestrator, cmd).await,
-            Commands::Shapley(cmd) => cli::shapley::handle(&orchestrator, cmd).await,
+            Commands::Inspect { cmd } => cli::inspect::handle(&orchestrator, cmd).await,
             Commands::Snapshot { cmd } => cli::snapshot::handle(&orchestrator, cmd).await,
+            Commands::Telemetry { cmd } => cli::telemetry::handle(&orchestrator, cmd).await,
         }
     }
 }

@@ -210,31 +210,6 @@ pub enum RewardsCommands {
         )]
         keypair: Option<PathBuf>,
     },
-    #[command(
-        about = "Inspect and display information about record accounts for an epoch",
-        after_help = r#"Examples:
-    # Inspect all records for epoch 123
-    inspect --epoch 123
-
-    # Inspect only device telemetry records
-    inspect --epoch 123 --type device-telemetry
-
-    # Inspect with specific rewards accountant
-    inspect --epoch 123 --rewards-accountant <PUBKEY>"#
-    )]
-    Inspect {
-        /// DZ epoch number to inspect records for
-        #[arg(short, long, value_name = "EPOCH")]
-        epoch: u64,
-
-        /// Rewards accountant public key (auto-fetched from ProgramConfig if not provided)
-        #[arg(short = 'r', long, value_name = "PUBKEY")]
-        rewards_accountant: Option<Pubkey>,
-
-        /// Specific record type to inspect (shows all if not specified)
-        #[arg(short = 't', long, value_name = "TYPE")]
-        r#type: Option<String>,
-    },
 }
 
 /// Handle rewards commands
@@ -286,15 +261,6 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
         } => {
             orchestrator
                 .realloc_record(r#type, epoch, size, keypair, dry_run)
-                .await
-        }
-        RewardsCommands::Inspect {
-            epoch,
-            rewards_accountant,
-            r#type,
-        } => {
-            orchestrator
-                .inspect_records(epoch, rewards_accountant, r#type)
                 .await
         }
         RewardsCommands::CloseRecord {
