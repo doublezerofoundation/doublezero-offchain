@@ -72,11 +72,14 @@ pub fn build_public_links(
         {
             match settings.network {
                 Network::MainnetBeta | Network::Mainnet => {
-                    // device's exchange pk -> exchange code
+                    // NOTE: On mainnet-beta, the exchange struct has the city itself as its code
+                    // so we can directly use device's exchange pk -> exchange code
                     exchange_to_location.insert(device.exchange_pk, exchange.code.clone());
                 }
                 Network::Testnet | Network::Devnet => {
-                    // In testnet exchange codes are prefixed by 'x', we can strip and use that
+                    // NOTE: On testnet, the exchange codes are prefixed by 'x', we can strip and use that
+                    // This is unwise to be fair, but if we "standardize" that the exchanges which are on
+                    // testnet will always have the 'x' prefix, this will be just fine
                     let ex_code = if let Some(c) = exchange.code.strip_prefix('x') {
                         c.to_string()
                     } else {
