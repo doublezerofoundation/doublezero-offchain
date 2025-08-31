@@ -1,7 +1,6 @@
 use crate::cli::{
-    Exportable, OutputFormat,
-    export::ExportOptions,
-    export::{to_csv_string, to_json_string},
+    common::{OutputFormat, OutputOptions, collection_to_csv, to_json_string},
+    traits::Exportable,
 };
 use anyhow::{Result, bail};
 use clap::Subcommand;
@@ -178,7 +177,7 @@ impl Exportable for LeaderScheduleExport {
                         percentage: info.percentage,
                     });
                 }
-                to_csv_string(&records)
+                collection_to_csv(&records)
             }
             OutputFormat::Json => to_json_string(self, false),
             OutputFormat::JsonPretty => to_json_string(self, true),
@@ -280,8 +279,8 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             };
 
             // Export based on options
-            let export_options = ExportOptions {
-                format: output_format,
+            let export_options = OutputOptions {
+                output_format,
                 output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
                 output_file: output_file.map(|p| p.to_string_lossy().to_string()),
             };
@@ -319,8 +318,8 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             );
 
             // Export based on options
-            let export_options = ExportOptions {
-                format: output_format,
+            let export_options = OutputOptions {
+                output_format,
                 output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
                 output_file: output_file.map(|p| p.to_string_lossy().to_string()),
             };
@@ -404,8 +403,8 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             };
 
             // Export based on options
-            let export_options = ExportOptions {
-                format: output_format,
+            let export_options = OutputOptions {
+                output_format,
                 output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
                 output_file: output_file.map(|p| p.to_string_lossy().to_string()),
             };
