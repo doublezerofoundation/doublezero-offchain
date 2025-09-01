@@ -13,8 +13,8 @@ pub enum RewardsCommands {
     # Calculate rewards for the previous epoch
     calculate-rewards -k keypair.json
 
-    # Calculate for a specific epoch with CSV export
-    calculate-rewards --epoch 123 -k keypair.json --output-dir ./reports
+    # Calculate for a specific epoch
+    calculate-rewards --epoch 123 -k keypair.json
 
     # Dry run to preview without writing to DZ ledger
     calculate-rewards --epoch 123 --dry-run"#
@@ -23,10 +23,6 @@ pub enum RewardsCommands {
         /// DZ epoch to calculate rewards for (defaults to previous epoch)
         #[arg(short, long, value_name = "EPOCH")]
         epoch: Option<u64>,
-
-        /// Directory to export CSV files for debugging and analysis
-        #[arg(short, long, value_name = "DIR")]
-        output_dir: Option<PathBuf>,
 
         /// Skip writing to ledger and show what would be written
         #[arg(long)]
@@ -217,12 +213,11 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
     match cmd {
         RewardsCommands::CalculateRewards {
             epoch,
-            output_dir,
             dry_run,
             keypair,
         } => {
             orchestrator
-                .calculate_rewards(epoch, output_dir, keypair, dry_run)
+                .calculate_rewards(epoch, keypair, dry_run)
                 .await
         }
         RewardsCommands::ReadTelemAgg {

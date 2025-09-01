@@ -9,8 +9,7 @@ use contributor_rewards::{
     ingestor::{epoch::EpochFinder, fetcher::Fetcher, types::FetchData},
 };
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::{collections::BTreeMap, path::PathBuf};
 use tracing::{info, warn};
 
 /// Snapshot export commands for raw chain data
@@ -70,20 +69,23 @@ pub enum SnapshotCommands {
     #[command(
         about = "Export Solana leader schedule for an epoch",
         after_help = r#"Examples:
-    # Export leader schedule as CSV
-    snapshot leader-schedule --epoch 9 --output-format csv --output-file leaders.csv
+    # Export leader schedule as CSV (using DZ epoch)
+    snapshot leader-schedule -e 83 --output-format csv --output-file leaders.csv
 
     # Export as JSON for analysis
-    snapshot leader-schedule --epoch 9 --output-format json-pretty"#
+    snapshot leader-schedule -e 83 --output-format json-pretty
+
+    # Use Solana epoch directly
+    snapshot leader-schedule --solana-epoch 840 --output-format json-pretty"#
     )]
     LeaderSchedule {
-        /// Solana epoch to fetch (will auto-determine from DZ epoch if not provided)
-        #[arg(short, long, value_name = "EPOCH")]
+        /// DZ epoch to use for timestamp mapping
+        #[arg(short = 'e', long = "epoch", value_name = "EPOCH")]
         epoch: Option<u64>,
 
-        /// DZ epoch to use for timestamp mapping
+        /// Solana epoch to fetch directly (advanced use)
         #[arg(long, value_name = "EPOCH")]
-        dz_epoch: Option<u64>,
+        solana_epoch: Option<u64>,
 
         /// Output format for export
         #[arg(short = 'f', long, default_value = "json-pretty")]
@@ -215,7 +217,10 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             info!("Fetched data for DZ epoch {}", fetch_epoch);
 
             // Try to get Solana epoch and leader schedule
-            let mut epoch_finder = EpochFinder::new(&fetcher.solana_read_client);
+            let mut epoch_finder = EpochFinder::new(
+                fetcher.dz_rpc_client.clone(),
+                fetcher.solana_read_client.clone(),
+            );
             let solana_epoch = match epoch_finder
                 .find_epoch_at_timestamp(fetch_data.start_us)
                 .await
@@ -227,27 +232,24 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
                 }
             };
 
-            let leader_schedule = if let Some(sol_epoch) = solana_epoch {
-                match fetcher
-                    .solana_read_client
-                    .get_leader_schedule(Some(sol_epoch))
+            let leader_schedule = if solana_epoch.is_some() {
+                match epoch_finder
+                    .fetch_leader_schedule(fetch_epoch, fetch_data.start_us)
                     .await
                 {
-                    Ok(Some(schedule)) => {
+                    Ok(schedule_map) => {
                         info!(
                             "Retrieved leader schedule with {} validators",
-                            schedule.len()
+                            schedule_map.len()
                         );
-                        let btree_schedule: BTreeMap<String, Vec<usize>> =
-                            schedule.into_iter().collect();
+                        // Convert from BTreeMap<String, usize> to BTreeMap<String, Vec<usize>>
+                        // We need to reconstruct the slots, but for snapshot we can use empty vecs
+                        // as we mainly care about the validator list and counts
+                        let btree_schedule: BTreeMap<String, Vec<usize>> = schedule_map
+                            .into_iter()
+                            .map(|(k, count)| (k, vec![0; count])) // Placeholder slots
+                            .collect();
                         Some(btree_schedule)
-                    }
-                    Ok(None) => {
-                        warn!(
-                            "No leader schedule available for Solana epoch {}",
-                            sol_epoch
-                        );
-                        None
                     }
                     Err(e) => {
                         warn!("Failed to get leader schedule: {}", e);
@@ -333,7 +335,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
 
         SnapshotCommands::LeaderSchedule {
             epoch,
-            dz_epoch,
+            solana_epoch,
             output_format,
             output_dir,
             output_file,
@@ -343,40 +345,94 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             // Create fetcher
             let fetcher = Fetcher::from_settings(orchestrator.settings())?;
 
-            // Determine which epoch to use
-            let solana_epoch = if let Some(e) = epoch {
-                e
-            } else if let Some(dz_e) = dz_epoch {
+            // Create epoch finder with explicit RPC clients
+            let mut epoch_finder = EpochFinder::new(
+                fetcher.dz_rpc_client.clone(),
+                fetcher.solana_read_client.clone(),
+            );
+
+            // Determine how to get the leader schedule
+            let (final_solana_epoch, btree_schedule) = if let Some(sol_e) = solana_epoch {
+                // User provided Solana epoch directly - use slot-based approach
+                info!("Using provided Solana epoch {}", sol_e);
+
+                // Get Solana epoch schedule
+                let schedule = epoch_finder.get_solana_schedule().await?;
+                let first_slot = schedule.get_first_slot_in_epoch(sol_e);
+
+                // Fetch using slot number
+                let leader_schedule = fetcher
+                    .solana_read_client
+                    .get_leader_schedule(Some(first_slot))
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("No leader schedule available for Solana epoch {}", sol_e)
+                    })?;
+
+                let btree: BTreeMap<String, Vec<usize>> = leader_schedule.into_iter().collect();
+                (sol_e, btree)
+            } else if let Some(dz_e) = epoch {
+                // User provided DZ epoch - use the new fetch_leader_schedule method
+                info!("Using DZ epoch {}", dz_e);
+
                 // Fetch DZ data to get timestamp
                 let (_, fetch_data) = fetcher.with_epoch(dz_e).await?;
-                let mut epoch_finder = EpochFinder::new(&fetcher.solana_read_client);
-                epoch_finder
+
+                // Get leader schedule using the new method
+                let schedule_map = epoch_finder
+                    .fetch_leader_schedule(dz_e, fetch_data.start_us)
+                    .await?;
+
+                // Also get the Solana epoch for display
+                let sol_epoch = epoch_finder
                     .find_epoch_at_timestamp(fetch_data.start_us)
-                    .await? as u64
+                    .await?;
+
+                // Convert to the expected format (we need Vec<usize> for slots)
+                // Since we only have counts, we'll generate placeholder slot indices
+                let btree: BTreeMap<String, Vec<usize>> = schedule_map
+                    .into_iter()
+                    .map(|(validator, count)| {
+                        // Generate sequential slot indices as placeholders
+                        let slots: Vec<usize> = (0..count).collect();
+                        (validator, slots)
+                    })
+                    .collect();
+
+                (sol_epoch, btree)
             } else {
-                // Get current epoch
-                let (_, fetch_data) = fetcher.fetch().await?;
-                let mut epoch_finder = EpochFinder::new(&fetcher.solana_read_client);
-                epoch_finder
+                // No epoch provided - use current
+                info!("No epoch provided, using current");
+
+                let (dz_e, fetch_data) = fetcher.fetch().await?;
+
+                // Get leader schedule using the new method
+                let schedule_map = epoch_finder
+                    .fetch_leader_schedule(dz_e, fetch_data.start_us)
+                    .await?;
+
+                // Also get the Solana epoch for display
+                let sol_epoch = epoch_finder
                     .find_epoch_at_timestamp(fetch_data.start_us)
-                    .await? as u64
+                    .await?;
+
+                // Convert to the expected format
+                let btree: BTreeMap<String, Vec<usize>> = schedule_map
+                    .into_iter()
+                    .map(|(validator, count)| {
+                        let slots: Vec<usize> = (0..count).collect();
+                        (validator, slots)
+                    })
+                    .collect();
+
+                (sol_epoch, btree)
             };
 
-            info!("Fetching leader schedule for Solana epoch {}", solana_epoch);
-
-            // Get leader schedule
-            let schedule = fetcher
-                .solana_read_client
-                .get_leader_schedule(Some(solana_epoch))
-                .await?
-                .ok_or_else(|| {
-                    anyhow::anyhow!("No leader schedule available for epoch {}", solana_epoch)
-                })?;
-
-            info!("Retrieved schedule with {} validators", schedule.len());
-
-            // Convert to BTreeMap for determinism
-            let btree_schedule: BTreeMap<String, Vec<usize>> = schedule.into_iter().collect();
+            info!(
+                "Retrieved schedule with {} validators for Solana epoch {}",
+                btree_schedule.len(),
+                final_solana_epoch
+            );
 
             // Calculate total slots and percentages
             let total_slots: usize = btree_schedule.values().map(|v| v.len()).sum();
@@ -397,7 +453,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             }
 
             let leader_export = LeaderScheduleExport {
-                epoch: solana_epoch,
+                epoch: final_solana_epoch,
                 leaders,
                 total_slots,
             };
@@ -409,7 +465,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
                 output_file: output_file.map(|p| p.to_string_lossy().to_string()),
             };
 
-            let default_filename = format!("leader-schedule-epoch-{solana_epoch}");
+            let default_filename = format!("leader-schedule-epoch-{final_solana_epoch}");
             export_options.write(&leader_export, &default_filename)?;
 
             info!("Leader schedule exported successfully");
