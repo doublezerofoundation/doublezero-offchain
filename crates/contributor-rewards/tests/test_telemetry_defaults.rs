@@ -159,7 +159,6 @@ mod tests {
 
         // Test 2: With previous epoch lookup enabled and data available
         {
-            let settings = create_test_settings(0.7, 1000.0, true);
             let mut cache = PreviousEpochCache::new();
 
             // Add previous epoch data for this circuit
