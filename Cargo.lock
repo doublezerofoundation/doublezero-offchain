@@ -670,7 +670,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -744,7 +744,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
 dependencies = [
  "borsh-derive 0.10.4",
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -1776,7 +1776,7 @@ dependencies = [
 [[package]]
 name = "doublezero-config"
 version = "0.6.0"
-source = "git+ssh://git@github.com/malbeclabs/doublezero#4eb9a6d8c3336a6238a7332f0c96076728a8732a"
+source = "git+ssh://git@github.com/malbeclabs/doublezero#387e64ba548048b96c998a8cb0371782c6b4aa28"
 dependencies = [
  "eyre",
  "solana-sdk",
@@ -1837,7 +1837,7 @@ dependencies = [
 [[package]]
 name = "doublezero-program-common"
 version = "0.6.0"
-source = "git+ssh://git@github.com/malbeclabs/doublezero#4eb9a6d8c3336a6238a7332f0c96076728a8732a"
+source = "git+ssh://git@github.com/malbeclabs/doublezero#387e64ba548048b96c998a8cb0371782c6b4aa28"
 dependencies = [
  "borsh 1.5.7",
  "byteorder",
@@ -1871,7 +1871,7 @@ dependencies = [
 [[package]]
 name = "doublezero-record"
 version = "0.6.0"
-source = "git+ssh://git@github.com/malbeclabs/doublezero#4eb9a6d8c3336a6238a7332f0c96076728a8732a"
+source = "git+ssh://git@github.com/malbeclabs/doublezero#387e64ba548048b96c998a8cb0371782c6b4aa28"
 dependencies = [
  "bytemuck",
  "solana-program",
@@ -1904,7 +1904,7 @@ dependencies = [
 [[package]]
 name = "doublezero-serviceability"
 version = "0.6.0"
-source = "git+ssh://git@github.com/malbeclabs/doublezero#4eb9a6d8c3336a6238a7332f0c96076728a8732a"
+source = "git+ssh://git@github.com/malbeclabs/doublezero#387e64ba548048b96c998a8cb0371782c6b4aa28"
 dependencies = [
  "borsh 1.5.7",
  "doublezero-program-common",
@@ -1942,7 +1942,7 @@ dependencies = [
 [[package]]
 name = "doublezero-telemetry"
 version = "0.6.0"
-source = "git+ssh://git@github.com/malbeclabs/doublezero#4eb9a6d8c3336a6238a7332f0c96076728a8732a"
+source = "git+ssh://git@github.com/malbeclabs/doublezero#387e64ba548048b96c998a8cb0371782c6b4aa28"
 dependencies = [
  "borsh 1.5.7",
  "doublezero-program-common",
@@ -1955,7 +1955,7 @@ dependencies = [
 [[package]]
 name = "doublezero_sdk"
 version = "0.6.0"
-source = "git+ssh://git@github.com/malbeclabs/doublezero#4eb9a6d8c3336a6238a7332f0c96076728a8732a"
+source = "git+ssh://git@github.com/malbeclabs/doublezero#387e64ba548048b96c998a8cb0371782c6b4aa28"
 dependencies = [
  "base64 0.22.1",
  "bincode 2.0.1",
