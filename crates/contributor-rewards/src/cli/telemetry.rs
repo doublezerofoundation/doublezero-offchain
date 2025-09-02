@@ -5,7 +5,7 @@ use crate::cli::{
     },
     traits::Exportable,
 };
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Subcommand;
 use contributor_rewards::{
     calculator::orchestrator::Orchestrator,
@@ -565,7 +565,9 @@ async fn handle_internet_export(
 
     // Manual export since we don't have Exportable for raw samples
     let output_str = match output.output_format {
-        OutputFormat::Csv => collection_to_csv(&export_data.samples)?,
+        OutputFormat::Csv => {
+            bail!("Unsupported! Use --output-format json or json-pretty instead.")
+        }
         OutputFormat::Json => to_json_string(&export_data, false)?,
         OutputFormat::JsonPretty => to_json_string(&export_data, true)?,
     };
@@ -658,7 +660,9 @@ async fn handle_device_export(
 
     // Manual export since we don't have Exportable for raw samples
     let output_str = match output.output_format {
-        OutputFormat::Csv => collection_to_csv(&export_data.samples)?,
+        OutputFormat::Csv => {
+            bail!("Unsupported! Use --output-format json or json-pretty instead.")
+        }
         OutputFormat::Json => to_json_string(&export_data, false)?,
         OutputFormat::JsonPretty => to_json_string(&export_data, true)?,
     };
