@@ -59,9 +59,6 @@ impl Orchestrator {
             &borsh::to_vec(&internet_telemetry)?,
         );
 
-        // CSV export functionality has been moved to CLI export commands
-        // Use `snapshot` and `telemetry` commands for data export
-
         // Group demands by start city
         let mut demands_by_city: BTreeMap<String, Vec<Demand>> = BTreeMap::new();
         for demand in shapley_inputs.demands.clone() {
@@ -81,8 +78,6 @@ impl Orchestrator {
                     "City: {city}, Demand: \n{}",
                     print_demands(demands, 1_000_000)
                 );
-
-                // Per-city demand export has been moved to CLI export commands
 
                 // Build shapley inputs
                 let input = ShapleyInput {
@@ -144,8 +139,6 @@ impl Orchestrator {
                 .with(Style::psql().remove_horizontals())
                 .to_string();
             info!("Shapley Output:\n{}", table);
-
-            // Shapley output export has been moved to CLI export commands
 
             // Construct merkle tree
             let merkle_tree = ContributorRewardsMerkleTree::new(fetch_epoch, &shapley_output)?;
