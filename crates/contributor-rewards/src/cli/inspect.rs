@@ -7,7 +7,9 @@ use clap::Subcommand;
 use contributor_rewards::{
     calculator::{
         orchestrator::Orchestrator,
-        shapley_handler::{build_devices, build_private_links, build_public_links},
+        shapley_handler::{
+            PreviousEpochCache, build_devices, build_private_links, build_public_links,
+        },
     },
     ingestor::{demand, fetcher::Fetcher},
     processor::{internet::InternetTelemetryProcessor, telemetry::DZDTelemetryProcessor},
@@ -194,9 +196,22 @@ async fn handle_inspect_shapley(
     );
 
     // Build Shapley inputs using existing types
+    // Create an empty cache since we're just inspecting, not applying defaults
+    let previous_epoch_cache = PreviousEpochCache::new();
+
     let devices = build_devices(&fetch_data)?;
-    let private_links = build_private_links(&fetch_data, &dzd_stats);
-    let public_links = build_public_links(orchestrator.settings(), &internet_stats, &fetch_data)?;
+    let private_links = build_private_links(
+        orchestrator.settings(),
+        &fetch_data,
+        &dzd_stats,
+        &previous_epoch_cache,
+    );
+    let public_links = build_public_links(
+        orchestrator.settings(),
+        &internet_stats,
+        &fetch_data,
+        &previous_epoch_cache,
+    )?;
 
     // Get unique cities from public links
     let mut cities = BTreeSet::new();
