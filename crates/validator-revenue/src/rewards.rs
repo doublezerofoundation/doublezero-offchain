@@ -72,6 +72,7 @@ pub async fn get_total_rewards(
 
     let inflation_rewards = inflation_rewards?;
     let jito_rewards = jito_rewards?;
+
     let block_rewards = block_rewards?;
 
     for validator_id in validator_ids {
@@ -83,8 +84,9 @@ pub async fn get_total_rewards(
             .unwrap_or_default();
         let block_reward = block_rewards.get(validator_id).cloned().unwrap_or_default();
 
-        let priority_base = block_reward.0 - block_reward.1;
         total_reward += inflation_reward + block_reward.0 + jito_reward;
+
+        let priority_base = block_reward.0 - block_reward.1;
         let rewards = Reward {
             validator_id: validator_id.to_string(),
             jito: jito_reward,
