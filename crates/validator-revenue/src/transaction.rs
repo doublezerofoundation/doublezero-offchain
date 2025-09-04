@@ -345,7 +345,7 @@ mod tests {
         );
         let (_, proof) = debt_proof.unwrap();
         let new_transaction = transaction
-            .verify_transaction(&solana_rpc_client, 78, proof, leaf)
+            .verify_transaction(&solana_rpc_client, dz_epoch, proof, leaf)
             .await?;
 
         let _sent_transaction = transaction
