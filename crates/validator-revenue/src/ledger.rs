@@ -1,8 +1,54 @@
-use anyhow::{Context, Result};
+use crate::rewards;
+use anyhow::{Context, Result, bail};
 use doublezero_record::state::RecordData;
 use doublezero_sdk::record::{self, client, state::read_record_data};
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcSendTransactionConfig};
-use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer, signer::keypair::Keypair};
+use solana_sdk::{
+    commitment_config::CommitmentConfig, epoch_schedule::Epoch, signer::Signer,
+    signer::keypair::Keypair,
+};
+
+pub async fn get_solana_epoch_from_dz_epoch(
+    solana_client: &RpcClient,
+    ledger_client: &RpcClient,
+    dz_epoch: Epoch,
+) -> Result<u64> {
+    let dz_epoch_info = ledger_client.get_epoch_info().await?;
+
+    let first_slot_in_current_epoch = dz_epoch_info.absolute_slot - dz_epoch_info.slot_index;
+
+    let epoch_diff = dz_epoch_info.epoch - dz_epoch;
+
+    let first_slot = first_slot_in_current_epoch - (dz_epoch_info.slots_in_epoch * epoch_diff);
+
+    let dz_block = ledger_client.get_block(first_slot).await?;
+
+    let dz_block_time = dz_block
+        .block_time
+        .context("Block time is missing for the given slot")?;
+    let dz_block_time: u64 = dz_block_time as u64;
+
+    let solana_epoch_info = solana_client.get_epoch_info().await?;
+
+    let first_slot_in_current_solana_epoch =
+        solana_epoch_info.absolute_slot - solana_epoch_info.slot_index;
+
+    let solana_block_time = solana_client
+        .get_block_time(first_slot_in_current_solana_epoch)
+        .await?;
+    let solana_block_time: u64 = solana_block_time as u64;
+
+    if dz_block_time > solana_block_time {
+        bail!("DZ block time {dz_block_time} > solana_block_time {solana_block_time}");
+    }
+    let num_slots: u64 =
+        ((solana_block_time - dz_block_time) as f64 / rewards::SLOT_TIME_DURATION_SECONDS) as u64;
+
+    Ok(
+        (solana_epoch_info.epoch * solana_epoch_info.slots_in_epoch - num_slots)
+            / solana_epoch_info.slots_in_epoch,
+    )
+}
 
 pub async fn write_record_to_ledger<T: borsh::BorshSerialize>(
     rpc_client: &RpcClient,

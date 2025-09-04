@@ -17,7 +17,7 @@ use std::collections::HashMap;
 
 use crate::solana_debt_calculator::ValidatorRewards;
 
-const SLOT_TIME_DURATION_SECONDS: f64 = 0.4;
+pub const SLOT_TIME_DURATION_SECONDS: f64 = 0.4;
 
 #[derive(Deserialize, Debug, BorshDeserialize, BorshSerialize)]
 pub struct EpochRewards {
