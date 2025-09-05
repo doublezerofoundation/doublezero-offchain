@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
 use doublezero_revenue_distribution::{
     ID,
@@ -170,35 +170,32 @@ impl Transaction {
         dz_epoch: u64,
         proof: MerkleProof,
         leaf: SolanaValidatorDebt,
-    ) -> Result<VersionedTransaction> {
+    ) -> Result<()> {
+        if !self.dry_run {
+            bail!("Only simulated transaction are allowed for verify_transaction")
+        };
+
         let dz_epoch = DoubleZeroEpoch::new(dz_epoch);
-        match try_build_instruction(
+        let instruction = try_build_instruction(
             &ID,
             VerifyDistributionMerkleRootAccounts::new(dz_epoch),
             &RevenueDistributionInstructionData::VerifyDistributionMerkleRoot {
                 kind: DistributionMerkleRootKind::SolanaValidatorPayment(leaf),
                 proof,
             },
-        ) {
-            Ok(instruction) => {
-                let recent_blockhash = solana_rpc_client.get_latest_blockhash().await?;
-                let message = Message::try_compile(
-                    &self.signer.pubkey(),
-                    &[instruction],
-                    &[],
-                    recent_blockhash,
-                )
+        )?;
+
+        let recent_blockhash = solana_rpc_client.get_latest_blockhash().await?;
+        let message =
+            Message::try_compile(&self.signer.pubkey(), &[instruction], &[], recent_blockhash)
                 .unwrap();
 
-                let verified_instruction =
-                    VersionedTransaction::try_new(VersionedMessage::V0(message), &[&self.signer])
-                        .unwrap();
-                Ok(verified_instruction)
-            }
-            Err(err) => Err(anyhow!(
-                "Failed to build finalize distribution instruction: {err:?}"
-            )),
-        }
+        let verified_transaction =
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &[&self.signer])
+                .map_err(|e| anyhow!("Failed to create verified instruction: {e:?}"))?;
+        self.send_or_simulate_transaction(solana_rpc_client, &verified_transaction)
+            .await?;
+        Ok(())
     }
 
     pub async fn send_or_simulate_transaction(
@@ -253,6 +250,7 @@ mod tests {
         validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
     };
 
+    use doublezero_sdk::commands::multicastgroup::subscribe::SubscribeMulticastGroupCommand;
     use solana_client::{
         nonblocking::rpc_client::RpcClient,
         rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig},
@@ -282,7 +280,7 @@ mod tests {
         Ok(default_keypair)
     }
 
-    #[ignore = "needs local validator"]
+    // #[ignore = "needs local validator"]
     #[tokio::test]
     async fn test_verify_distribution() -> anyhow::Result<()> {
         let keypair = try_load_keypair(None).unwrap();
@@ -316,7 +314,7 @@ mod tests {
         let transaction = Transaction::new(keypair, true);
         let leaf = SolanaValidatorDebt {
             node_id: Pubkey::from_str("va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b").unwrap(),
-            amount: 2264,
+            amount: 0,
         };
 
         let signer = try_load_keypair(None).unwrap();
@@ -327,7 +325,6 @@ mod tests {
         let record =
             ledger::read_from_ledger(&ledger_rpc_client, &signer, seeds, commitment_config).await?;
         let deserialized: EpochRewards = borsh::from_slice(record.1.as_slice()).unwrap();
-
         let computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = deserialized
             .rewards
             .iter()
@@ -344,13 +341,10 @@ mod tests {
             &Pubkey::from_str("va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b").unwrap(),
         );
         let (_, proof) = debt_proof.unwrap();
-        let new_transaction = transaction
+        transaction
             .verify_transaction(&solana_rpc_client, dz_epoch, proof, leaf)
             .await?;
 
-        let _sent_transaction = transaction
-            .send_or_simulate_transaction(&solana_rpc_client, &new_transaction)
-            .await?;
         Ok(())
     }
 
