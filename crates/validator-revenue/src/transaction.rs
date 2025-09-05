@@ -392,7 +392,7 @@ mod tests {
         let dz_epoch_info = ledger_rpc_client.get_epoch_info().await?;
 
         let new_transaction = transaction
-            .initialize_distribution(&ledger_rpc_client, &solana_rpc_client, dz_epoch_info.epoch)
+            .initialize_distribution(&ledger_rpc_client, dz_epoch_info.epoch, 85)
             .await?;
 
         let _sent_transaction = transaction
@@ -478,7 +478,6 @@ mod tests {
             vote_account_config,
         );
         let solana_rpc_client = fpc.solana_rpc_client;
-        let ledger_rpc_client = fpc.ledger_rpc_client;
 
         let tx_sig = solana_rpc_client
             .request_airdrop(&k, 1_000_000_000)
@@ -509,7 +508,7 @@ mod tests {
         let transaction = Transaction::new(keypair, false);
 
         let new_transaction = transaction
-            .initialize_distribution(&ledger_rpc_client, &solana_rpc_client, 0)
+            .initialize_distribution(&solana_rpc_client, 0, 0)
             .await?;
 
         let _sent_transaction = transaction

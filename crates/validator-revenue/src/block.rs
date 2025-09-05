@@ -75,10 +75,7 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
                     })
                     .ok_or_else(|| anyhow::anyhow!("no block rewards"))?;
 
-                Ok((
-                    validator_id,
-                    (signature_lamports, lamports - signature_lamports),
-                ))
+                Ok((validator_id, (signature_lamports, lamports)))
             }
 
             Err(e) => {
