@@ -250,7 +250,6 @@ mod tests {
         validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
     };
 
-    use doublezero_sdk::commands::multicastgroup::subscribe::SubscribeMulticastGroupCommand;
     use solana_client::{
         nonblocking::rpc_client::RpcClient,
         rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig},
@@ -309,35 +308,22 @@ mod tests {
             vote_account_config,
         );
         let solana_rpc_client = fpc.solana_rpc_client;
-        let ledger_rpc_client = fpc.ledger_rpc_client;
-
-        let transaction = Transaction::new(keypair, true);
+        let dry_run = true;
+        let transaction = Transaction::new(keypair, dry_run);
         let leaf = SolanaValidatorDebt {
             node_id: Pubkey::from_str("va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b").unwrap(),
-            amount: 0,
+            amount: 707,
         };
 
-        let signer = try_load_keypair(None).unwrap();
-        let dz_epoch: u64 = 83;
-        let prefix = b"solana_validator_debt_test";
-        let dz_epoch_bytes = dz_epoch.to_le_bytes();
-        let seeds: &[&[u8]] = &[prefix, &dz_epoch_bytes];
-        let record =
-            ledger::read_from_ledger(&ledger_rpc_client, &signer, seeds, commitment_config).await?;
-        let deserialized: EpochRewards = borsh::from_slice(record.1.as_slice()).unwrap();
-        let computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = deserialized
-            .rewards
-            .iter()
-            .map(|reward| ComputedSolanaValidatorDebt {
-                node_id: Pubkey::from_str(&reward.validator_id).unwrap(),
-                amount: reward.total,
-            })
-            .collect();
-        let debt = ComputedSolanaValidatorDebts {
-            epoch: deserialized.epoch,
-            debts: computed_solana_validator_debt_vec,
+        let dz_epoch: u64 = 84;
+        let record = ComputedSolanaValidatorDebts {
+            epoch: 832,
+            debts: vec![ComputedSolanaValidatorDebt {
+                node_id: Pubkey::from_str("va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b").unwrap(),
+                amount: 707,
+            }],
         };
-        let debt_proof = debt.find_debt_proof(
+        let debt_proof = record.find_debt_proof(
             &Pubkey::from_str("va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b").unwrap(),
         );
         let (_, proof) = debt_proof.unwrap();
