@@ -135,25 +135,25 @@ pub async fn write_debts<T: ValidatorRewards>(
     let merkle_root = computed_solana_validator_debts.merkle_root();
 
     // Initialize a distribution
-    // let initialized_transaction = transaction
-    //     .initialize_distribution(
-    //         solana_debt_calculator.solana_rpc_client(),
-    //         fetched_dz_epoch_info.epoch,
-    //         dz_epoch,
-    //     )
-    //     .await?;
+    let initialized_transaction = transaction
+        .initialize_distribution(
+            solana_debt_calculator.solana_rpc_client(),
+            fetched_dz_epoch_info.epoch,
+            dz_epoch,
+        )
+        .await?;
 
-    // let tx_initialized_sig = transaction
-    //     .send_or_simulate_transaction(
-    //         solana_debt_calculator.solana_rpc_client(),
-    //         &initialized_transaction,
-    //     )
-    //     .await?;
+    let tx_initialized_sig = transaction
+        .send_or_simulate_transaction(
+            solana_debt_calculator.solana_rpc_client(),
+            &initialized_transaction,
+        )
+        .await?;
 
-    // println!(
-    //     "initialized distribution tx: {:?}",
-    //     tx_initialized_sig.unwrap()
-    // );
+    println!(
+        "initialized distribution tx: {:?}",
+        tx_initialized_sig.unwrap()
+    );
 
     // Create the data for the solana transaction
     let total_validators: u32 = validator_rewards.rewards.len() as u32;
@@ -187,10 +187,9 @@ pub async fn write_debts<T: ValidatorRewards>(
         tx_submitted_sig: Some(tx_submitted_sig.ok_or_else(|| {
             anyhow::anyhow!("send_or_simulate_transaction returned None for tx_submitted_sig")
         })?),
-        tx_initialized_sig: None,
-        // tx_initialized_sig: Some(tx_initialized_sig.ok_or_else(|| {
-            // anyhow::anyhow!("send_or_simulate_transaction returned None for tx_submitted_sig")
-        // })?),
+        tx_initialized_sig: Some(tx_initialized_sig.ok_or_else(|| {
+            anyhow::anyhow!("send_or_simulate_transaction returned None for tx_submitted_sig")
+        })?),
     };
     Ok(record_result)
 }
