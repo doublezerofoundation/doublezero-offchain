@@ -279,7 +279,7 @@ mod tests {
         Ok(default_keypair)
     }
 
-    // #[ignore = "needs local validator"]
+    #[ignore = "needs local validator"]
     #[tokio::test]
     async fn test_verify_distribution() -> anyhow::Result<()> {
         let keypair = try_load_keypair(None).unwrap();
