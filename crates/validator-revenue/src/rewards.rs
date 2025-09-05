@@ -90,8 +90,8 @@ pub async fn get_total_rewards(
             jito: jito_reward,
             inflation: inflation_reward,
             total: total_reward,
-            block_priority: block_reward.0,
-            block_base: block_reward.1,
+            block_priority: block_reward.1,
+            block_base: block_reward.0,
             epoch,
         };
         validator_rewards.push(rewards);
@@ -174,7 +174,7 @@ mod tests {
             "Eleven".to_string(),
             "Twelve".to_string(),
         ];
-        let priority_fees = signatures.iter().len() as u64 * 2500;
+        let priority_fees = signatures.len() as u64 * 2500;
         let mock_block = UiConfirmedBlock {
             num_reward_partitions: Some(1),
             signatures: Some(signatures),
@@ -291,7 +291,7 @@ mod tests {
         assert_eq!(reward.inflation, inflation_reward);
         assert_eq!(reward.jito, jito_reward);
         assert_eq!(reward.total, block_reward + inflation_reward + jito_reward);
-        assert_eq!(reward.block_priority, priority_fees);
+        assert_eq!(reward.block_priority, block_reward - priority_fees);
     }
 
     #[tokio::test]
