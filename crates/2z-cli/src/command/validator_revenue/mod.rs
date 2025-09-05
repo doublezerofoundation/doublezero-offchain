@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
-
+use crate::rpc::{SolanaDebtPaymentConnectionOptions};
 
 #[derive(Debug, Args)]
 pub struct ValidatorRevenueCliCommand {

@@ -2,9 +2,11 @@ use std::ops::Deref;
 
 use anyhow::{Error, Result, bail};
 use clap::Args;
-use solana_client::nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient};
+use doublezero_solana_validator_debt::solana_debt_calculator::SolanaDebtCalculator;
+use solana_client::{nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig}};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
+use solana_transaction_status_client_types::{TransactionDetails, UiTransactionEncoding}
 use url::Url;
 
 const SOLANA_MAINNET_GENESIS_HASH: Pubkey =
@@ -102,6 +104,51 @@ impl TryFrom<SolanaConnectionOptions> for Connection {
     }
 }
 
+
+impl TryFrom<SolanaDebtPaymentConnectionOptions> for SolanaDebtCalculator {
+    type Error = Error;
+
+    fn try_from(opts: SolanaDebtPaymentConnectionOptions) -> Result<SolanaDebtCalculator> {
+        let SolanaDebtPaymentConnectionOptions {
+            solana_url_or_moniker,
+            ledger_url_or_moniker,
+        } = opts;
+
+        let solana_url_or_moniker = solana_url_or_moniker.as_deref().unwrap_or("m");
+        let solana_rpc_url = Url::parse(normalize_to_url_if_moniker(solana_url_or_moniker))?;
+
+        let ledger_url_or_moniker = ledger_url_or_moniker.as_deref().unwrap_or("m");
+        let ledger_rpc_url = Url::parse(normalize_to_ledger_url_if_moniker(ledger_url_or_moniker))?;
+
+        let solana_rpc_client =  RpcClient::new_with_commitment(
+            solana_rpc_url.into(),
+            CommitmentConfig::confirmed(),
+        );
+
+        let ledger_rpc_client =  RpcClient::new_with_commitment(
+            ledger_rpc_url.into(),
+            CommitmentConfig::confirmed(),
+        );
+
+        let rpc_block_config = RpcBlockConfig {
+            encoding: Some(UiTransactionEncoding::Base58),
+            transaction_details: Some(TransactionDetails::None),
+            rewards: Some(true),
+            commitment: Some(CommitmentConfig::confirmed()),
+            max_supported_transaction_version: Some(0),
+        };
+
+        let vote_account_config = RpcGetVoteAccountsConfig {
+            vote_pubkey: None,
+            commitment: CommitmentConfig::finalized().into(),
+            keep_unstaked_delinquents: None,
+            delinquent_slot_distance: None,
+        };
+
+        Ok(SolanaDebtCalculator::new(ledger_rpc_client, solana_rpc_client, rpc_block_config, vote_account_config))
+    }
+}
+
 impl Deref for Connection {
     type Target = RpcClient;
 
@@ -115,6 +162,15 @@ fn normalize_to_url_if_moniker(url_or_moniker: &str) -> &str {
     match url_or_moniker {
         "m" | "mainnet-beta" => "https://api.mainnet-beta.solana.com",
         "t" | "testnet" => "https://api.testnet.solana.com",
+        "l" | "localhost" => "http://localhost:8899",
+        url => url,
+    }
+}
+
+fn normalize_to_ledger_url_if_moniker(url_or_moniker: &str) -> &str {
+    match url_or_moniker {
+        "m" | "mainnet-beta" => "",
+        "t" | "testnet" => "",
         "l" | "localhost" => "http://localhost:8899",
         url => url,
     }
