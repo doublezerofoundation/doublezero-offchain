@@ -6,31 +6,54 @@ use solana_sdk::signer::keypair::Keypair;
 use std::path::PathBuf;
 
 #[derive(Debug, Args)]
-pub struct ValidatorRevenueCliCommand {
+pub struct ValidatorDebtCliCommand {
     #[command(subcommand)]
-    pub command: ValidatorRevenueSubCommand,
+    pub command: ValidatorDebtSubCommand,
 }
 
 #[derive(Debug, Subcommand)]
-pub enum ValidatorRevenueSubCommand {
+pub enum ValidatorDebtSubCommand {
     PayDebt {
+        /// Filepath or URL to a keypair.
+        #[arg(long = "keypair", short = 'k', value_name = "KEYPAIR")]
+        keypair_path: Option<String>,
+
+        /// DoubleZero ledger epoch
         #[arg(long)]
         doublezero_epoch: u64,
+
+        /// Connectin options to Solana and DoubleZero ledger
         #[command(flatten)]
         solana_debt_payer_options: SolanaDebtPaymentConnectionOptions,
+
+        /// Temporary: pass in comma-separated list of validator pubkeys
+        #[arg(long)]
+        validator_pubkeys: String,
+        /// Simulate the command
         #[arg(long)]
         dry_run: bool,
     },
 }
 
-impl ValidatorRevenueSubCommand {
+impl ValidatorDebtSubCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         match self {
-            ValidatorRevenueSubCommand::PayDebt {
+            ValidatorDebtSubCommand::PayDebt {
                 doublezero_epoch,
                 solana_debt_payer_options,
+                keypair_path,
+                validator_pubkeys,
                 dry_run,
-            } => execute_pay_debt(doublezero_epoch, solana_debt_payer_options, dry_run).await,
+            } => {
+                execute_pay_debt(
+                    doublezero_epoch,
+                    solana_debt_payer_options,
+                    keypair_path,
+                    validator_pubkeys,
+                    dry_run,
+                )
+                .await
+            }
         }
     }
 }
@@ -38,15 +61,21 @@ impl ValidatorRevenueSubCommand {
 async fn execute_pay_debt(
     doublezero_epoch: u64,
     solana_debt_payer_options: SolanaDebtPaymentConnectionOptions,
+    keypair_path: Option<String>,
+    validator_pubkeys: String,
     dry_run: bool,
 ) -> Result<()> {
+    let validator_pubkeys: Vec<String> = validator_pubkeys
+        .split(",")
+        .map(|validator_id| validator_id.to_string()) //
+        .collect();
     let debt_calculator = SolanaDebtCalculator::try_from(solana_debt_payer_options)?;
-    let signer = try_load_keypair(None)?;
+    let signer = try_load_keypair(keypair_path.map(Into::into))?;
     let debt = worker::write_debts(
         &debt_calculator,
         signer,
         // TODO: pull in validator IDs from access pass
-        vec!["va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b".to_string()],
+        validator_pubkeys,
         doublezero_epoch,
         dry_run,
     )
@@ -55,7 +84,6 @@ async fn execute_pay_debt(
     Ok(())
 }
 
-// tmp hack
 fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
     let home_path = std::env::var_os("HOME").unwrap();
     let default_keypair_path = ".config/solana/id.json";

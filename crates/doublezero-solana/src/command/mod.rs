@@ -5,7 +5,7 @@ mod passport;
 mod prepaid;
 mod revenue_distribution;
 mod validator;
-mod validator_revenue;
+mod validator_debt;
 
 pub use admin::*;
 pub use ata::*;
@@ -14,7 +14,7 @@ pub use passport::*;
 pub use prepaid::*;
 pub use revenue_distribution::*;
 pub use validator::*;
-pub use validator_revenue::*;
+pub use validator_debt::*;
 
 //
 
@@ -45,8 +45,8 @@ pub enum DoubleZeroSolanaCommand {
     /// Solana validator commands.
     Validator(ValidatorCliCommand),
 
-    /// Validator revenue program commands.
-    ValidatorRevenue(ValidatorRevenueCliCommand),
+    /// Validator debt program commands.
+    ValidatorDebt(ValidatorDebtCliCommand),
 }
 
 impl DoubleZeroSolanaCommand {
@@ -67,8 +67,8 @@ impl DoubleZeroSolanaCommand {
             DoubleZeroSolanaCommand::Validator(validator) => {
                 validator.command.try_into_execute().await
             }
-            DoubleZero2zSolanaCommand::ValidatorRevenue(validator_revenue) => {
-                validator_revenue.command.try_into_execute().await
+            DoubleZero2zSolanaCommand::ValidatorDebt(validator_debt) => {
+                validator_debt.command.try_into_execute().await
             }
         }
     }
