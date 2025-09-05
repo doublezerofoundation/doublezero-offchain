@@ -18,6 +18,20 @@ pub struct DoubleZeroLedgerRpcOptions {
 }
 
 #[derive(Debug, Args)]
+pub struct SolanaDebtPaymentConnectionOptions {
+    /// URL for Solana's JSON RPC or moniker (or their first letter):
+    /// [mainnet-beta, testnet, localhost].
+    #[arg(long = "solana_url")]
+    pub solana_url_or_moniker: Option<String>,
+
+    /// URL for DoubleZero ledger's JSON RPC or moniker (or their first letter):
+    /// [mainnet-beta, testnet, localhost].
+    #[arg(long = "doublezero_ledger_url")]
+    pub ledger_url_or_moniker: Option<String>,
+}
+
+
+#[derive(Debug, Args)]
 pub struct SolanaConnectionOptions {
     /// URL for Solana's JSON RPC or moniker (or their first letter):
     /// [mainnet-beta, testnet, localhost].

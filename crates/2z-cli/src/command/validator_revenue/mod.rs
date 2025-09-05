@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+
 #[derive(Debug, Args)]
 pub struct ValidatorRevenueCliCommand {
     #[command(subcommand)]
@@ -12,13 +13,17 @@ pub enum ValidatorRevenueSubCommand {
     PayDebt {
         #[arg(long)]
         doublezero_epoch: u64,
+        #[command(flatten)]
+        solana_debt_payer_options: SolanaDebtPaymentConnectionOptions,
     },
 }
 
 impl ValidatorRevenueSubCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         match self {
-            ValidatorRevenueSubCommand::PayDebt { doublezero_epoch } => execute_pay_debt(doublezero_epoch).await,
+            ValidatorRevenueSubCommand::PayDebt { doublezero_epoch, solana_debt_payer_options } => {
+                execute_pay_debt(doublezero_epoch).await
+            }
         }
     }
 }
