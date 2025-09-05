@@ -84,14 +84,13 @@ pub async fn get_total_rewards(
             .unwrap_or_default();
         let block_reward = block_rewards.get(validator_id).cloned().unwrap_or_default();
 
-        total_reward += inflation_reward + block_reward.0 + jito_reward;
-        let priority_base = block_reward.0 - block_reward.1;
+        total_reward += inflation_reward + block_reward.0 + block_reward.1 + jito_reward;
         let rewards = Reward {
             validator_id: validator_id.to_string(),
             jito: jito_reward,
             inflation: inflation_reward,
             total: total_reward,
-            block_priority: priority_base,
+            block_priority: block_reward.0,
             block_base: block_reward.1,
             epoch,
         };
@@ -140,7 +139,7 @@ mod tests {
         let validator_id = "6WgdYhhGE53WrZ7ywJA15hBVkw7CRbQ8yDBBTwmBtAHN";
         let validator_ids: &[String] = &[String::from(validator_id)];
         let epoch = 824;
-        let block_reward: u64 = 30000;
+        let block_reward: u64 = 40000;
         let inflation_reward = 2500;
         let jito_reward = 10000;
 
@@ -175,7 +174,7 @@ mod tests {
             "Eleven".to_string(),
             "Twelve".to_string(),
         ];
-        let base_fees = signatures.len() as u64 * 2500;
+        let priority_fees = signatures.iter().len() as u64 * 2500;
         let mock_block = UiConfirmedBlock {
             num_reward_partitions: Some(1),
             signatures: Some(signatures),
@@ -287,13 +286,12 @@ mod tests {
             .iter()
             .find(|reward| reward.validator_id == validator_id)
             .unwrap();
-        let priority_base = block_reward - base_fees;
+        assert_eq!(reward.block_base + reward.block_priority, block_reward);
         assert_eq!(reward.epoch, epoch);
-        assert_eq!(reward.block_base, base_fees);
         assert_eq!(reward.inflation, inflation_reward);
         assert_eq!(reward.jito, jito_reward);
         assert_eq!(reward.total, block_reward + inflation_reward + jito_reward);
-        assert_eq!(reward.block_priority, priority_base);
+        assert_eq!(reward.block_priority, priority_fees);
     }
 
     #[tokio::test]
@@ -302,8 +300,7 @@ mod tests {
         let validator_id = "6WgdYhhGE53WrZ7ywJA15hBVkw7CRbQ8yDBBTwmBtAHN";
         let validator_ids: &[String] = &[String::from(validator_id)];
         let epoch = 823;
-        let block_reward: u64 = 2500;
-        let signatures: u64 = 2500;
+        let block_reward: u64 = 40000;
         let inflation_reward = 5500;
         let jito_reward = 10000;
 
@@ -418,13 +415,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(reward.epoch, epoch);
-        assert_eq!(reward.block_base, block_reward);
+        assert_eq!(reward.block_base + reward.block_priority, block_reward);
         assert_eq!(reward.inflation, inflation_reward);
         assert_eq!(reward.jito, jito_reward);
         assert_eq!(
             reward.total,
-            reward.block_base + reward.inflation + reward.jito
+            reward.block_base + reward.inflation + reward.jito + reward.block_priority
         );
-        assert_eq!(reward.block_priority, block_reward - signatures);
+        assert_eq!(reward.block_priority + reward.block_base, block_reward);
     }
 }

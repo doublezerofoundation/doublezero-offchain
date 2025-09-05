@@ -118,6 +118,7 @@ pub async fn write_debts<T: ValidatorRewards>(
         debts: computed_solana_validator_debt_vec.clone(),
     };
 
+    // TODO: https://github.com/malbeclabs/doublezero/issues/1553
     let ledger_record = ledger::write_record_to_ledger(
         solana_debt_calculator.ledger_rpc_client(),
         &transaction.signer,

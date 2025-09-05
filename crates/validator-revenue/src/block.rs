@@ -73,8 +73,10 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
                             .sum()
                     })
                     .ok_or_else(|| anyhow::anyhow!("no block rewards"))?;
-
-                Ok((validator_id, (signature_lamports, lamports)))
+                Ok((
+                    validator_id,
+                    (signature_lamports, lamports - signature_lamports),
+                ))
             }
 
             Err(e) => {
@@ -111,10 +113,7 @@ mod tests {
         let validator_id = "some_validator_pubkey".to_string();
         let validator_ids = &[validator_id.clone()];
         let epoch = 100;
-        let first_slot = get_first_slot_for_epoch(epoch);
         let slot_index = 10;
-        let slot = first_slot + slot_index as u64;
-        dbg!(&slot);
 
         let mut leader_schedule = HashMap::new();
         leader_schedule.insert(validator_id.clone(), vec![slot_index]);
@@ -124,7 +123,7 @@ mod tests {
             .times(1)
             .returning(move || Ok(leader_schedule.clone()));
 
-        let block_reward = (7500, 7500);
+        let block_reward = (7500, 0);
         let mock_block = UiConfirmedBlock {
             num_reward_partitions: Some(1),
             signatures: Some(vec![
