@@ -85,7 +85,6 @@ pub async fn get_total_rewards(
         let block_reward = block_rewards.get(validator_id).cloned().unwrap_or_default();
 
         total_reward += inflation_reward + block_reward.0 + jito_reward;
-
         let priority_base = block_reward.0 - block_reward.1;
         let rewards = Reward {
             validator_id: validator_id.to_string(),
@@ -124,7 +123,6 @@ fn epoch_from_timestamp(block_time: u64, current_slot: u64, timestamp: u64) -> R
 
 #[cfg(test)]
 mod tests {
-    use crate::block::LAMPORT_MULTIPLE;
     use crate::jito::{JitoReward, JitoRewards};
 
     use super::*;
@@ -132,7 +130,8 @@ mod tests {
     use solana_client::rpc_response::{
         RpcInflationReward, RpcVoteAccountInfo, RpcVoteAccountStatus,
     };
-    use solana_sdk::reward_type::RewardType::Fee;
+    use solana_sdk::{epoch_info::EpochInfo, reward_type::RewardType::Fee};
+
     use solana_transaction_status_client_types::UiConfirmedBlock;
 
     #[tokio::test]
@@ -141,7 +140,7 @@ mod tests {
         let validator_id = "6WgdYhhGE53WrZ7ywJA15hBVkw7CRbQ8yDBBTwmBtAHN";
         let validator_ids: &[String] = &[String::from(validator_id)];
         let epoch = 824;
-        let block_reward: u64 = 60000;
+        let block_reward: u64 = 30000;
         let inflation_reward = 2500;
         let jito_reward = 10000;
 
@@ -176,7 +175,7 @@ mod tests {
             "Eleven".to_string(),
             "Twelve".to_string(),
         ];
-        let base_fees = signatures.len() as u64 * LAMPORT_MULTIPLE;
+        let base_fees = signatures.len() as u64 * 2500;
         let mock_block = UiConfirmedBlock {
             num_reward_partitions: Some(1),
             signatures: Some(signatures),
@@ -195,13 +194,40 @@ mod tests {
             block_height: None,
         };
 
-        let first_slot = block::get_first_slot_for_epoch(epoch);
         let slot_index: usize = 10;
-        let slot = first_slot + slot_index as u64;
+
+        let mock_epoch_info = EpochInfo {
+            epoch,
+            slot_index: 100000,
+            absolute_slot: 10000000,
+            block_height: 103030003,
+            slots_in_epoch: 5000000,
+            transaction_count: Some(1000),
+        };
+
+        let first_slot = 9900010;
+        mock_solana_debt_calculator
+            .expect_get::<JitoRewards>()
+            .withf(move |url| url.contains(&format!("epoch={epoch}")))
+            .times(1)
+            .returning(move |_| {
+                Ok(JitoRewards {
+                    total_count: 1000,
+                    rewards: vec![JitoReward {
+                        vote_account: validator_id.to_string(),
+                        mev_revenue: jito_reward,
+                    }],
+                })
+            });
+
+        mock_solana_debt_calculator
+            .expect_get_epoch_info()
+            .times(1)
+            .returning(move || Ok(mock_epoch_info.clone()));
 
         mock_solana_debt_calculator
             .expect_get_block_with_config()
-            .withf(move |s| *s == slot)
+            .withf(move |s| *s == first_slot)
             .times(1)
             .returning(move |_| Ok(mock_block.clone()));
 
@@ -237,20 +263,6 @@ mod tests {
             .expect_get_inflation_reward()
             .times(1)
             .returning(move |_, _| Ok(mock_rpc_inflation_reward.clone()));
-
-        mock_solana_debt_calculator
-            .expect_get::<JitoRewards>()
-            .withf(move |url| url.contains(&format!("epoch={epoch}")))
-            .times(1)
-            .returning(move |_| {
-                Ok(JitoRewards {
-                    total_count: 1000,
-                    rewards: vec![JitoReward {
-                        vote_account: validator_id.to_string(),
-                        mev_revenue: jito_reward,
-                    }],
-                })
-            });
 
         let mut leader_schedule = HashMap::new();
         leader_schedule.insert(validator_id.to_string(), vec![slot_index]);
@@ -289,10 +301,10 @@ mod tests {
         // Set up test variables and mock data.
         let validator_id = "6WgdYhhGE53WrZ7ywJA15hBVkw7CRbQ8yDBBTwmBtAHN";
         let validator_ids: &[String] = &[String::from(validator_id)];
-        let epoch = 819;
-        let block_reward: u64 = 5000;
-        let signatures: u64 = LAMPORT_MULTIPLE;
-        let inflation_reward = 2500;
+        let epoch = 823;
+        let block_reward: u64 = 2500;
+        let signatures: u64 = 2500;
+        let inflation_reward = 5500;
         let jito_reward = 10000;
 
         let mut mock_solana_debt_calculator = MockValidatorRewards::new();
@@ -332,9 +344,7 @@ mod tests {
             .times(1)
             .returning(move |_, _| Ok(mock_rpc_inflation_reward.clone()));
 
-        let first_slot = block::get_first_slot_for_epoch(epoch);
         let slot_index: usize = 10;
-        let slot = first_slot + slot_index as u64;
 
         let mut leader_schedule = HashMap::new();
         leader_schedule.insert(validator_id.to_string(), vec![slot_index]);
@@ -362,9 +372,22 @@ mod tests {
             block_height: None,
         };
 
+        let mock_epoch_info = EpochInfo {
+            epoch: 824,
+            slot_index: 100000,
+            absolute_slot: 10000000,
+            block_height: 103030003,
+            slots_in_epoch: 5000000,
+            transaction_count: Some(1000),
+        };
+
+        mock_solana_debt_calculator
+            .expect_get_epoch_info()
+            .times(1)
+            .returning(move || Ok(mock_epoch_info.clone()));
+
         mock_solana_debt_calculator
             .expect_get_block_with_config()
-            .withf(move |s| *s == slot)
             .times(1)
             .returning(move |_| Ok(mock_block.clone()));
 

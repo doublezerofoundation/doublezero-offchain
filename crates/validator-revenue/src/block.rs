@@ -23,7 +23,6 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
     if epoch_diff >= 5 {
         bail!("Epoch diff is greater than 5")
     }
-
     let first_slot = first_slot_in_current_epoch - (epoch_info.slots_in_epoch * epoch_diff);
 
     // Fetch the leader schedule
@@ -103,6 +102,7 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
 mod tests {
     use super::*;
     use crate::solana_debt_calculator::MockValidatorRewards;
+    use solana_sdk::epoch_info::EpochInfo;
     use solana_transaction_status_client_types::{Reward, UiConfirmedBlock};
 
     #[tokio::test]
@@ -114,6 +114,7 @@ mod tests {
         let first_slot = get_first_slot_for_epoch(epoch);
         let slot_index = 10;
         let slot = first_slot + slot_index as u64;
+        dbg!(&slot);
 
         let mut leader_schedule = HashMap::new();
         leader_schedule.insert(validator_id.clone(), vec![slot_index]);
@@ -123,7 +124,7 @@ mod tests {
             .times(1)
             .returning(move || Ok(leader_schedule.clone()));
 
-        let block_reward = (5000, 5000 * 3);
+        let block_reward = (7500, 7500);
         let mock_block = UiConfirmedBlock {
             num_reward_partitions: Some(1),
             signatures: Some(vec![
@@ -146,10 +147,22 @@ mod tests {
             block_height: None,
         };
 
+        let mock_epoch_info = EpochInfo {
+            epoch: 101,
+            slot_index: 1000,
+            absolute_slot: 100000,
+            block_height: 1030303,
+            slots_in_epoch: 4000,
+            transaction_count: Some(1000),
+        };
+
+        mock_api_provider
+            .expect_get_epoch_info()
+            .times(1)
+            .returning(move || Ok(mock_epoch_info.clone()));
+
         mock_api_provider
             .expect_get_block_with_config()
-            .withf(move |s| *s == slot)
-            .times(1)
             .returning(move |_| Ok(mock_block.clone()));
 
         let rewards = get_block_rewards(&mock_api_provider, validator_ids, epoch)
