@@ -28,5 +28,4 @@ solana-client.workspace = true
 solana-sdk.workspace = true
 solana-transaction-status-client-types.workspace = true
 svm-hash.workspace = true
-tabled.workspace = true
 tokio.workspace = true
