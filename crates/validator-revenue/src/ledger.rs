@@ -129,7 +129,7 @@ mod tests {
     use solana_transaction_status_client_types::{TransactionDetails, UiTransactionEncoding};
     use std::{str::FromStr, time::Duration};
 
-    #[ignore = "needs remote connection"]
+    // #[ignore = "needs remote connection"]
     #[tokio::test]
     async fn test_convert_dz_epoch_to_solana_epoch() -> anyhow::Result<()> {
         let commitment_config = CommitmentConfig::processed();
@@ -157,10 +157,11 @@ mod tests {
             vote_account_config,
         );
 
-        let _solana_epoch =
+        let solana_epoch =
             get_solana_epoch_from_dz_epoch(&fpc.solana_rpc_client, &fpc.ledger_rpc_client, 87)
                 .await?;
 
+        assert_eq!(solana_epoch, 835);
         Ok(())
     }
 
