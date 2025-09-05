@@ -3,10 +3,13 @@ use std::ops::Deref;
 use anyhow::{Error, Result, bail};
 use clap::Args;
 use doublezero_solana_validator_debt::solana_debt_calculator::SolanaDebtCalculator;
-use solana_client::{nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig}};
+use solana_client::{
+    nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},
+    rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig},
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
-use solana_transaction_status_client_types::{TransactionDetails, UiTransactionEncoding}
+use solana_transaction_status_client_types::{TransactionDetails, UiTransactionEncoding};
 use url::Url;
 
 const SOLANA_MAINNET_GENESIS_HASH: Pubkey =
@@ -23,15 +26,14 @@ pub struct DoubleZeroLedgerRpcOptions {
 pub struct SolanaDebtPaymentConnectionOptions {
     /// URL for Solana's JSON RPC or moniker (or their first letter):
     /// [mainnet-beta, testnet, localhost].
-    #[arg(long = "solana_url")]
+    #[arg(long = "solana-url")]
     pub solana_url_or_moniker: Option<String>,
 
     /// URL for DoubleZero ledger's JSON RPC or moniker (or their first letter):
     /// [mainnet-beta, testnet, localhost].
-    #[arg(long = "doublezero_ledger_url")]
+    #[arg(long = "doublezero-ledger_url")]
     pub ledger_url_or_moniker: Option<String>,
 }
-
 
 #[derive(Debug, Args)]
 pub struct SolanaConnectionOptions {
@@ -104,7 +106,6 @@ impl TryFrom<SolanaConnectionOptions> for Connection {
     }
 }
 
-
 impl TryFrom<SolanaDebtPaymentConnectionOptions> for SolanaDebtCalculator {
     type Error = Error;
 
@@ -120,15 +121,11 @@ impl TryFrom<SolanaDebtPaymentConnectionOptions> for SolanaDebtCalculator {
         let ledger_url_or_moniker = ledger_url_or_moniker.as_deref().unwrap_or("m");
         let ledger_rpc_url = Url::parse(normalize_to_ledger_url_if_moniker(ledger_url_or_moniker))?;
 
-        let solana_rpc_client =  RpcClient::new_with_commitment(
-            solana_rpc_url.into(),
-            CommitmentConfig::confirmed(),
-        );
+        let solana_rpc_client =
+            RpcClient::new_with_commitment(solana_rpc_url.into(), CommitmentConfig::confirmed());
 
-        let ledger_rpc_client =  RpcClient::new_with_commitment(
-            ledger_rpc_url.into(),
-            CommitmentConfig::confirmed(),
-        );
+        let ledger_rpc_client =
+            RpcClient::new_with_commitment(ledger_rpc_url.into(), CommitmentConfig::confirmed());
 
         let rpc_block_config = RpcBlockConfig {
             encoding: Some(UiTransactionEncoding::Base58),
@@ -145,7 +142,12 @@ impl TryFrom<SolanaDebtPaymentConnectionOptions> for SolanaDebtCalculator {
             delinquent_slot_distance: None,
         };
 
-        Ok(SolanaDebtCalculator::new(ledger_rpc_client, solana_rpc_client, rpc_block_config, vote_account_config))
+        Ok(SolanaDebtCalculator::new(
+            ledger_rpc_client,
+            solana_rpc_client,
+            rpc_block_config,
+            vote_account_config,
+        ))
     }
 }
 

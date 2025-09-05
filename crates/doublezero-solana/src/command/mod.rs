@@ -66,7 +66,7 @@ impl DoubleZeroSolanaCommand {
             DoubleZeroSolanaCommand::Prepaid(prepaid) => prepaid.command.try_into_execute().await,
             DoubleZeroSolanaCommand::Validator(validator) => {
                 validator.command.try_into_execute().await
-            },
+            }
             DoubleZero2zSolanaCommand::ValidatorRevenue(validator_revenue) => {
                 validator_revenue.command.try_into_execute().await
             }
