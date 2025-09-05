@@ -129,7 +129,7 @@ mod tests {
     use solana_transaction_status_client_types::{TransactionDetails, UiTransactionEncoding};
     use std::{str::FromStr, time::Duration};
 
-    // #[ignore = "needs remote connection"]
+    #[ignore = "needs remote connection"]
     #[tokio::test]
     async fn test_convert_dz_epoch_to_solana_epoch() -> anyhow::Result<()> {
         let commitment_config = CommitmentConfig::processed();
