@@ -31,9 +31,6 @@ pub enum ValidatorDebtSubCommand {
         #[command(flatten)]
         solana_debt_payer_options: SolanaDebtPaymentConnectionOptions,
 
-        /// Temporary: pass in comma-separated list of validator pubkeys
-        #[arg(long)]
-        validator_pubkeys: String,
         /// Simulate the command
         #[arg(long)]
         dry_run: bool,
@@ -47,14 +44,12 @@ impl ValidatorDebtSubCommand {
                 doublezero_epoch,
                 solana_debt_payer_options,
                 keypair_path,
-                validator_pubkeys,
                 dry_run,
             } => {
                 execute_pay_debt(
                     doublezero_epoch,
                     solana_debt_payer_options,
                     keypair_path,
-                    validator_pubkeys,
                     dry_run,
                 )
                 .await
