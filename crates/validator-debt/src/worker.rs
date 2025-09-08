@@ -25,7 +25,7 @@ use svm_hash::sha2::Hash;
 
 fn serviceability_pubkey() -> Result<Pubkey> {
     match env::var("SERVICEABILITY_PUBKEY") {
-        Ok(pubkey) => Ok(Pubkey::from_str(&pubkey).unwrap()),
+        Ok(pubkey) => Ok(Pubkey::from_str(&pubkey)?),
         Err(_) => bail!("SERVICEABILITY_PUBKEY env var not set"),
     }
 }
@@ -229,7 +229,7 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
     };
 
     let accounts = ledger_rpc_client
-        .get_program_accounts_with_config(&serviceability_pubkey().unwrap(), config)
+        .get_program_accounts_with_config(&serviceability_pubkey()?, config)
         .await?;
 
     let mut pubkeys: Vec<String> = Vec::new();
