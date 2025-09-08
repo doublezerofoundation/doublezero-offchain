@@ -12,28 +12,12 @@ use crate::{
     transaction,
     validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
 };
-use anyhow::{Result, bail};
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use doublezero_revenue_distribution::instruction::RevenueDistributionInstructionData::ConfigureDistributionDebt;
-// use doublezero_serviceability::state::accountdata::AccountData;
-use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::keypair::Keypair};
-use std::{env, str::FromStr};
+use std::str::FromStr;
 use svm_hash::sha2::Hash;
-
-fn debt_seed_prefix() -> Result<String> {
-    match env::var("DEBT_SEED_PREFIX") {
-        Ok(seed_prefix) => Ok(seed_prefix),
-        Err(_) => bail!("DEBT_SEED_PREFIX env var not set"),
-    }
-}
-
-fn serviceability_pubkey() -> Result<Pubkey> {
-    match env::var("SERVICEABILITY_PUBKEY") {
-        Ok(pubkey) => Ok(Pubkey::from_str(&pubkey).unwrap()),
-        Err(_) => bail!("SERVICEABILITY_PUBKEY env var not set"),
-    }
-}
 
 #[derive(Debug)]
 pub struct RecordResult {
@@ -48,6 +32,7 @@ pub struct RecordResult {
 pub async fn write_debts<T: ValidatorRewards>(
     solana_debt_calculator: &T,
     signer: Keypair,
+    validator_ids: Vec<String>,
     dz_epoch: u64,
     dry_run: bool,
 ) -> Result<RecordResult> {
@@ -83,13 +68,9 @@ pub async fn write_debts<T: ValidatorRewards>(
     .await?;
 
     // Create seeds
-    let wrapped_prefix = debt_seed_prefix().unwrap();
-    let prefix = wrapped_prefix.as_bytes();
+    let prefix = b"solana_validator_debt_test";
     let dz_epoch_bytes = dz_epoch.to_le_bytes();
     let seeds: &[&[u8]] = &[prefix, &dz_epoch_bytes];
-
-    let validator_pubkeys =
-        fetch_validator_pubkeys(solana_debt_calculator.ledger_rpc_client()).await?;
 
     // fetch the distribution to get the fee percentages
     let distribution = transaction
@@ -99,7 +80,7 @@ pub async fn write_debts<T: ValidatorRewards>(
     // fetch rewards for validators
     let validator_rewards = rewards::get_total_rewards(
         solana_debt_calculator,
-        validator_pubkeys.as_slice(),
+        validator_ids.as_slice(),
         solana_epoch,
     )
     .await?;
@@ -213,31 +194,6 @@ pub async fn write_debts<T: ValidatorRewards>(
     Ok(record_result)
 }
 
-async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<String>> {
-    let config = solana_client::rpc_config::RpcProgramAccountsConfig {
-        filters: None,
-        account_config: solana_client::rpc_config::RpcAccountInfoConfig {
-            encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
-            data_slice: None,
-            commitment: Some(solana_sdk::commitment_config::CommitmentConfig::confirmed()),
-            min_context_slot: None,
-        },
-        with_context: None,
-        sort_results: None,
-    };
-
-    let accounts = ledger_rpc_client
-        .get_program_accounts_with_config(&serviceability_pubkey().unwrap(), config)
-        .await?;
-
-    let pubkeys: Vec<String> = accounts
-        .iter()
-        .map(|(pubkey, _account)| pubkey.to_string())
-        .collect();
-
-    Ok(pubkeys)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -310,9 +266,11 @@ mod tests {
 
         let dz_epoch = 84;
         let _res = write_debts(
-            &fpc, keypair,
-            // vec!["va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b".to_string()],
-            dz_epoch, false,
+            &fpc,
+            keypair,
+            vec!["va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b".to_string()],
+            dz_epoch,
+            false,
         )
         .await?;
         let signer = try_load_keypair(None).unwrap();
@@ -350,6 +308,7 @@ mod tests {
         let commitment_config = CommitmentConfig::processed();
 
         let validator_id = "devgM7SXHvoHH6jPXRsjn97gygPUo58XEnc9bqY1jpj";
+        let validator_ids: Vec<String> = vec![String::from(validator_id)];
         let epoch = 0;
         let fake_fetched_epoch = 820;
         let block_reward: u64 = 5000;
@@ -463,7 +422,14 @@ mod tests {
 
         let signer = try_load_keypair(None).unwrap();
 
-        let record_result = write_debts(&mock_solana_debt_calculator, signer, 45, false).await?;
+        let record_result = write_debts(
+            &mock_solana_debt_calculator,
+            signer,
+            validator_ids,
+            45,
+            false,
+        )
+        .await?;
 
         assert_eq!(
             record_result.last_written_epoch.unwrap(),
