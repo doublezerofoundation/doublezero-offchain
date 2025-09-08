@@ -286,7 +286,7 @@ mod tests {
         Ok(default_keypair)
     }
 
-    // #[ignore = "need local validator"]
+    #[ignore = "need local validator"]
     #[tokio::test]
     async fn test_distribution_flow() -> Result<()> {
         let keypair = try_load_keypair(None).unwrap();
