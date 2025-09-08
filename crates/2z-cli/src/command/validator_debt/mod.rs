@@ -1,7 +1,12 @@
 use crate::rpc::SolanaDebtPaymentConnectionOptions;
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use doublezero_solana_validator_debt::{solana_debt_calculator::SolanaDebtCalculator, worker};
+use doublezero_solana_validator_debt::{
+    ledger,
+    solana_debt_calculator::{SolanaDebtCalculator, ValidatorRewards},
+    transaction::Transaction,
+    validator_debt::ComputedSolanaValidatorDebts,
+};
 use solana_sdk::signer::keypair::Keypair;
 use std::path::PathBuf;
 
@@ -22,7 +27,7 @@ pub enum ValidatorDebtSubCommand {
         #[arg(long)]
         doublezero_epoch: u64,
 
-        /// Connectin options to Solana and DoubleZero ledger
+        /// Connection options to Solana and DoubleZero ledger
         #[command(flatten)]
         solana_debt_payer_options: SolanaDebtPaymentConnectionOptions,
 
@@ -62,25 +67,37 @@ async fn execute_pay_debt(
     doublezero_epoch: u64,
     solana_debt_payer_options: SolanaDebtPaymentConnectionOptions,
     keypair_path: Option<String>,
-    validator_pubkeys: String,
     dry_run: bool,
 ) -> Result<()> {
-    let validator_pubkeys: Vec<String> = validator_pubkeys
-        .split(",")
-        .map(|validator_id| validator_id.to_string()) //
-        .collect();
     let debt_calculator = SolanaDebtCalculator::try_from(solana_debt_payer_options)?;
     let signer = try_load_keypair(keypair_path.map(Into::into))?;
-    let debt = worker::write_debts(
-        &debt_calculator,
-        signer,
-        // TODO: pull in validator IDs from access pass
-        validator_pubkeys,
-        doublezero_epoch,
-        dry_run,
+    let prefix = b"solana_validator_debt_test";
+    let dz_epoch_bytes = doublezero_epoch.to_le_bytes();
+    let seeds: &[&[u8]] = &[prefix, &dz_epoch_bytes];
+
+    let read = ledger::read_from_ledger(
+        debt_calculator.ledger_rpc_client(),
+        &signer,
+        seeds,
+        debt_calculator.ledger_commitment_config(),
     )
     .await?;
-    dbg!(debt);
+
+    let deserialized: ComputedSolanaValidatorDebts = borsh::from_slice(read.1.as_slice()).unwrap();
+
+    let transaction = Transaction::new(signer, dry_run);
+    let transactions = transaction
+        .pay_solana_validator_debt(
+            &debt_calculator.solana_rpc_client,
+            deserialized,
+            doublezero_epoch,
+        )
+        .await?;
+    for t in transactions {
+        transaction
+            .send_or_simulate_transaction(&debt_calculator.solana_rpc_client, &t)
+            .await?;
+    }
     Ok(())
 }
 
