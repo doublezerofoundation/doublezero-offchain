@@ -1918,6 +1918,7 @@ dependencies = [
  "doublezero-program-tools",
  "doublezero-record",
  "doublezero-revenue-distribution",
+ "doublezero-serviceability",
  "doublezero_sdk",
  "futures",
  "mockall",
