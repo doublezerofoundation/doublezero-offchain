@@ -15,7 +15,12 @@ use crate::{
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use doublezero_revenue_distribution::instruction::RevenueDistributionInstructionData::ConfigureDistributionDebt;
-use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::keypair::Keypair};
+use solana_sdk::{
+    pubkey,
+    pubkey::Pubkey,
+    signature::Signature,
+    signer::keypair::Keypair,
+};
 use std::str::FromStr;
 use svm_hash::sha2::Hash;
 
@@ -66,6 +71,25 @@ pub async fn write_debts<T: ValidatorRewards>(
         dz_epoch,
     )
     .await?;
+    let config = solana_client::rpc_config::RpcProgramAccountsConfig {
+        filters: None,
+        account_config: solana_client::rpc_config::RpcAccountInfoConfig {
+            encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+            data_slice: None,
+            commitment: Some(solana_sdk::commitment_config::CommitmentConfig::confirmed()),
+            min_context_slot: None,
+        },
+        with_context: None,
+        sort_results: None,
+    };
+
+    let _x = solana_debt_calculator
+        .solana_rpc_client()
+        .get_program_accounts_with_config(
+            &pubkey!("DZtnuQ839pSaDMFG5q1ad2V95G82S5EC4RrB3Ndw2Heb"),
+            config,
+        )
+        .await?;
 
     // Create seeds
     let prefix = b"solana_validator_debt_test";
