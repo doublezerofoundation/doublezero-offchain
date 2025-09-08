@@ -12,7 +12,11 @@ use doublezero_revenue_distribution::{
     state::{Distribution, ProgramConfig},
     types::{DoubleZeroEpoch, SolanaValidatorDebt},
 };
-use solana_client::{nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction};
+use solana_client::{
+    nonblocking::rpc_client::RpcClient,
+    rpc_client::SerializableTransaction,
+    rpc_response::{Response, RpcSimulateTransactionResult},
+};
 use solana_sdk::{
     message::{VersionedMessage, v0::Message},
     pubkey::Pubkey,
@@ -164,17 +168,13 @@ impl Transaction {
     }
 
     // only simulate transaction
-    pub async fn verify_transaction(
+    pub async fn verify_merkle_root(
         &self,
         solana_rpc_client: &RpcClient,
         dz_epoch: u64,
         proof: MerkleProof,
         leaf: SolanaValidatorDebt,
-    ) -> Result<()> {
-        if !self.dry_run {
-            bail!("Only simulated transaction are allowed for verify_transaction")
-        };
-
+    ) -> Result<Response<RpcSimulateTransactionResult>> {
         let dz_epoch = DoubleZeroEpoch::new(dz_epoch);
         let instruction = try_build_instruction(
             &ID,
@@ -193,9 +193,10 @@ impl Transaction {
         let verified_transaction =
             VersionedTransaction::try_new(VersionedMessage::V0(message), &[&self.signer])
                 .map_err(|e| anyhow!("Failed to create verified instruction: {e:?}"))?;
-        self.send_or_simulate_transaction(solana_rpc_client, &verified_transaction)
+        let verified = solana_rpc_client
+            .simulate_transaction(&verified_transaction)
             .await?;
-        Ok(())
+        Ok(verified)
     }
 
     pub async fn send_or_simulate_transaction(
@@ -244,8 +245,6 @@ impl Transaction {
 mod tests {
     use super::*;
     use crate::{
-        ledger,
-        rewards::EpochRewards,
         solana_debt_calculator::{SolanaDebtCalculator, ledger_rpc, solana_rpc},
         validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
     };
@@ -281,7 +280,7 @@ mod tests {
 
     #[ignore = "needs local validator"]
     #[tokio::test]
-    async fn test_verify_distribution() -> anyhow::Result<()> {
+    async fn test_verify_merkle_root() -> anyhow::Result<()> {
         let keypair = try_load_keypair(None).unwrap();
         let commitment_config = CommitmentConfig::processed();
         let ledger_rpc_client = RpcClient::new_with_commitment(ledger_rpc(), commitment_config);
@@ -328,7 +327,7 @@ mod tests {
         );
         let (_, proof) = debt_proof.unwrap();
         transaction
-            .verify_transaction(&solana_rpc_client, dz_epoch, proof, leaf)
+            .verify_merkle_root(&solana_rpc_client, dz_epoch, proof, leaf)
             .await?;
 
         Ok(())
