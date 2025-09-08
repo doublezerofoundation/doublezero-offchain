@@ -22,6 +22,16 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::keypair::Keypair};
 use std::{env, str::FromStr};
 use svm_hash::sha2::Hash;
+use tabled::{Table, Tabled, settings::Style};
+
+#[derive(Debug, Tabled)]
+pub struct DebtSummary {}
+
+#[derive(Debug, Tabled)]
+pub struct TransactionSummmary {
+    pub transaction_type: String,
+    pub signature: String,
+}
 
 fn serviceability_pubkey() -> Result<Pubkey> {
     match env::var("SERVICEABILITY_PUBKEY") {
@@ -101,27 +111,19 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     signer: Keypair,
     dz_epoch: u64,
     dry_run: bool,
-) -> Result<RecordResult> {
-    let record_result: RecordResult;
+) -> Result<()> {
     let fetched_dz_epoch_info = solana_debt_calculator
         .ledger_rpc_client()
         .get_epoch_info()
         .await?;
 
-    let now = Utc::now();
     let transaction = transaction::Transaction::new(signer, dry_run);
 
     if fetched_dz_epoch_info.epoch == dz_epoch {
-        record_result = RecordResult {
-            last_written_epoch: Some(fetched_dz_epoch_info.epoch),
-            last_check: Some(now),
-            data_written: None, // probably will be something if we want to record "heartbeats"
-            computed_debts: None,
-            tx_submitted_sig: None,
-        };
-        // maybe write last check time or maybe epoch + counter ?
-        // return early as there's nothing to write
-        return Ok(record_result);
+        bail!(
+            "Fetched DZ epoch {} == dz_epoch parameter {dz_epoch}",
+            fetched_dz_epoch_info.epoch
+        );
     };
 
     // get solana epoch
@@ -226,16 +228,11 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         )
         .await?;
 
-    record_result = RecordResult {
-        last_written_epoch: Some(dz_epoch),
-        last_check: Some(now),
-        data_written: merkle_root,
-        computed_debts: Some(computed_solana_validator_debts),
-        tx_submitted_sig: Some(tx_submitted_sig.ok_or_else(|| {
-            anyhow::anyhow!("send_or_simulate_transaction returned None for tx_submitted_sig")
-        })?),
-    };
-    Ok(record_result)
+    println!(
+        "Transaction signatures:\n{}",
+        Table::new().with(Style::psql().remove_horizontals())
+    );
+    Ok(())
 }
 
 async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<String>> {
