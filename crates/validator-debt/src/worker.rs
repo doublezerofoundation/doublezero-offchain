@@ -15,18 +15,13 @@ use crate::{
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use doublezero_revenue_distribution::instruction::RevenueDistributionInstructionData::ConfigureDistributionDebt;
-// use doublezero_serviceability::state::accountdata::AccountData;
+use doublezero_serviceability::state::{
+    accesspass::AccessPassType::SolanaValidator, accountdata::AccountData,
+};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::keypair::Keypair};
 use std::{env, str::FromStr};
 use svm_hash::sha2::Hash;
-
-fn debt_seed_prefix() -> Result<String> {
-    match env::var("DEBT_SEED_PREFIX") {
-        Ok(seed_prefix) => Ok(seed_prefix),
-        Err(_) => bail!("DEBT_SEED_PREFIX env var not set"),
-    }
-}
 
 fn serviceability_pubkey() -> Result<Pubkey> {
     match env::var("SERVICEABILITY_PUBKEY") {
@@ -83,8 +78,7 @@ pub async fn write_debts<T: ValidatorRewards>(
     .await?;
 
     // Create seeds
-    let wrapped_prefix = debt_seed_prefix().unwrap();
-    let prefix = wrapped_prefix.as_bytes();
+    let prefix = b"solana_validator_debt_test";
     let dz_epoch_bytes = dz_epoch.to_le_bytes();
     let seeds: &[&[u8]] = &[prefix, &dz_epoch_bytes];
 
@@ -214,8 +208,16 @@ pub async fn write_debts<T: ValidatorRewards>(
 }
 
 async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<String>> {
+    let account_type = 11; // access pass
+    let filters = vec![solana_client::rpc_filter::RpcFilterType::Memcmp(
+        solana_client::rpc_filter::Memcmp::new(
+            0,
+            solana_client::rpc_filter::MemcmpEncodedBytes::Bytes(vec![account_type]),
+        ),
+    )];
+
     let config = solana_client::rpc_config::RpcProgramAccountsConfig {
-        filters: None,
+        filters: Some(filters),
         account_config: solana_client::rpc_config::RpcAccountInfoConfig {
             encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
             data_slice: None,
@@ -230,10 +232,15 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
         .get_program_accounts_with_config(&serviceability_pubkey().unwrap(), config)
         .await?;
 
-    let pubkeys: Vec<String> = accounts
-        .iter()
-        .map(|(pubkey, _account)| pubkey.to_string())
-        .collect();
+    let mut pubkeys: Vec<String> = Vec::new();
+
+    for (_pubkey, account) in accounts {
+        let account_data = AccountData::try_from(&account.data[..])?;
+        let access_pass = account_data.get_accesspass()?;
+        if let SolanaValidator(pubkey) = access_pass.accesspass_type {
+            pubkeys.push(pubkey.to_string())
+        }
+    }
 
     Ok(pubkeys)
 }
@@ -279,7 +286,7 @@ mod tests {
         Ok(default_keypair)
     }
 
-    #[ignore = "need local validator"]
+    // #[ignore = "need local validator"]
     #[tokio::test]
     async fn test_distribution_flow() -> Result<()> {
         let keypair = try_load_keypair(None).unwrap();
@@ -343,7 +350,7 @@ mod tests {
 
         Ok(())
     }
-    #[ignore = "this will fail without local validator"]
+    // #[ignore = "this will fail without local validator"]
     #[tokio::test]
     async fn test_execute_worker() -> Result<()> {
         let mut mock_solana_debt_calculator = MockValidatorRewards::new();
