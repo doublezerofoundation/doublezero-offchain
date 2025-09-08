@@ -20,7 +20,7 @@ solana-sdk.workspace = true
 solana-transaction-status-client-types.workspace = true
 tokio.workspace = true
 url.workspace = true
-doublezero-solana-validator-debt = { path = "../validator-revenue/" }
+doublezero-solana-validator-debt = { path = "../validator-debt/" }
 [[bin]]
 name = "doublezero-solana"
 path = "src/main.rs"
