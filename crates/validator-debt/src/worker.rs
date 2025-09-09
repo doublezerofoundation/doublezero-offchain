@@ -16,7 +16,7 @@ use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use doublezero_revenue_distribution::instruction::RevenueDistributionInstructionData::ConfigureDistributionDebt;
 use doublezero_serviceability::state::{
-    accesspass::AccessPassType::SolanaValidator, accountdata::AccountData,
+    accesspass::AccessPassType, accountdata::AccountData, accounttype::AccountType,
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signature::Signature, signer::keypair::Keypair};
@@ -208,7 +208,7 @@ pub async fn write_debts<T: ValidatorRewards>(
 }
 
 async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<String>> {
-    let account_type = 11; // access pass
+    let account_type = AccountType::AccessPass as u8;
     let filters = vec![solana_client::rpc_filter::RpcFilterType::Memcmp(
         solana_client::rpc_filter::Memcmp::new(
             0,
@@ -237,7 +237,7 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
     for (_pubkey, account) in accounts {
         let account_data = AccountData::try_from(&account.data[..])?;
         let access_pass = account_data.get_accesspass()?;
-        if let SolanaValidator(pubkey) = access_pass.accesspass_type {
+        if let AccessPassType::SolanaValidator(pubkey) = access_pass.accesspass_type {
             pubkeys.push(pubkey.to_string())
         }
     }
