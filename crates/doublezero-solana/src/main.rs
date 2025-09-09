@@ -13,5 +13,8 @@ struct DoubleZeroSolanaApp {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    DoubleZeroSolanaApp::parse().command.try_into_execute().await
+    DoubleZeroSolanaApp::parse()
+        .command
+        .try_into_execute()
+        .await
 }
