@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cli::{inspect::InspectCommands, rewards::RewardsCommands};
 use contributor_rewards::{calculator::orchestrator::Orchestrator, settings::Settings};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use std::path::PathBuf;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -83,6 +84,23 @@ impl Cli {
         };
         init_logging(&settings.log_level)?;
 
+        // Initialize metrics exporter if enabled
+        if let Some(metrics) = &settings.metrics {
+            if let Err(e) = PrometheusBuilder::new()
+                .with_http_listener(metrics.addr)
+                .install()
+            {
+                tracing::warn!(
+                    "Failed to initialize metrics exporter: {e}. Continuing without metrics."
+                );
+            } else {
+                export_build_info();
+                tracing::info!("Metrics exporter initialized on {}", metrics.addr);
+            }
+        } else {
+            tracing::info!("Metrics export disabled");
+        }
+
         let orchestrator = Orchestrator::new(&settings);
 
         // Route to module handlers
@@ -114,4 +132,20 @@ fn init_logging(log_level: &str) -> Result<()> {
         .init();
 
     Ok(())
+}
+
+fn export_build_info() {
+    let version = option_env!("BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+    let build_commit = option_env!("BUILD_COMMIT").unwrap_or("UNKNOWN");
+    let build_date = option_env!("DATE").unwrap_or("UNKNOWN");
+    let pkg_version = env!("CARGO_PKG_VERSION");
+
+    metrics::gauge!(
+        "doublezero_contributor_rewards_build_info",
+        "version" => version,
+        "commit" => build_commit,
+        "date" => build_date,
+        "pkg_version" => pkg_version
+    )
+    .set(1.0);
 }

@@ -42,7 +42,7 @@ impl RewardsWorker {
         dry_run: bool,
         interval: Duration,
     ) -> Self {
-        let max_consecutive_failures = orchestrator.settings.worker.max_consecutive_failures;
+        let max_consecutive_failures = orchestrator.settings.scheduler.max_consecutive_failures;
         Self {
             orchestrator: orchestrator.clone(),
             state_file,
@@ -124,6 +124,8 @@ impl RewardsWorker {
                 Ok(processed) => {
                     if processed {
                         info!("Successfully processed rewards");
+                        metrics::counter!("doublezero_contributor_rewards_worker_success")
+                            .increment(1);
                     } else {
                         debug!("No new rewards to process");
                     }
@@ -134,6 +136,8 @@ impl RewardsWorker {
                     error!("Failed to process rewards: {}", e);
                     state.mark_failure();
                     state.save(&self.state_file)?;
+
+                    metrics::counter!("doublezero_contributor_rewards_worker_failure").increment(1);
 
                     // Continue running unless we hit max failures
                     if !state.is_in_failure_state(self.max_consecutive_failures) {
