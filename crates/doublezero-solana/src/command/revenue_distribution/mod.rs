@@ -200,11 +200,7 @@ pub async fn execute_pay_solana_validator_debt(
 
     let transaction = Transaction::new(wallet.signer, wallet.dry_run);
     let transactions = transaction
-        .pay_solana_validator_debt(
-            &wallet.connection.rpc_client,
-            deserialized,
-            epoch,
-        )
+        .pay_solana_validator_debt(&wallet.connection.rpc_client, deserialized, epoch)
         .await?;
     for t in transactions {
         transaction
