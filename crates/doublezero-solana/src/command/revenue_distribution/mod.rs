@@ -54,7 +54,7 @@ pub enum RevenueDistributionSubCommand {
 
     PaySolanaValidatorDebt {
         #[arg(long)]
-        doublezero_epoch: u64,
+        epoch: u64,
 
         #[command(flatten)]
         solana_payer_options: SolanaPayerOptions,
@@ -76,12 +76,12 @@ impl RevenueDistributionSubCommand {
                 solana_payer_options,
             } => execute_initialize_contributor_rewards(service_key, solana_payer_options).await,
             RevenueDistributionSubCommand::PaySolanaValidatorDebt {
-                doublezero_epoch,
+                epoch,
                 solana_payer_options,
                 ledger_connection_options,
             } => {
                 execute_pay_solana_validator_debt(
-                    doublezero_epoch,
+                    epoch,
                     solana_payer_options,
                     ledger_connection_options,
                 )
@@ -179,12 +179,12 @@ pub async fn execute_initialize_contributor_rewards(
 //
 //
 pub async fn execute_pay_solana_validator_debt(
-    doublezero_epoch: u64,
+    epoch: u64,
     solana_payer_options: SolanaPayerOptions,
     ledger_connection_options: LedgerConnectionOptions,
 ) -> Result<()> {
     let prefix = b"solana_validator_debt_test";
-    let dz_epoch_bytes = doublezero_epoch.to_le_bytes();
+    let dz_epoch_bytes = epoch.to_le_bytes();
     let seeds: &[&[u8]] = &[prefix, &dz_epoch_bytes];
     let wallet = Wallet::try_from(solana_payer_options)?;
     let ledger = LedgerConnection::try_from(ledger_connection_options)?;
@@ -203,7 +203,7 @@ pub async fn execute_pay_solana_validator_debt(
         .pay_solana_validator_debt(
             &wallet.connection.rpc_client,
             deserialized,
-            doublezero_epoch,
+            epoch,
         )
         .await?;
     for t in transactions {
