@@ -183,7 +183,7 @@ impl Transaction {
             &ID,
             VerifyDistributionMerkleRootAccounts::new(dz_epoch),
             &RevenueDistributionInstructionData::VerifyDistributionMerkleRoot {
-                kind: DistributionMerkleRootKind::SolanaValidatorPayment(leaf),
+                kind: DistributionMerkleRootKind::SolanaValidatorDebt(leaf),
                 proof,
             },
         )?;

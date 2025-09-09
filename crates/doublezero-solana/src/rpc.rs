@@ -2,14 +2,9 @@ use std::ops::Deref;
 
 use anyhow::{Error, Result, bail};
 use clap::Args;
-use doublezero_solana_validator_debt::solana_debt_calculator::SolanaDebtCalculator;
-use solana_client::{
-    nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},
-    rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig},
-};
+use solana_client::nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::pubkey::Pubkey;
-use solana_transaction_status_client_types::{TransactionDetails, UiTransactionEncoding};
 use url::Url;
 
 const SOLANA_MAINNET_GENESIS_HASH: Pubkey =
@@ -47,9 +42,22 @@ pub struct SolanaConnectionOptions {
     pub ws_url: Option<String>,
 }
 
+#[derive(Debug, Args)]
+pub struct LedgerConnectionOptions {
+    /// URL for DoubleZero Ledger:
+    /// [mainnet-beta, testnet, localhost].
+    #[arg(long = "ledger_url", short = 'l')]
+    pub ledger_url: Option<String>,
+}
+
 pub struct Connection {
     pub rpc_client: RpcClient,
     pub ws_url: Url,
+    pub is_mainnet: bool,
+}
+
+pub struct LedgerConnection {
+    pub rpc_client: RpcClient,
     pub is_mainnet: bool,
 }
 
@@ -64,6 +72,25 @@ impl Connection {
         PubsubClient::new(self.ws_url.as_ref())
             .await
             .map_err(Into::into)
+    }
+}
+
+impl TryFrom<LedgerConnectionOptions> for LedgerConnection {
+    type Error = Error;
+
+    fn try_from(opts: LedgerConnectionOptions) -> Result<LedgerConnection> {
+        let LedgerConnectionOptions { ledger_url } = opts;
+
+        let ledger_url = ledger_url.as_deref().unwrap_or("mainnet-beta");
+        let ledger_rpc_url = Url::parse(normalize_to_ledger_url(ledger_url))?;
+
+        let ledger_rpc_client =
+            RpcClient::new_with_commitment(ledger_rpc_url.into(), CommitmentConfig::confirmed());
+
+        Ok(LedgerConnection {
+            rpc_client: ledger_rpc_client,
+            is_mainnet: false,
+        })
     }
 }
 
@@ -106,52 +133,15 @@ impl TryFrom<SolanaConnectionOptions> for Connection {
     }
 }
 
-impl TryFrom<SolanaDebtPaymentConnectionOptions> for SolanaDebtCalculator {
-    type Error = Error;
+impl Deref for Connection {
+    type Target = RpcClient;
 
-    fn try_from(opts: SolanaDebtPaymentConnectionOptions) -> Result<SolanaDebtCalculator> {
-        let SolanaDebtPaymentConnectionOptions {
-            solana_url_or_moniker,
-            ledger_url_or_moniker,
-        } = opts;
-
-        let solana_url_or_moniker = solana_url_or_moniker.as_deref().unwrap_or("m");
-        let solana_rpc_url = Url::parse(normalize_to_url_if_moniker(solana_url_or_moniker))?;
-
-        let ledger_url_or_moniker = ledger_url_or_moniker.as_deref().unwrap_or("m");
-        let ledger_rpc_url = Url::parse(normalize_to_ledger_url_if_moniker(ledger_url_or_moniker))?;
-
-        let solana_rpc_client =
-            RpcClient::new_with_commitment(solana_rpc_url.into(), CommitmentConfig::confirmed());
-
-        let ledger_rpc_client =
-            RpcClient::new_with_commitment(ledger_rpc_url.into(), CommitmentConfig::confirmed());
-
-        let rpc_block_config = RpcBlockConfig {
-            encoding: Some(UiTransactionEncoding::Base58),
-            transaction_details: Some(TransactionDetails::None),
-            rewards: Some(true),
-            commitment: Some(CommitmentConfig::confirmed()),
-            max_supported_transaction_version: Some(0),
-        };
-
-        let vote_account_config = RpcGetVoteAccountsConfig {
-            vote_pubkey: None,
-            commitment: CommitmentConfig::finalized().into(),
-            keep_unstaked_delinquents: None,
-            delinquent_slot_distance: None,
-        };
-
-        Ok(SolanaDebtCalculator::new(
-            ledger_rpc_client,
-            solana_rpc_client,
-            rpc_block_config,
-            vote_account_config,
-        ))
+    fn deref(&self) -> &Self::Target {
+        &self.rpc_client
     }
 }
 
-impl Deref for Connection {
+impl Deref for LedgerConnection {
     type Target = RpcClient;
 
     fn deref(&self) -> &Self::Target {
@@ -169,8 +159,8 @@ fn normalize_to_url_if_moniker(url_or_moniker: &str) -> &str {
     }
 }
 
-fn normalize_to_ledger_url_if_moniker(url_or_moniker: &str) -> &str {
-    match url_or_moniker {
+fn normalize_to_ledger_url(url: &str) -> &str {
+    match url {
         "m" | "mainnet-beta" => "",
         "t" | "testnet" => "",
         "l" | "localhost" => "http://localhost:8899",
