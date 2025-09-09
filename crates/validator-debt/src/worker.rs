@@ -289,6 +289,7 @@ mod tests {
     #[ignore = "need local validator"]
     #[tokio::test]
     async fn test_distribution_flow() -> Result<()> {
+        // sample validator id: "va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b"
         let keypair = try_load_keypair(None).unwrap();
         let commitment_config = CommitmentConfig::confirmed();
         let ledger_rpc_client = RpcClient::new_with_commitment(ledger_rpc(), commitment_config);
@@ -316,12 +317,7 @@ mod tests {
         );
 
         let dz_epoch = 84;
-        let _res = write_debts(
-            &fpc, keypair,
-            // vec!["va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b".to_string()],
-            dz_epoch, false,
-        )
-        .await?;
+        let _res = write_debts(&fpc, keypair, dz_epoch, false).await?;
         let signer = try_load_keypair(None).unwrap();
 
         let prefix = b"solana_validator_debt_test";
@@ -350,7 +346,8 @@ mod tests {
 
         Ok(())
     }
-    // #[ignore = "this will fail without local validator"]
+
+    #[ignore = "this will fail without local validator"]
     #[tokio::test]
     async fn test_execute_worker() -> Result<()> {
         let mut mock_solana_debt_calculator = MockValidatorRewards::new();
