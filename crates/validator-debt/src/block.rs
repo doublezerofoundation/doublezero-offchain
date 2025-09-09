@@ -70,7 +70,7 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
             })
             .notify(|err, dur: Duration| {
                 info!(
-                    "get_vote_accounts_with_config call failed, retrying in {:?}: {}",
+                    "get_block_with_config call failed, retrying in {:?}: {}",
                     dur, err
                 );
             })
