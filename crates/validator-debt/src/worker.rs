@@ -244,7 +244,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     }
 
     println!(
-        "Validator rewards and debt for epoch {}:\n{}",
+        "Validator rewards for solana epoch {} and validator debt for DoubleZero epoch {dz_epoch}:\n{}",
         validator_rewards.epoch,
         Table::new(write_summaries).with(Style::psql().remove_horizontals())
     );
@@ -333,6 +333,41 @@ mod tests {
 
     #[ignore = "need local validator"]
     #[tokio::test]
+    async fn test_initialize_distribution_flow() -> Result<()> {
+        let keypair = try_load_keypair(None).unwrap();
+        let commitment_config = CommitmentConfig::confirmed();
+        let ledger_rpc_client = RpcClient::new_with_commitment(ledger_rpc(), commitment_config);
+
+        let solana_rpc_client = RpcClient::new_with_commitment(solana_rpc(), commitment_config);
+        let vote_account_config = RpcGetVoteAccountsConfig {
+            vote_pubkey: None,
+            commitment: CommitmentConfig::finalized().into(),
+            keep_unstaked_delinquents: None,
+            delinquent_slot_distance: None,
+        };
+
+        let rpc_block_config = RpcBlockConfig {
+            encoding: Some(UiTransactionEncoding::Base58),
+            transaction_details: Some(TransactionDetails::Signatures),
+            rewards: Some(true),
+            commitment: None,
+            max_supported_transaction_version: Some(0),
+        };
+        let fpc = SolanaDebtCalculator::new(
+            ledger_rpc_client,
+            solana_rpc_client,
+            rpc_block_config,
+            vote_account_config,
+        );
+        let dz_epoch_info = fpc.ledger_rpc_client.get_epoch_info().await?;
+
+        initialize_distribution(&fpc, keypair, dz_epoch_info.epoch, true).await?;
+
+        Ok(())
+    }
+
+    #[ignore = "need local validator"]
+    #[tokio::test]
     async fn test_distribution_flow() -> Result<()> {
         // sample validator id: "va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b"
         let keypair = try_load_keypair(None).unwrap();
@@ -363,6 +398,7 @@ mod tests {
 
         let dz_epoch = 84;
         calculate_validator_debt(&fpc, keypair, dz_epoch, false).await?;
+
         let signer = try_load_keypair(None).unwrap();
 
         let prefix = b"solana_validator_debt_test";
