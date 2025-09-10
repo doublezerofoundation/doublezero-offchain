@@ -522,27 +522,6 @@ mod tests {
 
         calculate_validator_debt(&mock_solana_debt_calculator, signer, 45, false).await?;
 
-        // assert_eq!(
-        //     record_result.last_written_epoch.unwrap(),
-        //     fake_fetched_epoch
-        // );
-
-        // let computed_debts = record_result.computed_debts.unwrap();
-
-        // let first_validator_debt_proof = computed_debts
-        //     .find_debt_proof(&computed_debts.debts[0].node_id)
-        //     .unwrap();
-
-        // assert_eq!(
-        //     first_validator_debt_proof.0.amount,
-        //     block_reward + inflation_reward + jito_reward
-        // );
-
-        // assert_eq!(
-        //     first_validator_debt_proof.0.node_id,
-        //     Pubkey::from_str(validator_id).clone().unwrap()
-        // );
-
         Ok(())
     }
 }
