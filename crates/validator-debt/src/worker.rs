@@ -22,15 +22,6 @@ use solana_sdk::{pubkey::Pubkey, signer::keypair::Keypair};
 use std::{env, str::FromStr};
 use tabled::{Table, Tabled, settings::Style};
 
-#[derive(Debug, Tabled)]
-pub struct DebtSummary {}
-
-#[derive(Debug, Tabled)]
-pub struct TransactionSummary {
-    pub transaction_type: String,
-    pub signature: String,
-}
-
 #[derive(Debug, Default, Tabled)]
 pub struct WriteSummary {
     pub validator_pubkey: String,
