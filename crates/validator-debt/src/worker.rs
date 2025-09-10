@@ -66,12 +66,13 @@ pub async fn initialize_distribution<T: ValidatorRewards>(
         )
         .await?;
 
-    println!(
-        "initialized distribution tx: {:?}",
-        tx_initialized_sig.unwrap()
-    );
+    if let Some(tx) = tx_initialized_sig {
+        println!("initialized distribution tx: {tx:?}");
+    }
+
     Ok(())
 }
+
 pub async fn write_debts<T: ValidatorRewards>(
     solana_debt_calculator: &T,
     signer: Keypair,
