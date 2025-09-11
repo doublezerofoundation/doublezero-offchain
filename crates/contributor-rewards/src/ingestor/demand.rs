@@ -1,9 +1,9 @@
 use crate::ingestor::{epoch::EpochFinder, fetcher::Fetcher, types::FetchData};
 use anyhow::{Result, anyhow, bail};
-use doublezero_serviceability::state::user::User as DZUser;
+use doublezero_serviceability::state::{accesspass::AccessPassType, user::User as DZUser};
 use network_shapley::types::{Demand, Demands};
 use rayon::prelude::*;
-use solana_sdk::system_program::ID as SystemProgramID;
+use solana_sdk::{pubkey::Pubkey, system_program::ID as SystemProgramID};
 use std::collections::BTreeMap;
 use tracing::info;
 
@@ -67,16 +67,37 @@ pub fn build_with_schedule(
     fetch_data: &FetchData,
     leader_schedule: BTreeMap<String, usize>,
 ) -> Result<DemandBuildOutput> {
+    // Build AccessPass user to Validator mapping
+    let accessor_to_validator: BTreeMap<Pubkey, Pubkey> = fetch_data
+        .dz_serviceability
+        .access_passes
+        .par_iter()
+        .filter_map(|(_access_pass_pk, access_pass)| {
+            match access_pass.accesspass_type {
+                AccessPassType::Prepaid => {
+                    // TODO: Ignore or include?
+                    None
+                }
+                AccessPassType::SolanaValidator(validator_pk) => {
+                    Some((access_pass.user_payer, validator_pk))
+                }
+            }
+        })
+        .collect();
+
     // Build validator to user mapping
     let validator_to_user: BTreeMap<String, &DZUser> = fetch_data
         .dz_serviceability
         .users
         .par_iter()
-        .filter_map(|(_user_pk, user)| {
-            // Ensure that validator is not the system program
-            (user.validator_pubkey != SystemProgramID)
-                .then_some((user.validator_pubkey.to_string(), user))
-        })
+        .filter_map(
+            |(_user_pk, user)| match accessor_to_validator.get(&user.owner) {
+                None => None,
+                Some(validator_pk) => {
+                    (*validator_pk != SystemProgramID).then_some((validator_pk.to_string(), user))
+                }
+            },
+        )
         .collect();
 
     if validator_to_user.is_empty() {
