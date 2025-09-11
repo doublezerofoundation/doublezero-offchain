@@ -1,4 +1,4 @@
-use contributor_rewards::{
+use doublezero_contributor_rewards::{
     ingestor::types::{DZInternetData, DZInternetLatencySamples},
     settings::InetLookbackSettings,
 };

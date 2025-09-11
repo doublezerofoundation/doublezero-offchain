@@ -1,4 +1,4 @@
-use contributor_rewards::{
+use doublezero_contributor_rewards::{
     calculator::shapley_handler::PreviousEpochCache,
     processor::{
         internet::{InternetTelemetryStatMap, InternetTelemetryStats},
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_configuration_validation() {
-        use contributor_rewards::settings::validation::validate_config;
+        use doublezero_contributor_rewards::settings::validation::validate_config;
 
         // Valid configuration
         let valid_settings = create_test_settings(0.7, 1000.0, true);

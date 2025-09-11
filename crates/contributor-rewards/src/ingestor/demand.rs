@@ -1,4 +1,8 @@
-use crate::ingestor::{epoch::EpochFinder, fetcher::Fetcher, types::FetchData};
+use crate::ingestor::{
+    epoch::{EpochFinder, LeaderScheduleMap},
+    fetcher::Fetcher,
+    types::FetchData,
+};
 use anyhow::{Result, anyhow, bail};
 use doublezero_serviceability::state::{accesspass::AccessPassType, user::User as DZUser};
 use network_shapley::types::{Demand, Demands};
@@ -54,18 +58,18 @@ pub async fn build(fetcher: &Fetcher, fetch_data: &FetchData) -> Result<DemandBu
     );
 
     // Fetch leader schedule for this DZ epoch
-    let leader_schedule_map = epoch_finder
+    let leader_schedule = epoch_finder
         .fetch_leader_schedule(dz_epoch, timestamp_us)
         .await?;
 
-    build_with_schedule(fetch_data, leader_schedule_map)
+    build_with_schedule(fetch_data, leader_schedule.schedule_map)
 }
 
 /// Builds demands using pre-fetched leader schedule data
 /// NOTE: This allows testing without RPC calls
 pub fn build_with_schedule(
     fetch_data: &FetchData,
-    leader_schedule: BTreeMap<String, usize>,
+    leader_schedule: LeaderScheduleMap,
 ) -> Result<DemandBuildOutput> {
     // Build AccessPass user to Validator mapping
     let accessor_to_validator: BTreeMap<Pubkey, Pubkey> = fetch_data
@@ -75,7 +79,7 @@ pub fn build_with_schedule(
         .filter_map(|(_access_pass_pk, access_pass)| {
             match access_pass.accesspass_type {
                 AccessPassType::Prepaid => {
-                    // TODO: Ignore or include?
+                    // Ignore Prepaid
                     None
                 }
                 AccessPassType::SolanaValidator(validator_pk) => {
@@ -126,7 +130,7 @@ pub fn build_with_schedule(
 pub fn build_city_stats(
     fetch_data: &FetchData,
     validator_to_user: &BTreeMap<String, &DZUser>,
-    leader_schedule: BTreeMap<String, usize>,
+    leader_schedule: LeaderScheduleMap,
 ) -> Result<CityStats> {
     let mut city_stats = CityStats::new();
 
