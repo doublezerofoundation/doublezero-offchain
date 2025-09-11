@@ -19,7 +19,7 @@ use doublezero_serviceability::state::{
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{pubkey::Pubkey, signer::keypair::Keypair};
-use std::{env, str::FromStr};
+use std::{collections::HashMap, env, str::FromStr};
 use tabled::{Table, Tabled, settings::Style};
 
 #[derive(Debug, Default, Tabled)]
@@ -223,25 +223,25 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         println!("submitted distribution tx: {tx:?}");
     }
 
-    let mut write_summaries: Vec<WriteSummary> = Vec::new();
+    let debt_map: HashMap<String, u64> = computed_solana_validator_debts
+        .debts
+        .iter()
+        .map(|debt| (debt.node_id.to_string(), debt.amount))
+        .collect();
 
-    for vr in validator_rewards.rewards {
-        let debt = computed_solana_validator_debts
-            .debts
-            .iter()
-            .find(|&v| v.node_id.to_string() == vr.validator_id);
-        let ws = WriteSummary {
+    let write_summaries: Vec<WriteSummary> = validator_rewards
+        .rewards
+        .into_iter()
+        .map(|vr| WriteSummary {
             validator_pubkey: vr.validator_id.clone(),
             jito_rewards: vr.jito,
             block_base_rewards: vr.block_base,
             block_priority_rewards: vr.block_priority,
             inflation_rewards: vr.inflation,
             total_rewards: vr.total,
-            total_debt: debt.unwrap().amount,
-        };
-
-        write_summaries.push(ws);
-    }
+            total_debt: debt_map[&vr.validator_id], // this should panic if not found
+        })
+        .collect();
 
     println!(
         "Validator rewards for solana epoch {} and validator debt for DoubleZero epoch {dz_epoch}:\n{}",
