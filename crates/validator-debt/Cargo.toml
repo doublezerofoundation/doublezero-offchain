@@ -30,7 +30,6 @@ serde_json.workspace = true
 serde.workspace = true
 solana-account-decoder.workspace = true
 solana-client.workspace = true
-solana-program.workspace = true
 solana-sdk.workspace = true
 solana-transaction-status-client-types.workspace = true
 svm-hash.workspace = true

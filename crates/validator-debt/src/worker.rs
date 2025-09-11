@@ -18,8 +18,7 @@ use doublezero_serviceability::state::{
     accesspass::AccessPassType, accountdata::AccountData, accounttype::AccountType,
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_program::clock::Clock;
-use solana_sdk::{pubkey::Pubkey, signer::keypair::Keypair};
+use solana_sdk::{sysvar::clock, clock::Clock, pubkey::Pubkey, signer::keypair::Keypair};
 use std::{collections::HashMap, env, str::FromStr};
 use tabled::{Table, Tabled, settings::Style};
 
@@ -126,7 +125,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     // get solana current timestamp
     let clock_account = solana_debt_calculator
         .solana_rpc_client()
-        .get_account(&solana_program::sysvar::clock::id())
+        .get_account(&clock::id())
         .await?;
     let clock = bincode::deserialize::<Clock>(&clock_account.data)?;
     let solana_timestamp = clock.unix_timestamp;
