@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use clap::Subcommand;
-use contributor_rewards::{calculator::orchestrator::Orchestrator, worker::RewardsWorker};
+use contributor_rewards::{calculator::orchestrator::Orchestrator, scheduler::ScheduleWorker};
 use std::{path::PathBuf, time::Duration};
 use tracing::info;
 
@@ -87,7 +87,7 @@ async fn start_scheduler(
     info!("Starting rewards scheduler");
 
     // Create and run worker
-    let worker = RewardsWorker::new(
+    let worker = ScheduleWorker::new(
         orchestrator,
         state_file,
         keypair_path,

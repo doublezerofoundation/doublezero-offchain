@@ -8,6 +8,7 @@ use cli::{inspect::InspectCommands, rewards::RewardsCommands};
 use contributor_rewards::{calculator::orchestrator::Orchestrator, settings::Settings};
 use metrics_exporter_prometheus::PrometheusBuilder;
 use std::path::PathBuf;
+use tracing::{debug, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser, Debug)]
@@ -90,15 +91,13 @@ impl Cli {
                 .with_http_listener(metrics.addr)
                 .install()
             {
-                tracing::warn!(
-                    "Failed to initialize metrics exporter: {e}. Continuing without metrics."
-                );
+                warn!("Failed to initialize metrics exporter: {e}. Continuing without metrics.");
             } else {
                 export_build_info();
-                tracing::info!("Metrics exporter initialized on {}", metrics.addr);
+                debug!("Metrics exporter initialized on {}", metrics.addr);
             }
         } else {
-            tracing::info!("Metrics export disabled");
+            debug!("Metrics export disabled");
         }
 
         let orchestrator = Orchestrator::new(&settings);

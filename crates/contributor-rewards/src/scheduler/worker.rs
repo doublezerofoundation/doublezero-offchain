@@ -1,7 +1,7 @@
 use crate::{
     calculator::{orchestrator::Orchestrator, recorder::compute_record_address},
     ingestor::fetcher::Fetcher,
-    worker::state::WorkerState,
+    scheduler::state::SchedulerState,
 };
 use anyhow::{Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
@@ -24,7 +24,7 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 /// Main rewards worker that runs periodically to calculate rewards
-pub struct RewardsWorker {
+pub struct ScheduleWorker {
     orchestrator: Orchestrator,
     state_file: PathBuf,
     keypair_path: Option<PathBuf>,
@@ -33,7 +33,7 @@ pub struct RewardsWorker {
     max_consecutive_failures: u32,
 }
 
-impl RewardsWorker {
+impl ScheduleWorker {
     /// Create a new rewards worker
     pub fn new(
         orchestrator: &Orchestrator,
@@ -75,7 +75,7 @@ impl RewardsWorker {
         }
 
         // Load or create worker state
-        let mut state = WorkerState::load_or_default(&self.state_file)?;
+        let mut state = SchedulerState::load_or_default(&self.state_file)?;
 
         // Set up shutdown signal
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -124,7 +124,7 @@ impl RewardsWorker {
                 Ok(processed) => {
                     if processed {
                         info!("Successfully processed rewards");
-                        metrics::counter!("doublezero_contributor_rewards_worker_success")
+                        metrics::counter!("doublezero_contributor_rewards_scheduler_success")
                             .increment(1);
                     } else {
                         debug!("No new rewards to process");
@@ -137,7 +137,8 @@ impl RewardsWorker {
                     state.mark_failure();
                     state.save(&self.state_file)?;
 
-                    metrics::counter!("doublezero_contributor_rewards_worker_failure").increment(1);
+                    metrics::counter!("doublezero_contributor_rewards_scheduler_failure")
+                        .increment(1);
 
                     // Continue running unless we hit max failures
                     if !state.is_in_failure_state(self.max_consecutive_failures) {
@@ -151,7 +152,7 @@ impl RewardsWorker {
     }
 
     /// Process rewards for the current epoch if needed
-    async fn process_rewards(&self, state: &mut WorkerState) -> Result<bool> {
+    async fn process_rewards(&self, state: &mut SchedulerState) -> Result<bool> {
         // Get current epoch
         let fetcher = Fetcher::from_settings(&self.orchestrator.settings)?;
         let epoch_info = fetcher.dz_rpc_client.get_epoch_info().await?;

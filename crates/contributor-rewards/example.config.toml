@@ -105,7 +105,7 @@ enable_previous_epoch_lookup = true
 interval_seconds = 300
 
 # Path to worker state file for tracking processed epochs
-state_file = "/var/lib/doublezero/contributor-rewards.state"
+state_file = "/var/lib/doublezero-contributor-rewards/scheduler.state"
 
 # Maximum consecutive failures before halting
 max_consecutive_failures = 10

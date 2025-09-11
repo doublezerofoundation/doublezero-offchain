@@ -1,5 +1,6 @@
 use crate::settings::Settings;
 use anyhow::{Result, bail};
+use std::net::{IpAddr, SocketAddr};
 
 /// Validate the configuration values
 pub fn validate_config(settings: &Settings) -> Result<()> {
@@ -135,9 +136,20 @@ pub fn validate_config(settings: &Settings) -> Result<()> {
         );
     }
 
-    // TODO: validate metrics if the settings are present
+    if let Some(metrics) = &settings.metrics {
+        if !validate_socket_addr(&metrics.addr) {
+            bail!("Invalid SocketAddr: {}", metrics.addr)
+        }
+    }
 
     Ok(())
+}
+
+fn validate_socket_addr(addr: &SocketAddr) -> bool {
+    match addr.ip() {
+        IpAddr::V4(ipv4) => !ipv4.is_broadcast() && !ipv4.is_multicast(),
+        IpAddr::V6(ipv6) => !ipv6.is_unspecified() && !ipv6.is_multicast(),
+    }
 }
 
 #[cfg(test)]
@@ -189,7 +201,7 @@ mod tests {
             },
             scheduler: SchedulerSettings {
                 interval_seconds: 300,
-                state_file: "/var/lib/doublezero/contributor-rewards.state".to_string(),
+                state_file: "/var/lib/doublezero-contributor-rewards/scheduler.state".to_string(),
                 max_consecutive_failures: 10,
                 enable_dry_run: false,
             },
