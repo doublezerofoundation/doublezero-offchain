@@ -1,9 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_sdk::pubkey::Pubkey;
 use svm_hash::merkle::{MerkleProof, merkle_root_from_indexed_byte_ref_leaves};
-
 #[derive(Debug, BorshDeserialize, BorshSerialize, Clone)]
 pub struct ComputedSolanaValidatorDebts {
+    pub blockhash: String,
     pub epoch: u64,
     pub debts: Vec<ComputedSolanaValidatorDebt>,
 }
@@ -71,6 +71,7 @@ mod tests {
     #[test]
     fn test_add_rewards_to_tree() -> Result<()> {
         let debts = ComputedSolanaValidatorDebts {
+            blockhash: "1".to_string(),
             epoch: 822,
             debts: vec![
                 ComputedSolanaValidatorDebt {
