@@ -1,5 +1,5 @@
 use crate::ingestor::{
-    epoch::{EpochFinder, LeaderScheduleMap},
+    epoch::{EpochFinder, LeaderSchedule},
     fetcher::Fetcher,
     types::FetchData,
 };
@@ -62,14 +62,14 @@ pub async fn build(fetcher: &Fetcher, fetch_data: &FetchData) -> Result<DemandBu
         .fetch_leader_schedule(dz_epoch, timestamp_us)
         .await?;
 
-    build_with_schedule(fetch_data, leader_schedule.schedule_map)
+    build_with_schedule(fetch_data, &leader_schedule)
 }
 
 /// Builds demands using pre-fetched leader schedule data
 /// NOTE: This allows testing without RPC calls
 pub fn build_with_schedule(
     fetch_data: &FetchData,
-    leader_schedule: LeaderScheduleMap,
+    leader_schedule: &LeaderSchedule,
 ) -> Result<DemandBuildOutput> {
     // Build AccessPass user to Validator mapping
     let accessor_to_validator: BTreeMap<Pubkey, Pubkey> = fetch_data
@@ -130,13 +130,13 @@ pub fn build_with_schedule(
 pub fn build_city_stats(
     fetch_data: &FetchData,
     validator_to_user: &BTreeMap<String, &DZUser>,
-    leader_schedule: LeaderScheduleMap,
+    leader_schedule: &LeaderSchedule,
 ) -> Result<CityStats> {
     let mut city_stats = CityStats::new();
 
     // Process each leader
-    for (validator_pubkey, stake_proxy) in leader_schedule {
-        if let Some(user) = validator_to_user.get(&validator_pubkey)
+    for (validator_pubkey, stake_proxy) in leader_schedule.schedule_map.iter() {
+        if let Some(user) = validator_to_user.get(validator_pubkey)
             && let Some(device) = fetch_data.dz_serviceability.devices.get(&user.device_pk)
             && let Some(location) = fetch_data
                 .dz_serviceability

@@ -32,7 +32,7 @@ mod tests {
         let leader_schedule = load_leader_schedule()?;
 
         // Build demands using the refactored function
-        let result = demand::build_with_schedule(&fetch_data, leader_schedule.schedule_map)?;
+        let result = demand::build_with_schedule(&fetch_data, &leader_schedule)?;
 
         // Verify results
         println!("\nGenerated {} demands", result.demands.len());

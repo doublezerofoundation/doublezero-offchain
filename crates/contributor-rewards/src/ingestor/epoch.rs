@@ -23,7 +23,7 @@ use tracing::{debug, info};
 /// Approximate slot duration in microseconds (400ms)
 pub const SLOT_DURATION_US: u64 = 400_000;
 
-// key: validator_pk, val: ???
+// key: validator_pk, val: slot count
 pub type LeaderScheduleMap = BTreeMap<String, usize>;
 
 // Wrapper struct for leader scheduler

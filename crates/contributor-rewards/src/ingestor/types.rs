@@ -191,6 +191,7 @@ impl DZDeviceLatencySamples {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DZDTelemetryData {
     pub device_latency_samples: Vec<DZDeviceLatencySamples>,
+    #[serde(skip)]
     pub accounts: KeyedAccounts,
 }
 
@@ -268,5 +269,6 @@ impl DZInternetLatencySamples {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DZInternetData {
     pub internet_latency_samples: Vec<DZInternetLatencySamples>,
+    #[serde(skip)]
     pub accounts: KeyedAccounts,
 }
