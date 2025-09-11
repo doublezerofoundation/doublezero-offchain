@@ -12,7 +12,9 @@ pub enum ValidatorDebtCommand {
     InitializeDistribution {
         #[command(flatten)]
         solana_connection_options: SolanaValidatorDebtConnectionOptions,
+        #[arg(long)]
         epoch: u64,
+        #[arg(long, value_name = "DRY_RUN")]
         dry_run: bool,
     },
 
@@ -20,7 +22,9 @@ pub enum ValidatorDebtCommand {
     CalculateValidatorDebt {
         #[command(flatten)]
         solana_connection_options: SolanaValidatorDebtConnectionOptions,
+        #[arg(long)]
         epoch: u64,
+        #[arg(long, value_name = "DRY_RUN")]
         dry_run: bool,
     },
 
@@ -28,7 +32,9 @@ pub enum ValidatorDebtCommand {
     FinalizeTransaction {
         #[command(flatten)]
         solana_connection_options: SolanaValidatorDebtConnectionOptions,
+        #[arg(long)]
         epoch: u64,
+        #[arg(long, value_name = "DRY_RUN")]
         dry_run: bool,
     },
 }
@@ -87,7 +93,7 @@ async fn execute_finalize_transaction(
     let solana_debt_calculator: SolanaDebtCalculator =
         SolanaDebtCalculator::try_from(solana_connection_options)?;
     let signer = try_load_keypair(None).expect("failed to load keypair");
-    worker::calculate_validator_debt(&solana_debt_calculator, signer, epoch, dry_run).await?;
+    worker::finalize_distribution(&solana_debt_calculator, signer, epoch, dry_run).await?;
     Ok(())
 }
 
