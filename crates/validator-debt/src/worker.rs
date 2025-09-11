@@ -200,7 +200,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         .await?;
 
     let computed_solana_validator_debts = ComputedSolanaValidatorDebts {
-        blockhash: recent_blockhash.to_string(),
+        blockhash: recent_blockhash,
         epoch: solana_epoch,
         debts: computed_solana_validator_debt_vec.clone(),
     };
