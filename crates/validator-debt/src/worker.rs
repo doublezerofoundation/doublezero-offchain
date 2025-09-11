@@ -129,14 +129,14 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         .get_account(&solana_program::sysvar::clock::id())
         .await?;
     let clock = bincode::deserialize::<Clock>(&clock_account.data)?;
-    let solana_timestamp = clock.unix_timestamp as u32;
+    let solana_timestamp = clock.unix_timestamp;
 
-    if distribution.calculation_allowed_timestamp >= solana_timestamp {
+    if distribution.calculation_allowed_timestamp as i64 >= solana_timestamp {
         bail!(
-            "Distribution initialization has not passed the calculation_allowed_timestamp: {}. Current timestamp {solana_timestamp}",
+            "Solana timestamp {solana_timestamp} has not passed the calculation_allowed_timestamp: {}",
             distribution.calculation_allowed_timestamp
         );
-    }
+    };
 
     // get solana epoch
     let solana_epoch = ledger::get_solana_epoch_from_dz_epoch(
