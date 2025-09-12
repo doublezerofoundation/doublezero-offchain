@@ -4,11 +4,15 @@ use crate::ingestor::{
     types::FetchData,
 };
 use anyhow::{Result, anyhow, bail};
-use doublezero_serviceability::state::{accesspass::AccessPassType, user::User as DZUser};
+use doublezero_serviceability::state::{
+    accesspass::{AccessPassStatus, AccessPassType},
+    user::User as DZUser,
+};
 use network_shapley::types::{Demand, Demands};
 use rayon::prelude::*;
 use solana_sdk::{pubkey::Pubkey, system_program::ID as SystemProgramID};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use tabled::{Table, Tabled, settings::Style};
 use tracing::info;
 
 // key: location code, val: city stat
@@ -71,38 +75,126 @@ pub fn build_with_schedule(
     fetch_data: &FetchData,
     leader_schedule: &LeaderSchedule,
 ) -> Result<DemandBuildOutput> {
-    // Build AccessPass user to Validator mapping
-    let accessor_to_validator: BTreeMap<Pubkey, Pubkey> = fetch_data
-        .dz_serviceability
-        .access_passes
-        .par_iter()
-        .filter_map(|(_access_pass_pk, access_pass)| {
-            match access_pass.accesspass_type {
-                AccessPassType::Prepaid => {
-                    // Ignore Prepaid
-                    None
-                }
-                AccessPassType::SolanaValidator(validator_pk) => {
-                    Some((access_pass.user_payer, validator_pk))
+    // Build AccessPass lookup map
+    // This maps user_payer -> validator_pk for Connected SolanaValidator access passes only
+    let mut accessor_to_validator: HashMap<Pubkey, Pubkey> = HashMap::new();
+
+    // Track AccessPass statistics
+    let mut prepaid_count = 0;
+    let mut connected_validator_count = 0;
+    let mut disconnected_validator_count = 0;
+    let mut requested_validator_count = 0;
+    let mut expired_validator_count = 0;
+
+    for access_pass in fetch_data.dz_serviceability.access_passes.values() {
+        match access_pass.accesspass_type {
+            AccessPassType::Prepaid => {
+                prepaid_count += 1;
+            }
+            AccessPassType::SolanaValidator(validator_pk) => {
+                match access_pass.status {
+                    AccessPassStatus::Connected => {
+                        connected_validator_count += 1;
+                        // Only add Connected AccessPasses to the mapping
+                        accessor_to_validator.insert(access_pass.user_payer, validator_pk);
+                    }
+                    AccessPassStatus::Disconnected => {
+                        disconnected_validator_count += 1;
+                    }
+                    AccessPassStatus::Requested => {
+                        // XXX: Adding requested access_passes to the mapping as well
+                        accessor_to_validator.insert(access_pass.user_payer, validator_pk);
+                        requested_validator_count += 1;
+                    }
+                    AccessPassStatus::Expired => {
+                        expired_validator_count += 1;
+                    }
                 }
             }
-        })
-        .collect();
+        }
+    }
 
-    // Build validator to user mapping
-    let validator_to_user: BTreeMap<String, &DZUser> = fetch_data
-        .dz_serviceability
-        .users
-        .par_iter()
-        .filter_map(
-            |(_user_pk, user)| match accessor_to_validator.get(&user.owner) {
-                None => None,
-                Some(validator_pk) => {
-                    (*validator_pk != SystemProgramID).then_some((validator_pk.to_string(), user))
+    // Process users and build validator mapping
+    let mut validator_to_user = BTreeMap::new();
+    let mut users_with_access_pass = 0;
+    let mut users_without_access_pass = 0;
+
+    for user in fetch_data.dz_serviceability.users.values() {
+        match accessor_to_validator.get(&user.owner) {
+            None => {
+                users_without_access_pass += 1;
+            }
+            Some(validator_pk) => {
+                if *validator_pk != SystemProgramID {
+                    users_with_access_pass += 1;
+                    validator_to_user.insert(validator_pk.to_string(), user);
                 }
+            }
+        }
+    }
+
+    {
+        // For logging as table
+        #[derive(Debug, Tabled)]
+        struct AccessPassStats {
+            category: String,
+            count: usize,
+        }
+
+        // AccessPass breakdown table
+        let access_pass_stats = vec![
+            AccessPassStats {
+                category: "Prepaid".to_string(),
+                count: prepaid_count,
             },
-        )
-        .collect();
+            AccessPassStats {
+                category: "Validator - Connected".to_string(),
+                count: connected_validator_count,
+            },
+            AccessPassStats {
+                category: "Validator - Disconnected".to_string(),
+                count: disconnected_validator_count,
+            },
+            AccessPassStats {
+                category: "Validator - Requested".to_string(),
+                count: requested_validator_count,
+            },
+            AccessPassStats {
+                category: "Validator - Expired".to_string(),
+                count: expired_validator_count,
+            },
+            AccessPassStats {
+                category: "Total AccessPasses".to_string(),
+                count: fetch_data.dz_serviceability.access_passes.len(),
+            },
+        ];
+
+        let access_table = Table::new(access_pass_stats)
+            .with(Style::psql().remove_horizontals())
+            .to_string();
+        info!("AccessPass Breakdown:\n{}", access_table);
+
+        // User processing table
+        let user_stats = vec![
+            AccessPassStats {
+                category: "Users with Connected AccessPass".to_string(),
+                count: users_with_access_pass,
+            },
+            AccessPassStats {
+                category: "Users without Connected AccessPass".to_string(),
+                count: users_without_access_pass,
+            },
+            AccessPassStats {
+                category: "Total Users".to_string(),
+                count: fetch_data.dz_serviceability.users.len(),
+            },
+        ];
+
+        let user_table = Table::new(user_stats)
+            .with(Style::psql().remove_horizontals())
+            .to_string();
+        info!("User Processing:\n{}", user_table);
+    }
 
     if validator_to_user.is_empty() {
         bail!("Did not find any validators to build demands!")
@@ -115,7 +207,7 @@ pub fn build_with_schedule(
     }
 
     // Generate demands
-    let demands: Demands = generate(&city_stats);
+    let demands = generate(&city_stats);
     if demands.is_empty() {
         bail!("Could not build any demands!")
     }
