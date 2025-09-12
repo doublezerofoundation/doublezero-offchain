@@ -206,7 +206,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     };
 
     println!("attempting to create a new record on DZ ledger");
-    let created_ledger_record = ledger::create_record_on_ledger(
+    ledger::create_record_on_ledger(
         solana_debt_calculator.ledger_rpc_client(),
         recent_blockhash,
         &transaction.signer,
@@ -216,8 +216,37 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     )
     .await?;
 
-    if created_ledger_record {
-        println!("record already created for {seeds:?}");
+    // read record
+    let record = ledger::read_from_ledger(
+        solana_debt_calculator.ledger_rpc_client(),
+        &transaction.signer,
+        seeds,
+        solana_debt_calculator.ledger_commitment_config(),
+    )
+    .await;
+
+    match record {
+        Ok(ledger_record) => {
+            let deserialized_record: ComputedSolanaValidatorDebts =
+                borsh::from_slice(ledger_record.1.as_slice()).unwrap();
+
+            if deserialized_record.blockhash > computed_solana_validator_debts.blockhash {
+                bail!(
+                    "retrieved record blockhash {} is more recent than created record blockhash {}",
+                    &deserialized_record.blockhash,
+                    &computed_solana_validator_debts.blockhash
+                );
+            }
+
+            assert_eq!(
+                deserialized_record.debts,
+                computed_solana_validator_debts.debts
+            );
+        }
+        Err(err) => {
+            dbg!(&err);
+            println!("record doesn't exist, shutting down")
+        }
     }
 
     let merkle_root = computed_solana_validator_debts.merkle_root();
