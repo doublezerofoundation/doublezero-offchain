@@ -81,6 +81,11 @@ impl Wallet {
         Ok(transaction)
     }
 
+    pub async fn get_balance(&self) -> Result<u64> {
+        let balance = self.connection.get_balance(&self.signer.pubkey()).await?;
+        Ok(balance)
+    }
+
     pub async fn print_verbose_output(&self, tx_sigs: &[Signature]) -> Result<()> {
         if self.verbose {
             println!();
