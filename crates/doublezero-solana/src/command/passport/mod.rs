@@ -89,8 +89,15 @@ async fn execute_fetch(
 ) -> Result<()> {
     let connection = Connection::try_from(solana_connection_options)?;
 
+    println!(
+        "Connected to Solana cluster at {}",
+        connection.rpc_client.url()
+    );
+
     if program_config {
         let program_config_key = ProgramConfig::find_address().0;
+        println!("Fetching program config at {program_config_key}");
+
         let program_config_info = connection.get_account(&program_config_key).await?;
 
         let (program_config, _) =
@@ -100,7 +107,18 @@ async fn execute_fetch(
             .ok_or(anyhow!("Failed to deserialize program config"))?;
 
         // TODO: Pretty print.
-        println!("Program config: {program_config:?}");
+        println!(
+            "Program Config:\r\n   admin_key={}\r\n   sentinel_key={}\r\n   request_deposit_lamports={}\r\n   request_fee_lamports={}\r\n   is_paused={}",
+            program_config.admin_key,
+            program_config.sentinel_key,
+            program_config
+                .access_request_deposit_parameters
+                .request_deposit_lamports,
+            program_config
+                .access_request_deposit_parameters
+                .request_fee_lamports,
+            program_config.is_paused()
+        );
     }
 
     Ok(())
@@ -122,6 +140,16 @@ async fn execute_request_solana_validator_access(
     let wallet = Wallet::try_from(solana_payer_options)?;
     let wallet_key = wallet.pubkey();
 
+    let balance = wallet.get_balance().await?;
+    if balance < 1 {
+        bail!(
+            "Insufficient balance: {} SOL",
+            balance as f64 / 1_000_000_000.0
+        );
+    } else if verbose {
+        println!("Wallet balance: {} SOL", balance as f64 / 1_000_000_000.0);
+    }
+
     let ed25519_signature = Signature::from_str(&signature)?;
 
     // Verify the signature.
@@ -139,6 +167,8 @@ async fn execute_request_solana_validator_access(
     } else if verbose {
         println!("Signature recovers node ID: {node_id}");
     }
+    println!("Signature verified");
+    println!("Requesting Solana validator access...");
 
     let request_access_ix = try_build_instruction(
         &ID,
@@ -168,7 +198,7 @@ async fn execute_request_solana_validator_access(
     let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
     if let Some(tx_sig) = tx_sig {
-        println!("Request Solana validator access: {tx_sig}");
+        println!("Signature: {tx_sig}");
 
         wallet.print_verbose_output(&[tx_sig]).await?;
     }
