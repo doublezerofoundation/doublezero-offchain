@@ -201,7 +201,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
 
     let computed_solana_validator_debts = ComputedSolanaValidatorDebts {
         blockhash: recent_blockhash,
-        epoch: solana_epoch,
+        epoch: vec![solana_epoch],
         debts: computed_solana_validator_debt_vec.clone(),
     };
 
@@ -484,7 +484,7 @@ mod tests {
         )
         .await?;
 
-        assert_eq!(deserialized.epoch, solana_epoch);
+        assert_eq!(deserialized.epoch, vec![solana_epoch]);
 
         Ok(())
     }
