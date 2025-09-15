@@ -64,7 +64,12 @@ impl Sentinel {
                 event = self.rx.recv() => {
                     if let Some(signature) = event {
                         info!(%signature, "received access request txn");
-                        let access_ids = self.sol_rpc_client.get_access_request_from_signature(signature).await?;
+                        let access_ids = rpc_with_retry(
+                            || async {
+                                self.sol_rpc_client.get_access_request_from_signature(signature).await
+                            },
+                            "get_access_request_from_signature",
+                        ).await?;
                         if let Err(err) = self.handle_access_request(access_ids).await {
                             error!(?err, "error encountered validating network access request");
                         }
@@ -124,6 +129,7 @@ impl Sentinel {
 
         // NOTE: Temporarily disable leader schedule
         // - This is done so that glxy can onboard backup validator(s)
+        // - Also need to use rpc_with_retry on check_leader_schedule
         // if !self
         //     .sol_rpc_client
         //     .check_leader_schedule(validator_id, self.previous_leader_epochs)
@@ -135,8 +141,13 @@ impl Sentinel {
         //     );
         //     return Ok(None);
         // }
+        let opt_validator_ip = rpc_with_retry(
+            || async { self.sol_rpc_client.get_validator_ip(validator_id).await },
+            "get_validator_ip",
+        )
+        .await?;
 
-        if let Some(validator_ip) = self.sol_rpc_client.get_validator_ip(validator_id).await? {
+        if let Some(validator_ip) = opt_validator_ip {
             Ok(Some(validator_ip))
         } else {
             debug!(
