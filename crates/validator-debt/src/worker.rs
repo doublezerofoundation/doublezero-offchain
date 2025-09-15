@@ -218,7 +218,8 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     match record {
         Ok(ledger_record) => {
             let deserialized_record: ComputedSolanaValidatorDebts =
-                borsh::from_slice(ledger_record.1.as_slice()).unwrap();
+                borsh::from_slice(ledger_record.1.as_slice())
+                    .map_err(|e| anyhow::anyhow!("failed to deserialize ledger record: {}", e))?;
 
             if deserialized_record.blockhash != computed_solana_validator_debts.blockhash {
                 bail!(
