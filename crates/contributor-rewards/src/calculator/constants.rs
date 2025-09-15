@@ -1,3 +1,6 @@
+// slots in epoch
+pub const SLOTS_IN_EPOCH: f64 = 432000.0;
+
 // bits/sec to Gbps
 pub const BPS_TO_GBPS: u64 = 1_000_000_000;
 
@@ -12,3 +15,12 @@ pub const SEC_TO_US: f64 = 1_000_000.0;
 
 // max unit share
 pub const MAX_UNIT_SHARE: f64 = 1_000_000_000.0;
+
+// default traffic
+pub const DEMAND_TRAFFIC: f64 = 0.05;
+
+// default demand type
+pub const DEMAND_TYPE: u32 = 1;
+
+// default multicast enabled?
+pub const DEMAND_MULTICAST_ENABLED: bool = false;

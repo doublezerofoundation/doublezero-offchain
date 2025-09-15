@@ -1,4 +1,7 @@
 use crate::{
+    calculator::constants::{
+        DEMAND_MULTICAST_ENABLED, DEMAND_TRAFFIC, DEMAND_TYPE, SLOTS_IN_EPOCH,
+    },
     ingestor::{
         epoch::{EpochFinder, LeaderSchedule},
         fetcher::Fetcher,
@@ -97,10 +100,18 @@ pub fn build_with_schedule(
             }
             (AccessPassType::SolanaValidator(validator_pk), AccessPassStatus::Requested) => {
                 requested_validator_count += 1;
-                accessor_to_validator.insert(access_pass.user_payer, validator_pk);
+
+                // NOTE: add requested access passes to the map only on testnet/devnet
+                if matches!(settings.network, Network::Devnet | Network::Testnet) {
+                    accessor_to_validator.insert(access_pass.user_payer, validator_pk);
+                }
             }
-            other => {
-                warn!("ignored access_pass: {access_pass}, reason: {other:?}")
+            _ => {
+                warn!(
+                    access_pass_type = ?access_pass.accesspass_type,
+                    status = ?access_pass.status,
+                    "Ignored access pass"
+                );
             }
         }
     }
@@ -240,12 +251,6 @@ pub fn build_city_stats(
 
 /// Generates demand entries for cities
 pub fn generate(city_stats: &CityStats) -> Demands {
-    // TODO: move this to some constants.rs and/or make configurable
-    const TRAFFIC: f64 = 0.05;
-    const DEMAND_TYPE: u32 = 1;
-    const MULTICAST: bool = false;
-    const SLOTS_IN_EPOCH: f64 = 432000.0;
-
     // Filter cities with validators once
     let cities_with_validators: Vec<(&String, &CityStat)> = city_stats
         .iter()
@@ -274,10 +279,10 @@ pub fn generate(city_stats: &CityStats) -> Demands {
                         start: start_city.to_string(),
                         end: end_city.to_string(),
                         receivers: end_stats.validator_count as u32,
-                        traffic: TRAFFIC,
+                        traffic: DEMAND_TRAFFIC,
                         priority,
                         kind: DEMAND_TYPE,
-                        multicast: MULTICAST,
+                        multicast: DEMAND_MULTICAST_ENABLED,
                     })
                 })
                 .collect::<Vec<_>>()
