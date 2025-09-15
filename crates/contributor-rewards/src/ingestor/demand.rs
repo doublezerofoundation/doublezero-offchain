@@ -1,7 +1,10 @@
-use crate::ingestor::{
-    epoch::{EpochFinder, LeaderSchedule},
-    fetcher::Fetcher,
-    types::FetchData,
+use crate::{
+    ingestor::{
+        epoch::{EpochFinder, LeaderSchedule},
+        fetcher::Fetcher,
+        types::FetchData,
+    },
+    settings::{Settings, network::Network},
 };
 use anyhow::{Result, anyhow, bail};
 use doublezero_serviceability::state::{
@@ -13,7 +16,7 @@ use rayon::prelude::*;
 use solana_sdk::{pubkey::Pubkey, system_program::ID as SystemProgramID};
 use std::collections::{BTreeMap, HashMap};
 use tabled::{Table, Tabled, settings::Style};
-use tracing::info;
+use tracing::{info, warn};
 
 // key: location code, val: city stat
 pub type CityStats = BTreeMap<String, CityStat>;
@@ -66,12 +69,13 @@ pub async fn build(fetcher: &Fetcher, fetch_data: &FetchData) -> Result<DemandBu
         .fetch_leader_schedule(dz_epoch, timestamp_us)
         .await?;
 
-    build_with_schedule(fetch_data, &leader_schedule)
+    build_with_schedule(&fetcher.settings, fetch_data, &leader_schedule)
 }
 
 /// Builds demands using pre-fetched leader schedule data
 /// NOTE: This allows testing without RPC calls
 pub fn build_with_schedule(
+    settings: &Settings,
     fetch_data: &FetchData,
     leader_schedule: &LeaderSchedule,
 ) -> Result<DemandBuildOutput> {
@@ -82,34 +86,21 @@ pub fn build_with_schedule(
     // Track AccessPass statistics
     let mut prepaid_count = 0;
     let mut connected_validator_count = 0;
-    let mut disconnected_validator_count = 0;
     let mut requested_validator_count = 0;
-    let mut expired_validator_count = 0;
 
     for access_pass in fetch_data.dz_serviceability.access_passes.values() {
-        match access_pass.accesspass_type {
-            AccessPassType::Prepaid => {
-                prepaid_count += 1;
+        match (access_pass.accesspass_type, access_pass.status) {
+            (AccessPassType::Prepaid, AccessPassStatus::Connected) => prepaid_count += 1,
+            (AccessPassType::SolanaValidator(validator_pk), AccessPassStatus::Connected) => {
+                connected_validator_count += 1;
+                accessor_to_validator.insert(access_pass.user_payer, validator_pk);
             }
-            AccessPassType::SolanaValidator(validator_pk) => {
-                match access_pass.status {
-                    AccessPassStatus::Connected => {
-                        connected_validator_count += 1;
-                        // Only add Connected AccessPasses to the mapping
-                        accessor_to_validator.insert(access_pass.user_payer, validator_pk);
-                    }
-                    AccessPassStatus::Disconnected => {
-                        disconnected_validator_count += 1;
-                    }
-                    AccessPassStatus::Requested => {
-                        // XXX: Adding requested access_passes to the mapping as well
-                        accessor_to_validator.insert(access_pass.user_payer, validator_pk);
-                        requested_validator_count += 1;
-                    }
-                    AccessPassStatus::Expired => {
-                        expired_validator_count += 1;
-                    }
-                }
+            (AccessPassType::SolanaValidator(validator_pk), AccessPassStatus::Requested) => {
+                requested_validator_count += 1;
+                accessor_to_validator.insert(access_pass.user_payer, validator_pk);
+            }
+            other => {
+                warn!("ignored access_pass: {access_pass}, reason: {other:?}")
             }
         }
     }
@@ -152,20 +143,8 @@ pub fn build_with_schedule(
                 count: connected_validator_count,
             },
             AccessPassStats {
-                category: "Validator - Disconnected".to_string(),
-                count: disconnected_validator_count,
-            },
-            AccessPassStats {
                 category: "Validator - Requested".to_string(),
                 count: requested_validator_count,
-            },
-            AccessPassStats {
-                category: "Validator - Expired".to_string(),
-                count: expired_validator_count,
-            },
-            AccessPassStats {
-                category: "Total AccessPasses".to_string(),
-                count: fetch_data.dz_serviceability.access_passes.len(),
             },
         ];
 
@@ -184,10 +163,6 @@ pub fn build_with_schedule(
                 category: "Users without Connected AccessPass".to_string(),
                 count: users_without_access_pass,
             },
-            AccessPassStats {
-                category: "Total Users".to_string(),
-                count: fetch_data.dz_serviceability.users.len(),
-            },
         ];
 
         let user_table = Table::new(user_stats)
@@ -201,7 +176,7 @@ pub fn build_with_schedule(
     }
 
     // Process leaders and build city statistics
-    let city_stats = build_city_stats(fetch_data, &validator_to_user, leader_schedule)?;
+    let city_stats = build_city_stats(settings, fetch_data, &validator_to_user, leader_schedule)?;
     if city_stats.is_empty() {
         bail!("Could not build any city_stats!")
     }
@@ -220,6 +195,7 @@ pub fn build_with_schedule(
 
 /// Build city statistics from fetch data and leader schedule
 pub fn build_city_stats(
+    settings: &Settings,
     fetch_data: &FetchData,
     validator_to_user: &BTreeMap<String, &DZUser>,
     leader_schedule: &LeaderSchedule,
@@ -234,13 +210,26 @@ pub fn build_city_stats(
                 .dz_serviceability
                 .locations
                 .get(&device.location_pk)
+            && let Some(exchange) = fetch_data
+                .dz_serviceability
+                .exchanges
+                .get(&device.exchange_pk)
         {
-            let stats = city_stats
-                .entry(location.code.to_string())
-                .or_insert(CityStat {
-                    validator_count: 0,
-                    total_stake_proxy: 0,
-                });
+            let stats = match settings.network {
+                Network::Testnet | Network::Devnet => city_stats
+                    .entry(location.code.to_string())
+                    .or_insert(CityStat {
+                        validator_count: 0,
+                        total_stake_proxy: 0,
+                    }),
+                // On mainnet, the exchange.code directly has the name of the city
+                Network::MainnetBeta | Network::Mainnet => city_stats
+                    .entry(exchange.code.to_string())
+                    .or_insert(CityStat {
+                        validator_count: 0,
+                        total_stake_proxy: 0,
+                    }),
+            };
             stats.validator_count += 1;
             stats.total_stake_proxy += stake_proxy;
         }

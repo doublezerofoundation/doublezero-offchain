@@ -1,4 +1,7 @@
+mod common;
+
 use anyhow::Result;
+use common::create_test_settings;
 use doublezero_contributor_rewards::ingestor::{demand, epoch::LeaderSchedule, types::FetchData};
 use serde_json::Value;
 use std::{fs, path::Path};
@@ -27,12 +30,15 @@ mod tests {
 
     #[test]
     fn test_demand_generation_from_json() -> Result<()> {
+        // Create test settings
+        let settings = create_test_settings(0.7, 1000.0, false);
+
         // Load test data
         let fetch_data = load_test_data()?;
         let leader_schedule = load_leader_schedule()?;
 
         // Build demands using the refactored function
-        let result = demand::build_with_schedule(&fetch_data, &leader_schedule)?;
+        let result = demand::build_with_schedule(&settings, &fetch_data, &leader_schedule)?;
 
         // Verify results
         println!("\nGenerated {} demands", result.demands.len());
@@ -66,9 +72,7 @@ mod tests {
                         .find(|d| d.start == *start_city && d.end == *end_city);
                     assert!(
                         found.is_some(),
-                        "Missing demand from {} to {}",
-                        start_city,
-                        end_city
+                        "Missing demand from {start_city} to {end_city}",
                     );
 
                     // Verify demand has valid values
