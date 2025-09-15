@@ -199,7 +199,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         .get_latest_blockhash()
         .await?;
 
-    let computed_solana_validator_debts = ComputedSolanaValidatorDebts {
+    let mut computed_solana_validator_debts = ComputedSolanaValidatorDebts {
         blockhash: recent_blockhash,
         epoch: vec![solana_epoch],
         debts: computed_solana_validator_debt_vec.clone(),
@@ -233,6 +233,26 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
                 deserialized_record.debts,
                 computed_solana_validator_debts.debts
             );
+
+            // DZ and solana epochs may not overlap exactly
+            if !deserialized_record.epoch.contains(&solana_epoch) {
+                // append the missing solana epoch to the vec
+                // this should only ever be at most 2 solana epochs
+                computed_solana_validator_debts.epoch.push(solana_epoch);
+                ledger::create_record_on_ledger(
+                    solana_debt_calculator.ledger_rpc_client(),
+                    recent_blockhash,
+                    &transaction.signer,
+                    &computed_solana_validator_debts,
+                    solana_debt_calculator.ledger_commitment_config(),
+                    seeds,
+                )
+                .await?;
+
+                bail!(
+                    "DZ epoch {dz_epoch} overlaps an additional solana epoch {solana_epoch}. Process shutting down and run calculations again"
+                );
+            }
 
             println!(
                 "computed debt and deserialized ledger record data are identical, proceeding to write transaction"
