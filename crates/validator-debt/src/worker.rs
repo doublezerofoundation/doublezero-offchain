@@ -220,9 +220,9 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
             let deserialized_record: ComputedSolanaValidatorDebts =
                 borsh::from_slice(ledger_record.1.as_slice()).unwrap();
 
-            if deserialized_record.blockhash > computed_solana_validator_debts.blockhash {
+            if deserialized_record.blockhash != computed_solana_validator_debts.blockhash {
                 bail!(
-                    "retrieved record blockhash {} is more recent than created record blockhash {}",
+                    "retrieved record blockhash {} is equal to created record blockhash {}",
                     &deserialized_record.blockhash,
                     &computed_solana_validator_debts.blockhash
                 );
