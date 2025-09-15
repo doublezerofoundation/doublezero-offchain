@@ -205,18 +205,8 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         debts: computed_solana_validator_debt_vec.clone(),
     };
 
-    println!("attempting to create a new record on DZ ledger");
-    ledger::create_record_on_ledger(
-        solana_debt_calculator.ledger_rpc_client(),
-        recent_blockhash,
-        &transaction.signer,
-        &computed_solana_validator_debts,
-        solana_debt_calculator.ledger_commitment_config(),
-        seeds,
-    )
-    .await?;
-
     // read record
+    println!("checking if record exists");
     let record = ledger::read_from_ledger(
         solana_debt_calculator.ledger_rpc_client(),
         &transaction.signer,
@@ -242,12 +232,26 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
                 deserialized_record.debts,
                 computed_solana_validator_debts.debts
             );
+
+            println!(
+                "computed debt and deserialized ledger record data are identical, proceeding to write transaction"
+            )
         }
-        Err(err) => {
-            dbg!(&err);
-            println!("record doesn't exist, shutting down")
+        Err(_err) => {
+            // create record
+            println!("creating a new record on DZ ledger");
+            ledger::create_record_on_ledger(
+                solana_debt_calculator.ledger_rpc_client(),
+                recent_blockhash,
+                &transaction.signer,
+                &computed_solana_validator_debts,
+                solana_debt_calculator.ledger_commitment_config(),
+                seeds,
+            )
+            .await?;
+            println!("new record created; shutting down until the next check")
         }
-    }
+    };
 
     let merkle_root = computed_solana_validator_debts.merkle_root();
 
