@@ -110,7 +110,7 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
             Err(e) => {
                 if let ClientErrorKind::RpcError(RpcError::RpcResponseError { code, .. }) = e.kind()
                 {
-                    if *code == -32_009 {
+                    if *code == -32_009 || *code == -32_007 {
                         Ok((validator_id, (0, 0)))
                     } else {
                         bail!("Failed to fetch block for slot {slot}: {e}")
@@ -121,7 +121,7 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
             }
         }
     })
-    .buffer_unordered(10)
+    .buffer_unordered(20)
     .try_collect::<HashMap<String, (u64, u64)>>()
     .await?;
 

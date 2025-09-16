@@ -97,12 +97,12 @@ pub async fn create_record_on_ledger<T: borsh::BorshSerialize>(
 pub async fn read_from_ledger(
     rpc_client: &RpcClient,
     payer_signer: &Keypair,
-    seeds: &[&[u8]],
+    seed: &[&[u8]],
     commitment_config: CommitmentConfig,
 ) -> Result<(RecordData, Vec<u8>)> {
     let payer_key = payer_signer.pubkey();
 
-    let record_key = record::pubkey::create_record_key(&payer_key, seeds);
+    let record_key = record::pubkey::create_record_key(&payer_key, seed);
     let get_account_response = rpc_client
         .get_account_with_commitment(&record_key, commitment_config)
         .await
