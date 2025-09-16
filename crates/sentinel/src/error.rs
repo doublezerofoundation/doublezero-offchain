@@ -2,24 +2,6 @@ use backon::{ExponentialBuilder, Retryable};
 use solana_client::{
     client_error::{ClientError, ClientErrorKind, reqwest::StatusCode},
     nonblocking::pubsub_client::PubsubClientError,
-    rpc_custom_error::{
-        JSON_RPC_SCAN_ERROR, JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP,
-        JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
-        JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
-        JSON_RPC_SERVER_ERROR_EPOCH_REWARDS_PERIOD_ACTIVE,
-        JSON_RPC_SERVER_ERROR_KEY_EXCLUDED_FROM_SECONDARY_INDEX,
-        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
-        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE,
-        JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED, JSON_RPC_SERVER_ERROR_NO_SNAPSHOT,
-        JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY, JSON_RPC_SERVER_ERROR_SLOT_NOT_EPOCH_BOUNDARY,
-        JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
-        JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
-        JSON_RPC_SERVER_ERROR_TRANSACTION_PRECOMPILE_VERIFICATION_FAILURE,
-        JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_LEN_MISMATCH,
-        JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_VERIFICATION_FAILURE,
-        JSON_RPC_SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION,
-    },
-    rpc_request::{RpcError, RpcResponseErrorData},
 };
 use solana_sdk::signature::{ParseSignatureError, Signature};
 use std::{
@@ -110,108 +92,37 @@ fn should_retry(err: &Error) -> bool {
 
 fn retryable_client_error(err: &ClientError) -> bool {
     match err.kind() {
-        ClientErrorKind::Io(_) => true,
         ClientErrorKind::Reqwest(reqwest_err) => {
             if reqwest_err.is_timeout() || reqwest_err.is_connect() {
                 return true;
             }
-            if let Some(status) = reqwest_err.status() {
-                return status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS;
-            }
-            false
+            retryable_status(reqwest_err.status())
         }
-        ClientErrorKind::RpcError(rpc_err) => retryable_rpc_error(rpc_err),
-        ClientErrorKind::Middleware(_) => true,
-        ClientErrorKind::Custom(_) => false,
-        ClientErrorKind::SerdeJson(_) => false,
-        ClientErrorKind::SigningError(_) => false,
-        ClientErrorKind::TransactionError(_) => false,
+        _ => false,
     }
 }
 
-fn retryable_rpc_error(rpc_error: &RpcError) -> bool {
-    match rpc_error {
-        RpcError::RpcResponseError { code, data, .. } => match data {
-            RpcResponseErrorData::SendTransactionPreflightFailure(_) => false,
-            RpcResponseErrorData::NodeUnhealthy { .. } => true,
-            RpcResponseErrorData::Empty => match *code {
-                JSON_RPC_SCAN_ERROR
-                | JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE
-                | JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP
-                | JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET
-                | JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED
-                | JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_UNREACHABLE
-                | JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
-                | JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY
-                | JSON_RPC_SERVER_ERROR_NO_SNAPSHOT
-                | JSON_RPC_SERVER_ERROR_SLOT_SKIPPED => true,
-                JSON_RPC_SERVER_ERROR_EPOCH_REWARDS_PERIOD_ACTIVE
-                | JSON_RPC_SERVER_ERROR_KEY_EXCLUDED_FROM_SECONDARY_INDEX
-                | JSON_RPC_SERVER_ERROR_SLOT_NOT_EPOCH_BOUNDARY
-                | JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE
-                | JSON_RPC_SERVER_ERROR_TRANSACTION_PRECOMPILE_VERIFICATION_FAILURE
-                | JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_LEN_MISMATCH
-                | JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_VERIFICATION_FAILURE
-                | JSON_RPC_SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION => false,
-                _ => false,
-            },
-        },
-        RpcError::RpcRequestError(_) => true,
-        RpcError::ParseError(_) | RpcError::ForUser(_) => false,
+fn retryable_status(status: Option<StatusCode>) -> bool {
+    match status {
+        Some(code) => code.is_server_error() || code == StatusCode::TOO_MANY_REQUESTS,
+        None => false,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::StatusCode;
     use super::*;
-    use solana_client::{
-        rpc_custom_error::JSON_RPC_SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-        rpc_response::RpcSimulateTransactionResult,
-    };
     use solana_sdk::transaction::TransactionError;
 
     #[test]
-    fn retries_io_errors() {
-        let err = Error::from(ClientError::from(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "timed out",
-        )));
-        assert!(should_retry(&err));
-    }
-
-    #[test]
-    fn retries_node_unhealthy_errors() {
-        let rpc_err = RpcError::RpcResponseError {
-            code: JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY,
-            message: "node unhealthy".into(),
-            data: RpcResponseErrorData::NodeUnhealthy {
-                num_slots_behind: Some(10),
-            },
-        };
-        let err = Error::from(ClientError::from(rpc_err));
-        assert!(should_retry(&err));
-    }
-
-    #[test]
-    fn does_not_retry_preflight_failures() {
-        let rpc_err = RpcError::RpcResponseError {
-            code: JSON_RPC_SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE,
-            message: "preflight failure".into(),
-            data: RpcResponseErrorData::SendTransactionPreflightFailure(
-                RpcSimulateTransactionResult {
-                    err: Some(TransactionError::AccountNotFound),
-                    logs: None,
-                    accounts: None,
-                    units_consumed: None,
-                    loaded_accounts_data_size: None,
-                    return_data: None,
-                    inner_instructions: None,
-                    replacement_blockhash: None,
-                },
-            ),
-        };
-        let err = Error::from(ClientError::from(rpc_err));
-        assert!(!should_retry(&err));
+    fn retryable_status_codes() {
+        // Minimally, 429, 500 and 503 should be retryable
+        assert!(retryable_status(Some(StatusCode::INTERNAL_SERVER_ERROR)));
+        assert!(retryable_status(Some(StatusCode::TOO_MANY_REQUESTS)));
+        assert!(retryable_status(Some(StatusCode::SERVICE_UNAVAILABLE)));
+        assert!(!retryable_status(Some(StatusCode::BAD_REQUEST)));
+        assert!(!retryable_status(None));
     }
 
     #[test]
