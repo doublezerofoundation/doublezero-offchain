@@ -207,7 +207,6 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
 
     // read record
     println!("checking if record exists");
-
     let current_dz_epoch_record = fetch_and_validate_record(
         solana_debt_calculator,
         dz_epoch,
@@ -224,43 +223,39 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
 
     // this means the previous dz epoch traversed more than one solana epoch
     // if the current dz_epoch_record's solana epoch is also in the previous record's epoch then we've already calculated the debt for that epoch and will send a zeroed-out record and transaction for the current dz epoch
-    let computed_solana_validator_debts = if previous_dz_epoch_record.epoch.len() > 1
-        && current_dz_epoch_record
-            .epoch
-            .iter()
-            .any(|epoch| previous_dz_epoch_record.epoch.contains(epoch))
-    {
-        // zero out the debt
-        computed_solana_validator_debts
-            .debts
-            .iter_mut()
-            .for_each(|debt| debt.amount = 0);
+    let computed_solana_validator_debts =
+        if has_overlapping_epoch(previous_dz_epoch_record, current_dz_epoch_record) {
+            // zero out the debt
+            computed_solana_validator_debts
+                .debts
+                .iter_mut()
+                .for_each(|debt| debt.amount = 0);
 
-        // write the record again on the ledger
-        let more_recent_blockhash = solana_debt_calculator
-            .ledger_rpc_client()
-            .get_latest_blockhash()
+            // write the record again on the ledger
+            let more_recent_blockhash = solana_debt_calculator
+                .ledger_rpc_client()
+                .get_latest_blockhash()
+                .await?;
+
+            let dz_epoch_bytes = dz_epoch.to_le_bytes();
+            let seed: &[&[u8]] = &[SOLANA_SEED_PREFIX, &dz_epoch_bytes];
+
+            ledger::create_record_on_ledger(
+                solana_debt_calculator.ledger_rpc_client(),
+                more_recent_blockhash,
+                &transaction.signer,
+                &computed_solana_validator_debts,
+                solana_debt_calculator.ledger_commitment_config(),
+                seed,
+            )
             .await?;
 
-        let dz_epoch_bytes = dz_epoch.to_le_bytes();
-        let seed: &[&[u8]] = &[SOLANA_SEED_PREFIX, &dz_epoch_bytes];
-
-        ledger::create_record_on_ledger(
-            solana_debt_calculator.ledger_rpc_client(),
-            more_recent_blockhash,
-            &transaction.signer,
-            &computed_solana_validator_debts,
-            solana_debt_calculator.ledger_commitment_config(),
-            seed,
-        )
-        .await?;
-
-        // return the zeroed-out debt
-        computed_solana_validator_debts
-    } else {
-        // return the unchanged debt
-        computed_solana_validator_debts
-    };
+            // return the zeroed-out debt
+            computed_solana_validator_debts
+        } else {
+            // return the unchanged debt
+            computed_solana_validator_debts
+        };
 
     write_transaction(
         solana_debt_calculator.solana_rpc_client(),
@@ -481,6 +476,17 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
     }
 
     Ok(pubkeys)
+}
+
+fn has_overlapping_epoch(
+    previous_dz_epoch_record: ComputedSolanaValidatorDebts,
+    current_dz_epoch_record: ComputedSolanaValidatorDebts,
+) -> bool {
+    previous_dz_epoch_record.epoch.len() > 1
+        && current_dz_epoch_record
+            .epoch
+            .iter()
+            .any(|epoch| previous_dz_epoch_record.epoch.contains(epoch))
 }
 
 #[cfg(test)]
