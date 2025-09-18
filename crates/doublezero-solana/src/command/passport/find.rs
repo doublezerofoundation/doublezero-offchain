@@ -48,7 +48,13 @@ pub async fn execute_find(
         match get_public_ipv4() {
             Ok(ip) => {
                 println!("Detected public IP: {ip}");
-                let server_ip: Ipv4Addr = ip.parse().unwrap();
+                let server_ip: Ipv4Addr = match ip.parse() {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        println!("Failed to parse detected public IP: {e}");
+                        return Ok(());
+                    }
+                };
                 let node = nodes
                     .iter()
                     .find(|n| n.gossip.is_some() && n.gossip.unwrap().ip() == server_ip);
