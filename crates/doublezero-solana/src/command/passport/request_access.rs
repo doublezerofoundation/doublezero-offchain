@@ -9,9 +9,15 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction, offchain_message::OffchainMessage, pubkey::Pubkey,
     signature::Signature,
 };
-use std::str::FromStr;
+use std::{net::Ipv4Addr, str::FromStr};
 
-use crate::payer::{SolanaPayerOptions, Wallet};
+use crate::{
+    command::helpers::get_public_ipv4,
+    payer::{SolanaPayerOptions, Wallet},
+};
+
+// 0.2 SOL in lamports (1 SOL = 1_000_000_000 lamports)
+const MIN_BALANCE_LAMPORTS: u64 = 200_000_000;
 
 pub async fn execute_request_solana_validator_access(
     service_key: Pubkey,
@@ -21,9 +27,63 @@ pub async fn execute_request_solana_validator_access(
     solana_payer_options: SolanaPayerOptions,
 ) -> Result<()> {
     let verbose = solana_payer_options.signer_options.verbose;
-
     let wallet = Wallet::try_from(solana_payer_options)?;
     let wallet_key = wallet.pubkey();
+
+    // Check balance
+    let balance = wallet.connection.get_balance(&wallet_key).await?;
+    if balance <= MIN_BALANCE_LAMPORTS {
+        bail!(
+            "Your wallet balance is below 0.2 SOL. Please fund your wallet to proceed."
+        );
+    } else if verbose {
+        println!("Wallet balance: {} lamports", balance);
+    }
+
+    // Check if the node ID is in gossip.
+    match get_public_ipv4() {
+        Ok(ip) => {
+            if verbose {
+                println!("Detected public IP: {ip}");
+            }
+
+            let server_ip: Ipv4Addr = match ip.parse() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    println!("Failed to parse detected public IP: {e}");
+                    return Ok(());
+                }
+            };
+
+            // Fetch the cluster nodes
+            let nodes = wallet.connection.get_cluster_nodes().await?;
+            let node = nodes
+                .iter()
+                .find(|n| n.gossip.is_some() && n.gossip.unwrap().ip() == server_ip);
+            match node {
+                Some(node) => {
+                    if verbose {
+                        println!("Found node in gossip: {}", node.pubkey);
+                    }
+                    if node.pubkey != node_id.to_string() {
+                        bail!(
+                            "⚠️  Warning: The provided node ID does not match the node ID associated with the detected public IP in gossip"
+                        );
+                    }
+
+                    if let Some(gossip) = &node.gossip {
+                        println!("Server IP: {}", gossip.ip());
+                    } else {
+                        println!("Server IP: <unknown>");
+                    }
+                }
+                None => println!(
+                    "⚠️  Warning: Your public IP {ip} is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
+                ),
+            }
+        }
+        Err(e) => println!("Failed to get public IP: {e}"),
+    }
 
     let ed25519_signature = Signature::from_str(&signature)?;
 

@@ -1,6 +1,7 @@
 mod admin;
 mod ata;
 mod contributor;
+mod helpers;
 mod passport;
 mod prepaid;
 mod revenue_distribution;
