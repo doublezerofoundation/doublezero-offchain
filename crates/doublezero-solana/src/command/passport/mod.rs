@@ -14,9 +14,12 @@ use solana_sdk::{
 };
 
 use crate::{
+    command::passport::find::execute_find,
     payer::{SolanaPayerOptions, Wallet},
     rpc::{Connection, SolanaConnectionOptions},
 };
+
+mod find;
 
 #[derive(Debug, Args)]
 pub struct PassportCliCommand {
@@ -26,6 +29,17 @@ pub struct PassportCliCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum PassportSubCommand {
+    Find {
+        #[arg(long, value_name = "PUBKEY")]
+        node_id: Option<Pubkey>,
+
+        #[arg(long, value_name = "IP_ADDRESS")]
+        server_ip: Option<String>,
+
+        #[command(flatten)]
+        solana_connection_options: SolanaConnectionOptions,
+    },
+
     Fetch {
         #[arg(long)]
         program_config: bool,
@@ -55,6 +69,11 @@ pub enum PassportSubCommand {
 impl PassportSubCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         match self {
+            PassportSubCommand::Find {
+                node_id,
+                server_ip,
+                solana_connection_options,
+            } => execute_find(node_id, server_ip, solana_connection_options).await,
             PassportSubCommand::Fetch {
                 program_config,
                 solana_connection_options,
