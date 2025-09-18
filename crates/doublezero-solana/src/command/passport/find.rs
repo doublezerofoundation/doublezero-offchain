@@ -31,7 +31,7 @@ pub async fn execute_find(
             ),
         }
     } else if server_ip.is_some() {
-        let server_ip: Ipv4Addr = server_ip.unwrap().parse().unwrap();
+        let server_ip: Ipv4Addr = server_ip.as_ref().unwrap().parse()?;
         let node = nodes
             .iter()
             .find(|n| n.gossip.is_some() && n.gossip.unwrap().ip() == server_ip);
