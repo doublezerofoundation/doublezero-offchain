@@ -47,7 +47,7 @@ pub async fn execute_find(
     } else {
         match get_public_ipv4() {
             Ok(ip) => {
-                println!("Detected public IP: {}", ip);
+                println!("Detected public IP: {ip}");
                 let server_ip: Ipv4Addr = ip.parse().unwrap();
                 let node = nodes
                     .iter()
@@ -62,7 +62,7 @@ pub async fn execute_find(
                     ),
                 }
             }
-            Err(e) => println!("Failed to get public IP: {}", e),
+            Err(e) => println!("Failed to get public IP: {e}"),
         }
     }
 
