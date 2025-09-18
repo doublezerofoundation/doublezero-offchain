@@ -18,8 +18,8 @@ pub async fn execute_find(
 
     let nodes = connection.get_cluster_nodes().await?;
 
-    if node_id.is_some() {
-        let node_id = node_id.unwrap().to_string();
+    if let Some(node_id) = node_id {
+        let node_id = node_id.to_string();
         let node = nodes.iter().find(|n| n.pubkey == node_id);
         match node {
             Some(node) => {
