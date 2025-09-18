@@ -14,23 +14,31 @@ pub async fn execute_find(
 ) -> Result<()> {
     println!("DoubleZero Passport - Find");
 
+    // Establish a connection to the Solana cluster
     let connection = Connection::try_from(solana_connection_options)?;
 
+    // Fetch the cluster nodes
     let nodes = connection.get_cluster_nodes().await?;
 
+    // Check if either node_id or server_ip is provided
     if let Some(node_id) = node_id {
+        // Search by node_id
         let node_id = node_id.to_string();
         let node = nodes.iter().find(|n| n.pubkey == node_id);
         match node {
             Some(node) => {
                 println!("Node-Id: {}", node.pubkey);
-                println!("Server IP: {}", node.gossip.unwrap().ip());
+                match &node.gossip {
+                    Some(gossip) => println!("Server IP: {}", gossip.ip()),
+                    None => println!("Server IP: <unknown>"),
+                }
             }
             None => println!(
                 "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
             ),
         }
     } else if server_ip.is_some() {
+        // Search by server_ip
         let server_ip: Ipv4Addr = server_ip.as_ref().unwrap().parse()?;
         let node = nodes
             .iter()
@@ -45,6 +53,7 @@ pub async fn execute_find(
             ),
         }
     } else {
+        // Neither node_id nor server_ip provided, attempt to detect public IP
         match get_public_ipv4() {
             Ok(ip) => {
                 println!("Detected public IP: {ip}");
