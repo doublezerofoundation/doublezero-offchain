@@ -9,18 +9,17 @@ use doublezero_revenue_distribution::{
     },
     state::{ContributorRewards, Journal, ProgramConfig},
 };
-
 use doublezero_solana_client_tools::zero_copy::ZeroCopyAccountOwned;
+use doublezero_solana_client_tools::{
+    payer::{SolanaPayerOptions, Wallet},
+    rpc::{DoubleZeroLedgerConnectionOptions, SolanaConnection, SolanaConnectionOptions},
+};
 use doublezero_solana_validator_debt::{
     ledger, transaction::Transaction, validator_debt::ComputedSolanaValidatorDebts,
 };
-
+use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
-
-use crate::{
-    payer::{SolanaPayerOptions, Wallet},
-    rpc::{Connection, LedgerConnection, LedgerConnectionOptions, SolanaConnectionOptions},
-};
 
 #[derive(Debug, Args)]
 pub struct RevenueDistributionCliCommand {
@@ -63,7 +62,7 @@ pub enum RevenueDistributionSubCommand {
         solana_payer_options: SolanaPayerOptions,
 
         #[command(flatten)]
-        ledger_connection_options: LedgerConnectionOptions,
+        dz_ledger_connection_options: DoubleZeroLedgerConnectionOptions,
     },
 }
 
@@ -91,12 +90,12 @@ impl RevenueDistributionSubCommand {
             RevenueDistributionSubCommand::PaySolanaValidatorDebt {
                 epoch,
                 solana_payer_options,
-                ledger_connection_options,
+                dz_ledger_connection_options,
             } => {
                 execute_pay_solana_validator_debt(
                     epoch,
                     solana_payer_options,
-                    ledger_connection_options,
+                    dz_ledger_connection_options,
                 )
                 .await
             }
@@ -114,7 +113,7 @@ async fn execute_fetch(
     solana_validator_fees: bool,
     solana_connection_options: SolanaConnectionOptions,
 ) -> Result<()> {
-    let connection = Connection::try_from(solana_connection_options)?;
+    let connection = SolanaConnection::try_from(solana_connection_options)?;
 
     if config {
         let program_config = fetch_program_config(&connection).await?;
@@ -232,18 +231,21 @@ pub async fn execute_initialize_contributor_rewards(
 pub async fn execute_pay_solana_validator_debt(
     epoch: u64,
     solana_payer_options: SolanaPayerOptions,
-    ledger_connection_options: LedgerConnectionOptions,
+    dz_ledger_connection_options: DoubleZeroLedgerConnectionOptions,
 ) -> Result<()> {
     let prefix = b"solana_validator_debt_test";
     let dz_epoch_bytes = epoch.to_le_bytes();
     let seeds: &[&[u8]] = &[prefix, &dz_epoch_bytes];
     let wallet = Wallet::try_from(solana_payer_options)?;
-    let ledger = LedgerConnection::try_from(ledger_connection_options)?;
+    let dz_ledger_rpc_client = RpcClient::new_with_commitment(
+        dz_ledger_connection_options.dz_ledger_url,
+        CommitmentConfig::confirmed(),
+    );
     let read = ledger::read_from_ledger(
-        &ledger.rpc_client,
+        &dz_ledger_rpc_client,
         &wallet.signer,
         seeds,
-        ledger.rpc_client.commitment(),
+        dz_ledger_rpc_client.commitment(),
     )
     .await?;
 
@@ -263,7 +265,7 @@ pub async fn execute_pay_solana_validator_debt(
 
 //
 
-async fn fetch_program_config(connection: &Connection) -> Result<ProgramConfig> {
+async fn fetch_program_config(connection: &SolanaConnection) -> Result<ProgramConfig> {
     let program_config = ZeroCopyAccountOwned::from_rpc_client(
         &connection.rpc_client,
         &ProgramConfig::find_address().0,
