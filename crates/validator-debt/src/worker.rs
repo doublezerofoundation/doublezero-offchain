@@ -113,9 +113,10 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         );
     };
 
-    let rpc = RpcClient::new("https://api.testnet.solana.com".to_string());
     // fetch the distribution to get the fee percentages and calculation_allowed_timestamp
-    let distribution = transaction.read_distribution(dz_epoch, &rpc).await?;
+    let distribution = transaction
+        .read_distribution(dz_epoch, solana_debt_calculator.solana_rpc_client())
+        .await?;
 
     // get solana current timestamp
     let clock_account = solana_debt_calculator
