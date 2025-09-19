@@ -3,19 +3,19 @@
 
 version: 2
 
-project_name: doublezero-solana
+project_name: doublezero-solana-cli
 
 monorepo:
-  tag_prefix: doublezero-solana/
+  tag_prefix: doublezero-solana-cli/
 
 builds:
-  - id: doublezero-solana
+  - id: doublezero-solana-cli
     binary: doublezero-solana
     builder: rust
     tool: cargo
     command: build
     flags:
-      - --package=doublezero-solana
+      - --package=doublezero-solana-cli
       - --release
     targets:
       - x86_64-unknown-linux-gnu
@@ -28,7 +28,7 @@ builds:
 archives:
   - id: doublezero_solana_archive
     formats: ["tar.gz"]
-    ids: [doublezero-solana]
+    ids: [doublezero-solana-cli]
     # this name template makes the OS and Arch compatible with the results of `uname`
     name_template: >-
       {{ .ProjectName }}_
@@ -39,9 +39,9 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
 
 nfpms:
-  - id: doublezero-solana
-    package_name: doublezero-solana
-    ids: [doublezero-solana]
+  - id: doublezero-solana-cli
+    package_name: doublezero-solana-cli
+    ids: [doublezero-solana-cli]
     vendor: doublezero
     homepage: doublezero.xyz
     maintainer: tech <tech@malbeclabs.com>
@@ -54,7 +54,7 @@ nfpms:
     bindir: /usr/local/bin
     release: "1"
     section: default
-    # NOTE: 2z does not required to be a systemd service
+    # NOTE: doublezero-solana-cli does not require to be a systemd service
 
 changelog:
   sort: asc
@@ -78,13 +78,13 @@ announce:
 
 git:
   ignore_tags:
-    - doublezero-solana/daily
+    - doublezero-solana-cli/daily
 
 nightly:
   publish_release: true
   keep_single_release: true
   version_template: "{{ incpatch .Version }}~git{{ .Env.BUILD_DATE }}.{{ .ShortCommit }}"
-  tag_name: "doublezero-solana/daily"
+  tag_name: "doublezero-solana-cli/daily"
 
 cloudsmiths:
   - organization: malbeclabs
