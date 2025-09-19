@@ -160,10 +160,6 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         .get_latest_blockhash()
         .await?;
 
-    // get the previous record to make sure the solana epoch hasn't bled across two dz epochs
-    let previous_dz_epoch_record =
-        fetch_previous_dz_ledger_record(solana_debt_calculator, dz_epoch, &transaction).await?;
-
     // create the seed
     let dz_epoch_bytes = dz_epoch.to_le_bytes();
     let seed: &[&[u8]] = &[SOLANA_SEED_PREFIX, &dz_epoch_bytes];
