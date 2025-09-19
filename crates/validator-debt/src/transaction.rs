@@ -52,7 +52,11 @@ fn mint_key() -> Pubkey {
 
 impl Transaction {
     pub fn new(signer: Keypair, dry_run: bool, force: bool) -> Transaction {
-        Transaction { signer, dry_run, force }
+        Transaction {
+            signer,
+            dry_run,
+            force,
+        }
     }
 
     pub fn pubkey(&self) -> Pubkey {

@@ -36,8 +36,6 @@ pub async fn get_solana_epoch_from_dz_epoch(
     ))
 }
 
-
-
 pub async fn create_record_on_ledger<T: borsh::BorshSerialize>(
     rpc_client: &RpcClient,
     recent_blockhash: Hash,

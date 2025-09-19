@@ -54,19 +54,27 @@ impl ValidatorDebtCommand {
                 epoch,
                 dry_run,
                 force,
-            } => execute_initialize_distribution(solana_connection_options, epoch, dry_run, force).await,
+            } => {
+                execute_initialize_distribution(solana_connection_options, epoch, dry_run, force)
+                    .await
+            }
             ValidatorDebtCommand::CalculateValidatorDebt {
                 solana_connection_options,
                 epoch,
                 dry_run,
                 force,
-            } => execute_calculate_validator_debt(solana_connection_options, epoch, dry_run, force).await,
+            } => {
+                execute_calculate_validator_debt(solana_connection_options, epoch, dry_run, force)
+                    .await
+            }
             ValidatorDebtCommand::FinalizeTransaction {
                 solana_connection_options,
                 epoch,
                 dry_run,
                 force,
-            } => execute_finalize_transaction(solana_connection_options, epoch, dry_run, force).await,
+            } => {
+                execute_finalize_transaction(solana_connection_options, epoch, dry_run, force).await
+            }
         }
     }
 }
@@ -75,7 +83,7 @@ async fn execute_initialize_distribution(
     solana_connection_options: SolanaValidatorDebtConnectionOptions,
     epoch: u64,
     dry_run: bool,
-    force: bool
+    force: bool,
 ) -> Result<()> {
     let solana_debt_calculator: SolanaDebtCalculator =
         SolanaDebtCalculator::try_from(solana_connection_options)?;
@@ -89,7 +97,7 @@ async fn execute_calculate_validator_debt(
     solana_connection_options: SolanaValidatorDebtConnectionOptions,
     epoch: u64,
     dry_run: bool,
-    force: bool
+    force: bool,
 ) -> Result<()> {
     let solana_debt_calculator: SolanaDebtCalculator =
         SolanaDebtCalculator::try_from(solana_connection_options)?;
@@ -103,7 +111,7 @@ async fn execute_finalize_transaction(
     solana_connection_options: SolanaValidatorDebtConnectionOptions,
     epoch: u64,
     dry_run: bool,
-    force: bool
+    force: bool,
 ) -> Result<()> {
     let solana_debt_calculator: SolanaDebtCalculator =
         SolanaDebtCalculator::try_from(solana_connection_options)?;
