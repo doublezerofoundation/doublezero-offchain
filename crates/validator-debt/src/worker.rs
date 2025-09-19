@@ -172,7 +172,10 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     // if the current dz_epoch_record's solana epoch is also in the previous record's epoch
     //  then we've already calculated the debt for that epoch and will send a zeroed-out record
     //  and transaction for the current dz epoch
-    if has_overlapping_epoch(&previous_dz_epoch_record.epoch, &solana_epoch) {
+    if has_overlapping_epoch(
+        &solana_epoch_from_first_dz_epoch_block,
+        &solana_epoch_from_last_dz_epoch_block,
+    ) {
         // zero out the debt
         let computed_solana_validator_debts = ComputedSolanaValidatorDebts::default();
 
@@ -475,8 +478,8 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
     Ok(pubkeys)
 }
 
-fn has_overlapping_epoch(previous_solana_epoch: &[u64], current_solana_epoch: &u64) -> bool {
-    previous_solana_epoch.len() > 1 && previous_solana_epoch.contains(current_solana_epoch)
+fn has_overlapping_epoch(first_slot_solana_epoch: &u64, last_slot_solana_epoch: &u64) -> bool {
+    first_slot_solana_epoch >= last_slot_solana_epoch
 }
 
 #[cfg(test)]
