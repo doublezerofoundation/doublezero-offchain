@@ -13,6 +13,8 @@ clap.workspace = true
 doublezero-passport.workspace = true
 doublezero-program-tools.workspace = true
 doublezero-revenue-distribution.workspace = true
+doublezero-solana-client-tools.workspace = true
+doublezero-solana-validator-debt.workspace = true
 serde_json.workspace = true
 solana-client.workspace = true
 solana-commitment-config.workspace = true
@@ -20,8 +22,6 @@ solana-sdk.workspace = true
 solana-transaction-status-client-types.workspace = true
 tokio.workspace = true
 url.workspace = true
-doublezero-solana-validator-debt.workspace = true
-doublezero-solana-client-tools.workspace = true
 
 [[bin]]
 name = "doublezero-solana"
