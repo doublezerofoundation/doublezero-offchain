@@ -471,8 +471,6 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
         }
     }
 
-    let pubkeys = vec!["va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b".to_string()];
-
     Ok(pubkeys)
 }
 
