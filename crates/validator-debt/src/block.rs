@@ -110,6 +110,8 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
             Err(e) => {
                 if let ClientErrorKind::RpcError(RpcError::RpcResponseError { code, .. }) = e.kind()
                 {
+                    // -32_009 -  Slot x was skipped, or missing in long-term storage
+                    // -32_007 -  Requested block or slot does not exist
                     if *code == -32_009 || *code == -32_007 {
                         Ok((validator_id, (0, 0)))
                     } else {
