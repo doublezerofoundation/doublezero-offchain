@@ -150,7 +150,7 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         solana_epoch_from_first_dz_epoch_block
     } else {
         println!(
-            "DZ epoch {dz_epoch} overlaps {solana_epoch_from_first_dz_epoch_block} and {solana_epoch_from_last_dz_epoch_block}"
+            "DZ epoch {dz_epoch} overlaps {solana_epoch_from_last_dz_epoch_block} and {solana_epoch_from_first_dz_epoch_block}"
         );
         solana_epoch_from_last_dz_epoch_block
     };
@@ -244,10 +244,8 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
 
     let computed_solana_validator_debts = ComputedSolanaValidatorDebts {
         blockhash: recent_blockhash,
-        epoch: vec![
-            solana_epoch_from_first_dz_epoch_block,
-            solana_epoch_from_last_dz_epoch_block,
-        ],
+        first_solana_epoch: solana_epoch_from_first_dz_epoch_block,
+        last_solana_epoch: solana_epoch_from_last_dz_epoch_block,
         debts: computed_solana_validator_debt_vec.clone(),
     };
 
@@ -581,14 +579,15 @@ mod tests {
 
         let deserialized: ComputedSolanaValidatorDebts = borsh::from_slice(read.1.as_slice())
             .map_err(|e| anyhow::anyhow!("failed to deserialize ledger record: {}", e))?;
-        let (_, solana_epoch) = ledger::get_solana_epoch_from_dz_epoch(
+        let (first_solana_epoch, last_solana_epoch) = ledger::get_solana_epoch_from_dz_epoch(
             &fpc.solana_rpc_client,
             &fpc.ledger_rpc_client,
             dz_epoch,
         )
         .await?;
 
-        assert_eq!(deserialized.epoch, vec![solana_epoch]);
+        assert_eq!(deserialized.first_solana_epoch, first_solana_epoch);
+        assert_eq!(deserialized.last_solana_epoch, last_solana_epoch);
 
         Ok(())
     }

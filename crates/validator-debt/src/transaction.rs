@@ -362,7 +362,8 @@ mod tests {
         let dz_epoch: u64 = 84;
         let record = ComputedSolanaValidatorDebts {
             blockhash: Hash::new_unique(),
-            epoch: vec![832],
+            first_solana_epoch: 832,
+            last_solana_epoch: 832,
             debts: vec![ComputedSolanaValidatorDebt {
                 node_id: Pubkey::from_str("va1i6T6vTcijrCz6G8r89H6igKjwkLfF6g5fnpvZu1b").unwrap(),
                 amount: 707,

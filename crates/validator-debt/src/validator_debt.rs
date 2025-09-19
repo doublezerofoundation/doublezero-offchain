@@ -5,7 +5,8 @@ use svm_hash::merkle::{MerkleProof, merkle_root_from_indexed_byte_ref_leaves};
 #[derive(Debug, Default, BorshDeserialize, BorshSerialize, Clone, PartialEq, Eq)]
 pub struct ComputedSolanaValidatorDebts {
     pub blockhash: Hash,
-    pub epoch: Vec<u64>,
+    pub first_solana_epoch: u64,
+    pub last_solana_epoch: u64,
     pub debts: Vec<ComputedSolanaValidatorDebt>,
 }
 
@@ -73,7 +74,8 @@ mod tests {
     fn test_add_rewards_to_tree() -> Result<()> {
         let debts = ComputedSolanaValidatorDebts {
             blockhash: Hash::new_unique(),
-            epoch: vec![822, 823],
+            first_solana_epoch: 822,
+            last_solana_epoch: 823,
             debts: vec![
                 ComputedSolanaValidatorDebt {
                     node_id: Pubkey::new_unique(),
