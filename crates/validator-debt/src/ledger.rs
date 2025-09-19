@@ -31,7 +31,7 @@ pub async fn get_solana_epoch_from_dz_epoch(
         get_solana_epoch_from_dz_slot(solana_client, ledger_client, last_slot).await?;
 
     Ok((
-        solana_epoch_from_first_dz_epoch_slot,
+        solana_epoch_from_first_dz_epoch_slot + 1,
         solana_epoch_from_last_dz_epoch_slot,
     ))
 }
