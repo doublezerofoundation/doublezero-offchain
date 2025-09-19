@@ -732,7 +732,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
 dependencies = [
  "borsh-derive 0.10.4",
- "hashbrown 0.13.2",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -1897,6 +1897,7 @@ dependencies = [
  "doublezero-passport",
  "doublezero-program-tools",
  "doublezero-revenue-distribution",
+ "doublezero-solana-client-tools",
  "doublezero-solana-validator-debt",
  "serde_json",
  "solana-client",
@@ -1904,6 +1905,23 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status-client-types",
  "tokio",
+ "url",
+]
+
+[[package]]
+name = "doublezero-solana-client-tools"
+version = "0.1.0"
+source = "git+ssh://git@github.com/doublezerofoundation/doublezero-solana?rev=315839d#315839df5c632bc8cbeefead3757dce837a3d186"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "clap",
+ "doublezero-program-tools",
+ "serde_json",
+ "solana-client",
+ "solana-commitment-config",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
  "url",
 ]
 
