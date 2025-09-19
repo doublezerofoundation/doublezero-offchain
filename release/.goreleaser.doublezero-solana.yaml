@@ -54,7 +54,7 @@ nfpms:
     bindir: /usr/local/bin
     release: "1"
     section: default
-    # NOTE: doublezero-solana-cli does not require to be a systemd service
+    # NOTE: doublezero-solana-cli is not required to be a systemd service
 
 changelog:
   sort: asc
