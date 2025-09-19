@@ -411,31 +411,6 @@ async fn create_or_validate_ledger_record<T: ValidatorRewards>(
     }
 }
 
-async fn fetch_previous_dz_ledger_record<T: ValidatorRewards>(
-    solana_debt_calculator: &T,
-    dz_epoch: u64,
-    transaction: &Transaction,
-) -> Result<ComputedSolanaValidatorDebts> {
-    // fetch previous record
-    let previous_dz_epoch = dz_epoch.saturating_sub(1);
-    let previous_dz_epoch_bytes = previous_dz_epoch.to_le_bytes();
-    let previous_seed: &[&[u8]] = &[SOLANA_SEED_PREFIX, &previous_dz_epoch_bytes];
-
-    let previous_record = ledger::read_from_ledger(
-        solana_debt_calculator.ledger_rpc_client(),
-        &transaction.signer,
-        previous_seed,
-        solana_debt_calculator.ledger_commitment_config(),
-    )
-    .await?;
-
-    let deserialized_previous_record: ComputedSolanaValidatorDebts =
-        borsh::from_slice(previous_record.1.as_slice())
-            .map_err(|e| anyhow::anyhow!("failed to deserialize ledger record: {}", e))?;
-
-    Ok(deserialized_previous_record)
-}
-
 async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<String>> {
     let account_type = AccountType::AccessPass as u8;
     let filters = vec![solana_client::rpc_filter::RpcFilterType::Memcmp(
