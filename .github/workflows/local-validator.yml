@@ -20,6 +20,10 @@ jobs:
             ${{ secrets.DOUBLEZERO_SOLANA_PRIVATE }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Passport Admin
+        run: cargo install --git "ssh://git@github.com/doublezerofoundation/doublezero-solana" --rev "315839d" doublezero-passport-admin
+      - name: Install Revenue Distribution Admin
+        run: cargo install --git "ssh://git@github.com/doublezerofoundation/doublezero-solana" --rev "315839d" doublezero-revenue-distribution-admin
       - name: Solana toolchain
         run: |
           sh -c "$(curl -sSfL https://release.anza.xyz/$SOLANA_CLI/install)"
