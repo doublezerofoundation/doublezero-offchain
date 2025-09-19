@@ -15,7 +15,7 @@ builds:
     tool: cargo
     command: build
     flags:
-      - --package=doublezero-solana-cli
+      - --package=doublezero-solana
       - --release
     targets:
       - x86_64-unknown-linux-gnu
