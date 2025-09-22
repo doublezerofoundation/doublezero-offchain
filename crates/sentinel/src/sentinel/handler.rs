@@ -1,8 +1,7 @@
 use crate::{
-    AccessIds, Result,
     client::{doublezero_ledger::DzRpcClient, solana::SolRpcClient},
     error::rpc_with_retry,
-    verify_access_request,
+    verify_access_request, AccessIds, Result,
 };
 use doublezero_passport::instruction::AccessMode;
 use solana_sdk::{
@@ -109,10 +108,15 @@ impl Sentinel {
             info!(%signature, user = %service_key, "access request granted");
             metrics::counter!("doublezero_sentinel_access_granted").increment(1);
         } else {
-            let signature = self
-                .sol_rpc_client
-                .deny_access(&access_ids.request_pda)
-                .await?;
+            let signature = rpc_with_retry(
+                || async {
+                    self.sol_rpc_client
+                        .deny_access(&access_ids.request_pda)
+                        .await
+                },
+                "deny_access",
+            )
+            .await?;
             info!(%signature, user = %service_key, "access request denied");
             metrics::counter!("doublezero_sentinel_access_denied").increment(1);
         }
