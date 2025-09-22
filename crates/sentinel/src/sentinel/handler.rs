@@ -82,13 +82,11 @@ impl Sentinel {
     }
 
     async fn handle_access_request(&self, access_ids: AccessIds) -> Result<()> {
-        // Get the attestation
-        let attestation = match access_ids.mode {
-            AccessMode::SolanaValidator(attestation) => attestation,
-            AccessMode::SolanaValidatorWithBackupIds { attestation, .. } => attestation,
+        // Get the service key.
+        let service_key = match access_ids.mode {
+            AccessMode::SolanaValidator(attestation) => attestation.service_key,
+            AccessMode::SolanaValidatorWithBackupIds { attestation, .. } => attestation.service_key,
         };
-
-        let service_key = attestation.service_key;
 
         let validator_ips = self.verify_qualifiers(&access_ids.mode).await?;
 
@@ -166,49 +164,40 @@ impl Sentinel {
         debug!(%validator_id, "Validator passed signature validation");
 
         // Extract attestation and backup IDs
-        let (attestation, backup_ids) = match access_mode {
-            AccessMode::SolanaValidator(attestation) => (attestation, None),
-            AccessMode::SolanaValidatorWithBackupIds {
-                attestation,
-                backup_ids,
-            } => (attestation, Some(backup_ids)),
+        let backup_ids = match access_mode {
+            AccessMode::SolanaValidator(_) => None,
+            AccessMode::SolanaValidatorWithBackupIds { backup_ids, .. } => Some(backup_ids),
         };
 
         // Check primary validator is in leader schedule
         if !self
-            .check_validator_in_leader_schedule(&attestation.validator_id)
+            .check_validator_in_leader_schedule(&validator_id)
             .await?
         {
             debug!(
-                %attestation.validator_id,
+                %validator_id,
                 "Validator failed leader schedule qualification"
             );
             return Ok(vec![]);
         }
 
         // Get primary validator IP immediately after leader schedule check
-        let validator_ip = match self
-            .get_and_validate_validator_ip(&attestation.validator_id)
-            .await?
-        {
+        let validator_ip = match self.get_and_validate_validator_ip(&validator_id).await? {
             Some(ip) => ip,
             None => {
                 debug!(
-                    %attestation.validator_id,
+                    %validator_id,
                     "Validator failed gossip protocol ip qualification"
                 );
-                return Ok(vec![]);
+                return Ok(Default::default());
             }
         };
 
         // Collect all validated IPs (starting with primary)
-        let mut ips = vec![(attestation.validator_id, validator_ip)];
+        let mut ips = vec![(validator_id, validator_ip)];
 
         // If we have backup IDs, verify they are NOT in leader schedule but ARE in gossip
         if let Some(backup_ids) = backup_ids {
-            // Store backup IPs to avoid duplicate calls
-            let mut backup_ips = Vec::new();
-
             for backup_id in backup_ids {
                 // Backup should NOT be in leader schedule
                 if self.check_validator_in_leader_schedule(backup_id).await? {
@@ -216,26 +205,23 @@ impl Sentinel {
                         %backup_id,
                         "Backup validator is in leader schedule (should not be)"
                     );
-                    return Ok(vec![]);
+                    return Ok(Default::default());
                 }
 
                 // Check backup ID is in gossip and store IP
                 match self.get_and_validate_validator_ip(backup_id).await? {
-                    Some(backup_ip) => {
-                        backup_ips.push((*backup_id, backup_ip));
+                    Some(ip) => {
+                        ips.push((*backup_id, ip));
                     }
                     None => {
                         debug!(
                             %backup_id,
                             "Backup validator not found in gossip"
                         );
-                        return Ok(vec![]);
+                        return Ok(Default::default());
                     }
                 }
             }
-
-            // Add all validated backup IPs to the result
-            ips.extend(backup_ips);
         }
 
         Ok(ips)
