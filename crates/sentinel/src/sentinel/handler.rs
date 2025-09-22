@@ -1,7 +1,8 @@
 use crate::{
+    AccessIds, Result,
     client::{doublezero_ledger::DzRpcClient, solana::SolRpcClient},
     error::rpc_with_retry,
-    verify_access_request, AccessIds, Result,
+    verify_access_request,
 };
 use doublezero_passport::instruction::AccessMode;
 use solana_sdk::{
