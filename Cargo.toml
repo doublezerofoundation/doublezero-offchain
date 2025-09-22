@@ -66,9 +66,9 @@ url = "2"
 ### Dependencies found in github.com/doublezerofoundation/doublezero-solana
 
 [workspace.dependencies.doublezero-passport]
+features = ["offchain"]
 git = "ssh://git@github.com/doublezerofoundation/doublezero-solana"
 rev = "058af1a"
-features = [ "offchain" ]
 
 [workspace.dependencies.doublezero-program-tools]
 git = "ssh://git@github.com/doublezerofoundation/doublezero-solana"
