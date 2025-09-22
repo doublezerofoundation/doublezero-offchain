@@ -85,26 +85,26 @@ rev = "4dd2450"
 
 [workspace.dependencies.doublezero-program-common]
 git = "ssh://git@github.com/malbeclabs/doublezero"
-rev="e15c579"
+rev="89a675d"
 
 [workspace.dependencies.doublezero-record]
 features = ["no-entrypoint"]
 git = "ssh://git@github.com/malbeclabs/doublezero"
-rev="e15c579"
+rev="89a675d"
 
 [workspace.dependencies.doublezero_sdk]
 git = "ssh://git@github.com/malbeclabs/doublezero"
-rev="e15c579"
+rev="89a675d"
 
 [workspace.dependencies.doublezero-serviceability]
 features = ["no-entrypoint", "serde"]
 git = "ssh://git@github.com/malbeclabs/doublezero"
-rev="e15c579"
+rev="89a675d"
 
 [workspace.dependencies.doublezero-telemetry]
 features = ["no-entrypoint", "serde"]
 git = "ssh://git@github.com/malbeclabs/doublezero"
-rev="e15c579"
+rev="89a675d"
 
 ### Other git dependencies
 
