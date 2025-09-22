@@ -24,7 +24,8 @@ pub struct AccessIds {
     mode: AccessMode,
 }
 
-pub fn verify_access_request(access_mode: &AccessMode) -> Result<()> {
+// Verify access request by and return validator_id (pubkey) if successful
+pub fn verify_access_request(access_mode: &AccessMode) -> Result<Pubkey> {
     const OFFCHAIN_MSG_SUPPORTED_VSN: u8 = 0;
 
     let raw_message = AccessRequest::access_request_message(access_mode);
@@ -44,7 +45,7 @@ pub fn verify_access_request(access_mode: &AccessMode) -> Result<()> {
         return Err(Error::SignatureVerify);
     }
 
-    Ok(())
+    Ok(attestation.validator_id)
 }
 
 pub fn new_transaction(
@@ -88,7 +89,10 @@ mod tests {
         attestation.ed25519_signature = signature_bytes;
 
         let access_mode = AccessMode::SolanaValidator(attestation);
-        assert!(verify_access_request(&access_mode).is_ok());
+        assert_eq!(
+            verify_access_request(&access_mode).unwrap(),
+            validator_id.pubkey()
+        );
     }
 
     #[test]
@@ -124,7 +128,10 @@ mod tests {
             attestation,
             backup_ids: vec![backup_id_1, backup_id_2],
         };
-        assert!(verify_access_request(&access_mode).is_ok());
+        assert_eq!(
+            verify_access_request(&access_mode).unwrap(),
+            validator_id.pubkey()
+        );
     }
 
     #[test]

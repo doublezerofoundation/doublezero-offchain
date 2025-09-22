@@ -161,7 +161,11 @@ impl Sentinel {
     }
 
     async fn verify_qualifiers(&self, access_mode: &AccessMode) -> Result<Vec<(Pubkey, Ipv4Addr)>> {
-        // Extract attestation and validate backup IDs
+        // Return early if sig verification fails
+        let validator_id = verify_access_request(access_mode)?;
+        debug!(%validator_id, "Validator passed signature validation");
+
+        // Extract attestation and backup IDs
         let (attestation, backup_ids) = match access_mode {
             AccessMode::SolanaValidator(attestation) => (attestation, None),
             AccessMode::SolanaValidatorWithBackupIds {
@@ -170,7 +174,7 @@ impl Sentinel {
             } => (attestation, Some(backup_ids)),
         };
 
-        // If primary validator id is not in leader schedule, return early
+        // Check primary validator is in leader schedule
         if !self
             .check_validator_in_leader_schedule(&attestation.validator_id)
             .await?
@@ -182,10 +186,31 @@ impl Sentinel {
             return Ok(vec![]);
         }
 
+        // Get primary validator IP immediately after leader schedule check
+        let validator_ip = match self
+            .get_and_validate_validator_ip(&attestation.validator_id)
+            .await?
+        {
+            Some(ip) => ip,
+            None => {
+                debug!(
+                    %attestation.validator_id,
+                    "Validator failed gossip protocol ip qualification"
+                );
+                return Ok(vec![]);
+            }
+        };
+
+        // Collect all validated IPs (starting with primary)
+        let mut ips = vec![(attestation.validator_id, validator_ip)];
+
         // If we have backup IDs, verify they are NOT in leader schedule but ARE in gossip
         if let Some(backup_ids) = backup_ids {
+            // Store backup IPs to avoid duplicate calls
+            let mut backup_ips = Vec::new();
+
             for backup_id in backup_ids {
-                // If backup id is in leader schedule, return early
+                // Backup should NOT be in leader schedule
                 if self.check_validator_in_leader_schedule(backup_id).await? {
                     debug!(
                         %backup_id,
@@ -194,50 +219,23 @@ impl Sentinel {
                     return Ok(vec![]);
                 }
 
-                // Check backup ID is in gossip
-                if self
-                    .get_and_validate_validator_ip(backup_id)
-                    .await?
-                    .is_none()
-                {
-                    debug!(
-                        %backup_id,
-                        "Backup validator not found in gossip"
-                    );
-                    return Ok(vec![]);
+                // Check backup ID is in gossip and store IP
+                match self.get_and_validate_validator_ip(backup_id).await? {
+                    Some(backup_ip) => {
+                        backup_ips.push((*backup_id, backup_ip));
+                    }
+                    None => {
+                        debug!(
+                            %backup_id,
+                            "Backup validator not found in gossip"
+                        );
+                        return Ok(vec![]);
+                    }
                 }
             }
-        }
 
-        if verify_access_request(access_mode).is_err() {
-            debug!(%attestation.validator_id, "Validator failed signature validation");
-            return Ok(vec![]);
-        }
-
-        // Collect all IPs (validator + backups)
-        let mut ips = Vec::new();
-
-        // Get primary validator IP
-        if let Some(validator_ip) = self
-            .get_and_validate_validator_ip(&attestation.validator_id)
-            .await?
-        {
-            ips.push((attestation.validator_id, validator_ip));
-        } else {
-            debug!(
-                %attestation.validator_id,
-                "Validator failed gossip protocol ip qualification"
-            );
-            return Ok(vec![]);
-        }
-
-        // Get backup IPs if applicable
-        if let AccessMode::SolanaValidatorWithBackupIds { backup_ids, .. } = access_mode {
-            for backup_id in backup_ids {
-                if let Some(backup_ip) = self.get_and_validate_validator_ip(backup_id).await? {
-                    ips.push((*backup_id, backup_ip));
-                }
-            }
+            // Add all validated backup IPs to the result
+            ips.extend(backup_ips);
         }
 
         Ok(ips)
@@ -307,7 +305,9 @@ mod tests {
             &self,
             access_mode: &AccessMode,
         ) -> Result<Vec<(Pubkey, Ipv4Addr)>> {
-            // Extract attestation and validate backup IDs
+            // Note: Skipping signature verification in mock, but in real code it's done first
+
+            // Extract attestation and backup IDs
             let (attestation, backup_ids) = match access_mode {
                 AccessMode::SolanaValidator(attestation) => (attestation, None),
                 AccessMode::SolanaValidatorWithBackupIds {
@@ -316,7 +316,7 @@ mod tests {
                 } => (attestation, Some(backup_ids)),
             };
 
-            // Check that primary validator is in leader schedule
+            // Check primary validator is in leader schedule
             if !self
                 .check_validator_in_leader_schedule(&attestation.validator_id)
                 .await?
@@ -324,10 +324,25 @@ mod tests {
                 return Ok(vec![]);
             }
 
+            // Get primary validator IP immediately after leader schedule check
+            let validator_ip = match self
+                .get_and_validate_validator_ip(&attestation.validator_id)
+                .await?
+            {
+                Some(ip) => ip,
+                None => return Ok(vec![]),
+            };
+
+            // Collect all validated IPs (starting with primary)
+            let mut ips = vec![(attestation.validator_id, validator_ip)];
+
             // If we have backup IDs, verify they are NOT in leader schedule but ARE in gossip
             if let Some(backup_ids) = backup_ids {
+                // Store backup IPs to avoid duplicate calls
+                let mut backup_ips = Vec::new();
+
                 for backup_id in backup_ids {
-                    // Check backup ID is NOT in leader schedule
+                    // Backup should NOT be in leader schedule
                     if !self
                         .check_validator_not_in_leader_schedule(backup_id)
                         .await?
@@ -335,39 +350,19 @@ mod tests {
                         return Ok(vec![]);
                     }
 
-                    // Check backup ID is in gossip
-                    if self
-                        .get_and_validate_validator_ip(backup_id)
-                        .await?
-                        .is_none()
-                    {
-                        return Ok(vec![]);
+                    // Check backup ID is in gossip and store IP
+                    match self.get_and_validate_validator_ip(backup_id).await? {
+                        Some(backup_ip) => {
+                            backup_ips.push((*backup_id, backup_ip));
+                        }
+                        None => {
+                            return Ok(vec![]);
+                        }
                     }
                 }
-            }
 
-            // Note: Skipping signature verification in mock
-
-            // Collect all IPs (validator + backups)
-            let mut ips = Vec::new();
-
-            // Get primary validator IP
-            if let Some(validator_ip) = self
-                .get_and_validate_validator_ip(&attestation.validator_id)
-                .await?
-            {
-                ips.push((attestation.validator_id, validator_ip));
-            } else {
-                return Ok(vec![]);
-            }
-
-            // Get backup IPs if applicable
-            if let AccessMode::SolanaValidatorWithBackupIds { backup_ids, .. } = access_mode {
-                for backup_id in backup_ids {
-                    if let Some(backup_ip) = self.get_and_validate_validator_ip(backup_id).await? {
-                        ips.push((*backup_id, backup_ip));
-                    }
-                }
+                // Add all validated backup IPs to the result
+                ips.extend(backup_ips);
             }
 
             Ok(ips)
