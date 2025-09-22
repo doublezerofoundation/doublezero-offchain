@@ -64,9 +64,13 @@ impl Sentinel {
                 event = self.rx.recv() => {
                     if let Some(signature) = event {
                         info!(%signature, "received access request txn");
-                        let access_ids = self.sol_rpc_client.get_access_request_from_signature(signature).await?;
-                        if let Err(err) = self.handle_access_request(access_ids).await {
-                            error!(?err, "error encountered validating network access request");
+                        match self.sol_rpc_client.get_access_request_from_signature(signature).await {
+                            Ok(access_ids) => {
+                                if let Err(err) = self.handle_access_request(access_ids).await {
+                                    error!(?err, "error encountered validating network access request");
+                                }
+                            },
+                            Err(err) => error!(?err, %signature, "failed to get access request from signature"),
                         }
                     }
                 }
