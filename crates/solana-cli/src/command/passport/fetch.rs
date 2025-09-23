@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow};
+use doublezero_passport::state::ProgramConfig;
 use doublezero_program_tools::zero_copy;
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
-use doublezero_passport::state::ProgramConfig;
 
 pub async fn execute_fetch(
     program_config: bool,
