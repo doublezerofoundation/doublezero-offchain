@@ -1,11 +1,10 @@
 use crate::{AccessIds, Error, Result, new_transaction};
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STD};
 use bincode;
-use borsh::de::BorshDeserialize;
 use doublezero_passport::{
     id as passport_id,
     instruction::{
-        AccessMode, PassportInstructionData,
+        PassportInstructionData,
         account::{DenyAccessAccounts, GrantAccessAccounts},
     },
     state::AccessRequest,
@@ -258,9 +257,10 @@ fn deserialize_access_request_from_account(
         zero_copy::checked_from_bytes_with_discriminator::<AccessRequest>(account_data)
             .ok_or_else(|| Error::Deserialize("Failed to deserialize AccessRequest".to_string()))?;
 
-    // Deserialize the encoded_access_mode field
-    let access_mode = AccessMode::try_from_slice(&access_request.encoded_access_mode)
-        .map_err(|e| Error::Deserialize(format!("Failed to deserialize AccessMode: {e}")))?;
+    // Use the new checked_access_mode() method to safely deserialize
+    let access_mode = access_request
+        .checked_access_mode()
+        .ok_or_else(|| Error::Deserialize("Failed to deserialize AccessMode".to_string()))?;
 
     Ok(AccessIds {
         request_pda: *request_pda,
