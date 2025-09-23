@@ -36,18 +36,12 @@ pub async fn execute_find(
                 "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
             ),
         }
-    } else if server_ip.is_some() {
+    } else if let Some(ip_str) = server_ip {
         // Search by server_ip
-        let server_ip: Ipv4Addr = match server_ip {
-            Some(ref ip_str) => match ip_str.parse() {
-                Ok(addr) => addr,
-                Err(e) => {
-                    println!("Failed to parse server IP: {e}");
-                    return Ok(());
-                }
-            },
-            None => {
-                println!("No server IP provided.");
+        let server_ip: Ipv4Addr = match ip_str.parse() {
+            Ok(addr) => addr,
+            Err(e) => {
+                println!("Failed to parse server IP: {e}");
                 return Ok(());
             }
         };
