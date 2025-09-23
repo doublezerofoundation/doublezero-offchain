@@ -38,14 +38,30 @@ pub async fn execute_find(
         }
     } else if server_ip.is_some() {
         // Search by server_ip
-        let server_ip: Ipv4Addr = server_ip.as_ref().unwrap().parse()?;
-        let node = nodes
-            .iter()
-            .find(|n| n.gossip.is_some() && n.gossip.unwrap().ip() == server_ip);
+        let server_ip: Ipv4Addr = match server_ip {
+            Some(ref ip_str) => match ip_str.parse() {
+                Ok(addr) => addr,
+                Err(e) => {
+                    println!("Failed to parse server IP: {e}");
+                    return Ok(());
+                }
+            },
+            None => {
+                println!("No server IP provided.");
+                return Ok(());
+            }
+        };
+        let node = nodes.iter().find(|n| match &n.gossip {
+            Some(gossip) => gossip.ip() == server_ip,
+            None => false,
+        });
         match node {
             Some(node) => {
                 println!("Node-Id: {}", node.pubkey);
-                println!("Server IP: {}", node.gossip.unwrap().ip());
+                match &node.gossip {
+                    Some(gossip) => println!("Server IP: {}", gossip.ip()),
+                    None => println!("Server IP: <unknown>"),
+                }
             }
             None => println!(
                 "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
@@ -63,13 +79,17 @@ pub async fn execute_find(
                         return Ok(());
                     }
                 };
-                let node = nodes
-                    .iter()
-                    .find(|n| n.gossip.is_some() && n.gossip.unwrap().ip() == server_ip);
+                let node = nodes.iter().find(|n| match &n.gossip {
+                    Some(gossip) => gossip.ip() == server_ip,
+                    None => false,
+                });
                 match node {
                     Some(node) => {
                         println!("Node-Id: {}", node.pubkey);
-                        println!("Server IP: {}", node.gossip.unwrap().ip());
+                        match &node.gossip {
+                            Some(gossip) => println!("Server IP: {}", gossip.ip()),
+                            None => println!("Server IP: <unknown>"),
+                        }
                     }
                     None => println!(
                         "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
