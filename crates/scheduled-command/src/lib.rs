@@ -135,22 +135,19 @@ fn schedule_to_cron(s: &str) -> Result<String> {
 
     // Check if duration is 24 hours or more.
     if duration.as_secs() >= 24 * 3600 {
-        bail!(
-            "Schedule duration '{}' is too long. Maximum allowed is less than 24 hours.",
-            s
-        );
+        bail!("Schedule duration '{s}' is too long. Maximum allowed is less than 24 hours");
     }
 
     // Convert to cron expression.
     let secs = duration.as_secs();
     if secs < 60 {
-        Ok(format!("*/{} * * * * *", secs))
+        Ok(format!("*/{secs} * * * * *"))
     } else if secs < 3600 {
         let mins = secs / 60;
-        Ok(format!("0 */{} * * * *", mins))
+        Ok(format!("0 */{mins} * * * *"))
     } else {
         let hours = secs / 3600;
-        Ok(format!("0 0 */{} * * *", hours))
+        Ok(format!("0 0 */{hours} * * *"))
     }
 }
 
@@ -160,23 +157,23 @@ mod tests {
 
     #[test]
     fn test_schedule_to_cron() {
-        // Test direct conversion
+        // Test direct conversion.
         assert_eq!(schedule_to_cron("30s").unwrap(), "*/30 * * * * *");
         assert_eq!(schedule_to_cron("2m").unwrap(), "0 */2 * * * *");
         assert_eq!(schedule_to_cron("2h").unwrap(), "0 0 */2 * * *");
 
-        // Test plain numbers (seconds)
+        // Test plain numbers (seconds).
         assert_eq!(schedule_to_cron("5").unwrap(), "*/5 * * * * *");
         assert_eq!(schedule_to_cron("120").unwrap(), "0 */2 * * * *");
 
-        // Test case insensitive
+        // Test case insensitive.
         assert_eq!(schedule_to_cron("5S").unwrap(), "*/5 * * * * *");
         assert_eq!(schedule_to_cron("10M").unwrap(), "0 */10 * * * *");
 
-        // Test whitespace
+        // Test whitespace.
         assert_eq!(schedule_to_cron(" 5s ").unwrap(), "*/5 * * * * *");
 
-        // Test 24 hour limit
+        // Test 24 hour limit.
         assert!(schedule_to_cron("24h").is_err());
         assert!(schedule_to_cron("86400").is_err());
         assert!(schedule_to_cron("23h").is_ok());

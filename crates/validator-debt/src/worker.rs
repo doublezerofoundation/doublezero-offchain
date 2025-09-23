@@ -511,7 +511,7 @@ mod tests {
         .await?;
 
         let deserialized: ComputedSolanaValidatorDebts = borsh::from_slice(read.1.as_slice())
-            .map_err(|e| anyhow::anyhow!("failed to deserialize ledger record: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("failed to deserialize ledger record: {e}"))?;
         let (first_solana_epoch, last_solana_epoch) = ledger::get_solana_epoch_from_dz_epoch(
             &fpc.solana_rpc_client,
             &fpc.ledger_rpc_client,
