@@ -49,7 +49,7 @@ pub struct ScheduleOption {
 }
 
 impl ScheduleOption {
-    /// Check if a schedule is configured
+    /// Check if a schedule is configured.
     pub fn is_scheduled(&self) -> bool {
         self.schedule.is_some()
     }
@@ -114,8 +114,8 @@ pub async fn run_schedulable<T: Schedulable + Send + Sync + 'static>(command: &T
 
 /// Convert a schedule string to a cron expression.
 ///
-/// Supports formats like "5s", "10m", "2h" or plain numbers (treated as seconds).
-/// Maximum allowed duration is less than 24 hours.
+/// Supports formats like "5s", "10m", "2h" or plain numbers (treated as
+/// seconds). Maximum allowed duration is less than 24 hours.
 fn schedule_to_cron(s: &str) -> Result<String> {
     let s = s.trim().to_lowercase();
 
@@ -141,7 +141,7 @@ fn schedule_to_cron(s: &str) -> Result<String> {
         );
     }
 
-    // Convert to cron expression
+    // Convert to cron expression.
     let secs = duration.as_secs();
     if secs < 60 {
         Ok(format!("*/{} * * * * *", secs))
