@@ -3,7 +3,7 @@ use std::{
     net::{TcpStream, ToSocketAddrs},
 };
 
-pub fn get_public_ipv4() -> Result<String, Box<dyn std::error::Error>> {
+pub fn get_public_ipv4() -> anyhow::Result<String> {
     // Resolve the host `ifconfig.me` to IPv4 addresses
     let addrs = "ifconfig.me:80"
         .to_socket_addrs()?
@@ -12,7 +12,7 @@ pub fn get_public_ipv4() -> Result<String, Box<dyn std::error::Error>> {
             _ => None,
         })
         .next()
-        .ok_or("Failed to resolve an IPv4 address")?;
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve an IPv4 address"))?;
 
     // Establish a connection to the IPv4 address
     let mut stream = TcpStream::connect(addrs)?;
@@ -35,5 +35,7 @@ pub fn get_public_ipv4() -> Result<String, Box<dyn std::error::Error>> {
         return Ok(ip.to_string());
     }
 
-    Err("Failed to extract the IP from the response".into())
+    Err(anyhow::anyhow!(
+        "Failed to extract the IP from the response"
+    ))
 }

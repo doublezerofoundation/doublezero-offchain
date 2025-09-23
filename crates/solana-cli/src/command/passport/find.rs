@@ -1,6 +1,7 @@
 use anyhow::Result;
 use doublezero_solana_client_tools::rpc::SolanaConnection;
 use doublezero_solana_client_tools::rpc::SolanaConnectionOptions;
+use solana_client::rpc_response::RpcContactInfo;
 use solana_sdk::pubkey::Pubkey;
 use std::net::Ipv4Addr;
 
@@ -22,19 +23,12 @@ pub async fn execute_find(
     // Check if either node_id or server_ip is provided
     if let Some(node_id) = node_id {
         // Search by node_id
-        let node_id = node_id.to_string();
-        let node = nodes.iter().find(|n| n.pubkey == node_id);
-        match node {
-            Some(node) => {
-                println!("Node-Id: {}", node.pubkey);
-                match &node.gossip {
-                    Some(gossip) => println!("Server IP: {}", gossip.ip()),
-                    None => println!("Server IP: <unknown>"),
-                }
-            }
-            None => println!(
+        if let Some(node) = find_node_by_node_id(&nodes, &node_id) {
+            print_node_info(node);
+        } else {
+            println!(
                 "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
-            ),
+            );
         }
     } else if let Some(ip_str) = server_ip {
         // Search by server_ip
@@ -45,21 +39,12 @@ pub async fn execute_find(
                 return Ok(());
             }
         };
-        let node = nodes.iter().find(|n| match &n.gossip {
-            Some(gossip) => gossip.ip() == server_ip,
-            None => false,
-        });
-        match node {
-            Some(node) => {
-                println!("Node-Id: {}", node.pubkey);
-                match &node.gossip {
-                    Some(gossip) => println!("Server IP: {}", gossip.ip()),
-                    None => println!("Server IP: <unknown>"),
-                }
-            }
-            None => println!(
+        if let Some(node) = find_node_by_ip(&nodes, server_ip) {
+            print_node_info(node);
+        } else {
+            println!(
                 "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
-            ),
+            );
         }
     } else {
         // Neither node_id nor server_ip provided, attempt to detect public IP
@@ -73,21 +58,12 @@ pub async fn execute_find(
                         return Ok(());
                     }
                 };
-                let node = nodes.iter().find(|n| match &n.gossip {
-                    Some(gossip) => gossip.ip() == server_ip,
-                    None => false,
-                });
-                match node {
-                    Some(node) => {
-                        println!("Node-Id: {}", node.pubkey);
-                        match &node.gossip {
-                            Some(gossip) => println!("Server IP: {}", gossip.ip()),
-                            None => println!("Server IP: <unknown>"),
-                        }
-                    }
-                    None => println!(
+                if let Some(node) = find_node_by_ip(&nodes, server_ip) {
+                    print_node_info(node);
+                } else {
+                    println!(
                         "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
-                    ),
+                    );
                 }
             }
             Err(e) => println!("Failed to get public IP: {e}"),
@@ -95,4 +71,26 @@ pub async fn execute_find(
     }
 
     Ok(())
+}
+
+fn find_node_by_node_id<'a>(
+    nodes: &'a [RpcContactInfo],
+    node_id: &'a Pubkey,
+) -> Option<&'a RpcContactInfo> {
+    let node_id_str = node_id.to_string();
+    nodes.iter().find(|n| n.pubkey == node_id_str)
+}
+
+fn find_node_by_ip<'a>(nodes: &'a [RpcContactInfo], ip: Ipv4Addr) -> Option<&'a RpcContactInfo> {
+    nodes
+        .iter()
+        .find(|n| n.gossip.as_ref().is_some_and(|gossip| gossip.ip() == ip))
+}
+
+fn print_node_info(node: &RpcContactInfo) {
+    println!("Node-Id: {}", node.pubkey);
+    match &node.gossip {
+        Some(gossip) => println!("Server IP: {}", gossip.ip()),
+        None => println!("Server IP: <unknown>"),
+    }
 }
