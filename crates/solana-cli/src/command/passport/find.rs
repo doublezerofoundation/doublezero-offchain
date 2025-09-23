@@ -81,7 +81,7 @@ fn find_node_by_node_id<'a>(
     nodes.iter().find(|n| n.pubkey == node_id_str)
 }
 
-fn find_node_by_ip<'a>(nodes: &'a [RpcContactInfo], ip: Ipv4Addr) -> Option<&'a RpcContactInfo> {
+fn find_node_by_ip(nodes: &[RpcContactInfo], ip: Ipv4Addr) -> Option<&RpcContactInfo> {
     nodes
         .iter()
         .find(|n| n.gossip.as_ref().is_some_and(|gossip| gossip.ip() == ip))
