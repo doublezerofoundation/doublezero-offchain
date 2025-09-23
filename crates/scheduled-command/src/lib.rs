@@ -86,6 +86,7 @@ pub async fn run_schedulable<T: Schedulable + Send + Sync + 'static>(command: &T
             let command_clone = command.clone();
             let job = Job::new_async(cron_expr.as_str(), move |_uuid, _l| {
                 let command = command_clone.clone();
+
                 Box::pin(async move {
                     if let Err(e) = command.execute_once().await {
                         error!("Command execution failed: {e}");
@@ -107,6 +108,7 @@ pub async fn run_schedulable<T: Schedulable + Send + Sync + 'static>(command: &T
             command.execute_once().await?;
         }
     }
+
     Ok(())
 }
 

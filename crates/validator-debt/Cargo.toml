@@ -21,6 +21,7 @@ clap.workspace = true
 doublezero-program-tools.workspace = true
 doublezero-record.workspace = true
 doublezero-revenue-distribution.workspace = true
+doublezero-scheduled-command.workspace = true
 doublezero-serviceability.workspace = true
 doublezero_sdk.workspace = true
 doublezero-solana-client-tools.workspace = true
@@ -37,5 +38,6 @@ svm-hash.workspace = true
 tabled.workspace = true
 tokio.workspace = true
 tracing.workspace = true
+tracing-subscriber.workspace = true
 url.workspace = true
 
