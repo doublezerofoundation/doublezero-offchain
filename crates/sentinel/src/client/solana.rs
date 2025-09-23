@@ -39,6 +39,8 @@ use std::{
 };
 use url::Url;
 
+const ACCESS_REQUEST_ACCOUNT_INDEX: usize = 2;
+
 pub struct SolRpcClient {
     client: RpcClient,
     payer: Arc<Keypair>,
@@ -127,7 +129,7 @@ impl SolRpcClient {
                     .find(|ix| ix.program_id(tx.message.static_account_keys()) == &passport_id())
                     .ok_or(Error::InstructionNotFound(signature))?;
 
-                // Get the AccessRequest account (index 2)
+                // Get the AccessRequest account
                 let accounts = compiled_ix
                     .accounts
                     .iter()
@@ -136,7 +138,7 @@ impl SolRpcClient {
                     .ok_or(Error::MissingAccountKeys(signature))?;
 
                 accounts
-                    .get(2)
+                    .get(ACCESS_REQUEST_ACCOUNT_INDEX)
                     .copied()
                     .ok_or(Error::InstructionInvalid(signature))?
             } else {
@@ -257,7 +259,7 @@ fn deserialize_access_request_from_account(
         zero_copy::checked_from_bytes_with_discriminator::<AccessRequest>(account_data)
             .ok_or_else(|| Error::Deserialize("Failed to deserialize AccessRequest".to_string()))?;
 
-    // Use the new checked_access_mode() method to safely deserialize
+    // Deserialize safely
     let access_mode = access_request
         .checked_access_mode()
         .ok_or_else(|| Error::Deserialize("Failed to deserialize AccessMode".to_string()))?;
