@@ -3,7 +3,10 @@ use solana_client::{
     client_error::{ClientError, ClientErrorKind, reqwest::StatusCode},
     nonblocking::pubsub_client::PubsubClientError,
 };
-use solana_sdk::signature::{ParseSignatureError, Signature};
+use solana_sdk::{
+    pubkey::Pubkey,
+    signature::{ParseSignatureError, Signature},
+};
 use std::{
     future::Future,
     sync::atomic::{AtomicUsize, Ordering},
@@ -22,6 +25,10 @@ pub enum Error {
     BincodeDeser(#[from] bincode::Error),
     #[error("borsh deserialization error: {0}")]
     BorshIo(#[from] borsh::io::Error),
+    #[error("deserialization error: {0}")]
+    Deserialize(String),
+    #[error("legacy AccessRequest format without encoded_access_mode: {0}")]
+    LegacyFormat(Pubkey),
     #[error("instruction not found in transaction: {0}")]
     InstructionNotFound(Signature),
     #[error("invalid instruction data: {0}")]

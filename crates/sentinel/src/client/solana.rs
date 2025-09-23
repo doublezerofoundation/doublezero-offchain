@@ -1,18 +1,19 @@
 use crate::{AccessIds, Error, Result, new_transaction};
-
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STD};
 use bincode;
 use borsh::de::BorshDeserialize;
 use doublezero_passport::{
     id as passport_id,
     instruction::{
-        PassportInstructionData,
+        AccessMode, PassportInstructionData,
         account::{DenyAccessAccounts, GrantAccessAccounts},
     },
     state::AccessRequest,
 };
-use doublezero_program_tools::{PrecomputedDiscriminator, instruction::try_build_instruction};
-use futures::{StreamExt, TryStreamExt, future::BoxFuture, stream::BoxStream};
+use doublezero_program_tools::{
+    PrecomputedDiscriminator, instruction::try_build_instruction, zero_copy,
+};
+use futures::{future::BoxFuture, stream::BoxStream};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::{
     nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient},
@@ -37,6 +38,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
 };
+use tracing::{debug, info, warn};
 use url::Url;
 
 pub struct SolRpcClient {
@@ -96,6 +98,7 @@ impl SolRpcClient {
         &self,
         signature: Signature,
     ) -> Result<AccessIds> {
+        // Get the transaction to find the AccessRequest account pubkey
         let txn = self
             .client
             .get_transaction_with_config(
@@ -110,16 +113,43 @@ impl SolRpcClient {
             )
             .await?;
 
-        if let EncodedTransaction::Binary(data, TransactionBinaryEncoding::Base64) =
-            txn.transaction.transaction
-        {
-            let data: &[u8] = &BASE64_STD.decode(data)?;
-            let tx: VersionedTransaction = bincode::deserialize(data)?;
+        // Extract the AccessRequest account pubkey from the transaction
+        let request_pda =
+            if let EncodedTransaction::Binary(data, TransactionBinaryEncoding::Base64) =
+                txn.transaction.transaction
+            {
+                let data: &[u8] = &BASE64_STD.decode(data)?;
+                let tx: VersionedTransaction = bincode::deserialize(data)?;
 
-            deserialize_access_request_ids(tx)
-        } else {
-            Err(Error::TransactionEncoding(signature))
-        }
+                // Find the passport instruction
+                let compiled_ix = tx
+                    .message
+                    .instructions()
+                    .iter()
+                    .find(|ix| ix.program_id(tx.message.static_account_keys()) == &passport_id())
+                    .ok_or(Error::InstructionNotFound(signature))?;
+
+                // Get the AccessRequest account (index 2)
+                let accounts = compiled_ix
+                    .accounts
+                    .iter()
+                    .map(|&idx| tx.message.static_account_keys().get(idx as usize).copied())
+                    .collect::<Option<Vec<_>>>()
+                    .ok_or(Error::MissingAccountKeys(signature))?;
+
+                accounts
+                    .get(2)
+                    .copied()
+                    .ok_or(Error::InstructionInvalid(signature))?
+            } else {
+                return Err(Error::TransactionEncoding(signature));
+            };
+
+        // Fetch the AccessRequest account data
+        let account = self.client.get_account(&request_pda).await?;
+
+        // Deserialize the AccessRequest and extract the AccessMode
+        deserialize_access_request_from_account(&request_pda, &account.data)
     }
 
     pub async fn get_access_requests(&self) -> Result<Vec<AccessIds>> {
@@ -140,22 +170,103 @@ impl SolRpcClient {
             .get_program_accounts_with_config(&passport_id(), config)
             .await?;
 
-        let access_ids = futures::stream::iter(accounts)
-            .then(|(pubkey, _acct)| async move {
-                let signatures = self.client.get_signatures_for_address(&pubkey).await?;
+        let mut access_ids = Vec::new();
+        let mut legacy_count = 0;
+        let mut new_format_count = 0;
+        let mut failed_count = 0;
 
-                let creation_signature: Signature = signatures
-                    .first()
-                    .ok_or(Error::MissingTxnSignature)
-                    .and_then(|sig| sig.signature.parse().map_err(Error::from))?;
+        for (pubkey, account) in accounts {
+            match deserialize_access_request_from_account(&pubkey, &account.data) {
+                Ok(ids) => {
+                    new_format_count += 1;
+                    access_ids.push(ids);
+                }
+                Err(Error::LegacyFormat(account_pubkey)) => {
+                    // Legacy account - need to fetch transaction to get AccessMode
+                    legacy_count += 1;
+                    match self.get_legacy_access_request(account_pubkey).await {
+                        Ok(ids) => access_ids.push(ids),
+                        Err(e) => {
+                            warn!(
+                                account = %account_pubkey,
+                                error = ?e,
+                                "Failed to process legacy AccessRequest account"
+                            );
+                            failed_count += 1;
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        account = %pubkey,
+                        error = ?e,
+                        "Failed to deserialize AccessRequest account"
+                    );
+                    failed_count += 1;
+                }
+            }
+        }
 
-                self.get_access_request_from_signature(creation_signature)
-                    .await
-            })
-            .try_collect::<Vec<_>>()
-            .await?;
+        if legacy_count > 0 || failed_count > 0 {
+            info!(
+                new_format = new_format_count,
+                legacy = legacy_count,
+                failed = failed_count,
+                "Processed AccessRequest accounts with mixed formats"
+            );
+        }
 
         Ok(access_ids)
+    }
+
+    /// Fallback function to handle legacy AccessRequest accounts that don't have
+    /// encoded_access_mode populated. This fetches the creation transaction and
+    /// extracts the AccessMode from instruction data.
+    async fn get_legacy_access_request(&self, request_pda: Pubkey) -> Result<AccessIds> {
+        debug!(
+            account = %request_pda,
+            "Fetching transaction history for legacy AccessRequest"
+        );
+
+        // Get the creation transaction signature
+        let signatures = self.client.get_signatures_for_address(&request_pda).await?;
+
+        let creation_signature: Signature = signatures
+            .first()
+            .ok_or(Error::MissingTxnSignature)
+            .and_then(|sig| sig.signature.parse().map_err(Error::from))?;
+
+        debug!(
+            account = %request_pda,
+            signature = %creation_signature,
+            "Found creation transaction for legacy AccessRequest"
+        );
+
+        // Parse the transaction to get the AccessMode
+        let txn = self
+            .client
+            .get_transaction_with_config(
+                &creation_signature,
+                RpcTransactionConfig {
+                    encoding: Some(UiTransactionEncoding::Base64),
+                    commitment: Some(CommitmentConfig {
+                        commitment: CommitmentLevel::Confirmed,
+                    }),
+                    max_supported_transaction_version: Some(0),
+                },
+            )
+            .await?;
+
+        if let EncodedTransaction::Binary(data, TransactionBinaryEncoding::Base64) =
+            txn.transaction.transaction
+        {
+            let data: &[u8] = &BASE64_STD.decode(data)?;
+            let tx: VersionedTransaction = bincode::deserialize(data)?;
+
+            deserialize_legacy_access_request_ids(tx, request_pda)
+        } else {
+            Err(Error::TransactionEncoding(creation_signature))
+        }
     }
 
     pub async fn check_leader_schedule(
@@ -227,7 +338,12 @@ impl SolPubsubClient {
     }
 }
 
-fn deserialize_access_request_ids(txn: VersionedTransaction) -> Result<AccessIds> {
+/// Helper function to deserialize legacy AccessRequest from transaction instruction data.
+/// This is only used as a fallback for accounts created before the encoded_access_mode field was added.
+fn deserialize_legacy_access_request_ids(
+    txn: VersionedTransaction,
+    request_pda: Pubkey,
+) -> Result<AccessIds> {
     let signature = txn.signatures.first().ok_or(Error::MissingTxnSignature)?;
     let compiled_ix = txn
         .message
@@ -235,25 +351,91 @@ fn deserialize_access_request_ids(txn: VersionedTransaction) -> Result<AccessIds
         .iter()
         .find(|ix| ix.program_id(txn.message.static_account_keys()) == &passport_id())
         .ok_or(Error::InstructionNotFound(*signature))?;
+
     let accounts = compiled_ix
         .accounts
         .iter()
         .map(|&idx| txn.message.static_account_keys().get(idx as usize).copied())
         .collect::<Option<Vec<_>>>()
         .ok_or(Error::MissingAccountKeys(*signature))?;
+
+    // Deserialize the AccessMode from instruction data
     let Ok(PassportInstructionData::RequestAccess(mode)) =
         PassportInstructionData::try_from_slice(&compiled_ix.data)
     else {
         return Err(Error::InstructionInvalid(*signature));
     };
-    match (accounts.get(2), accounts.get(1)) {
-        (Some(request_pda), Some(payer)) => Ok(AccessIds {
-            request_pda: *request_pda,
-            rent_beneficiary_key: *payer,
-            mode,
-        }),
-        _ => Err(Error::InstructionInvalid(*signature)),
+
+    // Get the rent beneficiary (payer) from the accounts
+    let rent_beneficiary_key = accounts
+        .get(1)
+        .copied()
+        .ok_or(Error::InstructionInvalid(*signature))?;
+
+    info!(
+        account = %request_pda,
+        "Successfully processed legacy AccessRequest using transaction data"
+    );
+    metrics::counter!("doublezero_sentinel_legacy_processed_via_txn").increment(1);
+
+    Ok(AccessIds {
+        request_pda,
+        rent_beneficiary_key,
+        mode,
+    })
+}
+
+/// Helper function to deserialize AccessMode from AccessRequest account data.
+/// Handles both new format (with encoded_access_mode) and legacy format.
+fn deserialize_access_request_from_account(
+    request_pda: &Pubkey,
+    account_data: &[u8],
+) -> Result<AccessIds> {
+    // Parse the AccessRequest structure using zero_copy
+    let (access_request, _) =
+        zero_copy::checked_from_bytes_with_discriminator::<AccessRequest>(account_data)
+            .ok_or_else(|| Error::Deserialize("Failed to deserialize AccessRequest".to_string()))?;
+
+    // Check if encoded_access_mode is populated (new format)
+    // Legacy accounts will have all zeros in this field
+    let is_legacy = access_request
+        .encoded_access_mode
+        .iter()
+        .all(|&byte| byte == 0);
+
+    if is_legacy {
+        // Legacy format detected - cannot process without transaction data
+        debug!(
+            account = %request_pda,
+            "Legacy AccessRequest format detected - missing encoded_access_mode"
+        );
+        metrics::counter!("doublezero_sentinel_legacy_access_request").increment(1);
+        return Err(Error::LegacyFormat(*request_pda));
     }
+
+    // New format - deserialize the encoded_access_mode field
+    let access_mode =
+        AccessMode::try_from_slice(&access_request.encoded_access_mode).map_err(|e| {
+            warn!(
+                account = %request_pda,
+                error = %e,
+                "Failed to deserialize AccessMode from encoded_access_mode"
+            );
+            metrics::counter!("doublezero_sentinel_access_mode_deserialize_failed").increment(1);
+            Error::Deserialize(format!("Failed to deserialize AccessMode: {e}"))
+        })?;
+
+    debug!(
+        account = %request_pda,
+        "Successfully deserialized AccessRequest with new format"
+    );
+    metrics::counter!("doublezero_sentinel_new_format_access_request").increment(1);
+
+    Ok(AccessIds {
+        request_pda: *request_pda,
+        rent_beneficiary_key: access_request.rent_beneficiary_key,
+        mode: access_mode,
+    })
 }
 
 pub struct PreviousEpochSlots {
