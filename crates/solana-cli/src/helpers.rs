@@ -1,21 +1,21 @@
 use std::{
     io::{Read, Write},
-    net::{TcpStream, ToSocketAddrs},
+    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    time::Duration,
 };
+
+use anyhow::{Context, bail};
 
 pub fn get_public_ipv4() -> anyhow::Result<String> {
     // Resolve the host `ifconfig.me` to IPv4 addresses
-    let addrs = "ifconfig.me:80"
+    let socket_addr = "ifconfig.me:80"
         .to_socket_addrs()?
-        .filter_map(|addr| match addr {
-            std::net::SocketAddr::V4(ipv4) => Some(ipv4),
-            _ => None,
-        })
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Failed to resolve an IPv4 address"))?;
+        .find(|addr| matches!(addr, SocketAddr::V4(_)))
+        .context("Failed to resolve an IPv4 address")?;
 
-    // Establish a connection to the IPv4 address
-    let mut stream = TcpStream::connect(addrs)?;
+    // Establish a connection to the IPv4 address with a short timeout to avoid hanging CLI calls.
+    let mut stream = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
 
     // Send an HTTP GET request to retrieve only IPv4
     let request = "GET /ip HTTP/1.1\r\nHost: ifconfig.me\r\nConnection: close\r\n\r\n";
@@ -31,11 +31,8 @@ pub fn get_public_ipv4() -> anyhow::Result<String> {
     // The IP will be in the body after the HTTP headers
     if let Some(body_start) = response_text.find("\r\n\r\n") {
         let ip = &response_text[body_start + 4..].trim();
-
         return Ok(ip.to_string());
     }
 
-    Err(anyhow::anyhow!(
-        "Failed to extract the IP from the response"
-    ))
+    bail!("Failed to extract the IP from the response")
 }
