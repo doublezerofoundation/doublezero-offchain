@@ -23,6 +23,7 @@ doublezero-record.workspace = true
 doublezero-revenue-distribution.workspace = true
 doublezero-serviceability.workspace = true
 doublezero_sdk.workspace = true
+doublezero-solana-client-tools.workspace = true
 futures.workspace = true
 mockall.workspace = true
 reqwest.workspace = true

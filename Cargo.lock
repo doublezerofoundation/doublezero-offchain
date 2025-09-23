@@ -1962,6 +1962,7 @@ dependencies = [
  "doublezero-record",
  "doublezero-revenue-distribution",
  "doublezero-serviceability",
+ "doublezero-solana-client-tools",
  "doublezero_sdk",
  "futures",
  "mockall",
