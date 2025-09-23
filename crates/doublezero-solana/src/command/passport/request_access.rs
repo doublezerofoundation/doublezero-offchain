@@ -33,9 +33,7 @@ pub async fn execute_request_solana_validator_access(
     // Check balance
     let balance = wallet.connection.get_balance(&wallet_key).await?;
     if balance <= MIN_BALANCE_LAMPORTS {
-        bail!(
-            "Your wallet balance is below 0.2 SOL. Please fund your wallet to proceed."
-        );
+        bail!("Your wallet balance is below 0.2 SOL. Please fund your wallet to proceed.");
     } else if verbose {
         println!("Wallet balance: {} lamports", balance);
     }
