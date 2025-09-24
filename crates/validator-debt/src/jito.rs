@@ -8,7 +8,7 @@ use tracing::info;
 
 const JITO_BASE_URL: &str = "https://kobe.mainnet.jito.network/api/v1/";
 
-pub const JITO_REWARDS_LIMIT: u16 = 1_500;
+pub const DEFAULT_JITO_REWARDS_LIMIT: u16 = 1_500;
 
 #[derive(Deserialize, Debug)]
 pub struct JitoRewards {
@@ -24,19 +24,41 @@ pub struct JitoReward {
     pub mev_revenue: u64,
 }
 
-// may need to add in pagination
+/// Fetches Jito MEV rewards for specified validators and epoch
+///
+/// This function retrieves MEV reward data from the Jito API for a given epoch
+/// and returns a mapping of validator vote accounts to their MEV revenue.
+///
+/// # Arguments
+/// * `solana_debt_calculator` - HTTP client for making API requests
+/// * `validator_ids` - List of validator vote account addresses
+/// * `epoch` - Epoch number to fetch rewards for
+///
+/// # Returns
+/// HashMap mapping validator vote account strings to MEV revenue amounts (in lamports)
+///
+/// # Errors
+/// Returns error if API request fails or data cannot be parsed
 pub async fn get_jito_rewards<T: ValidatorRewards>(
     solana_debt_calculator: &T,
     validator_ids: &[String],
     epoch: u64,
 ) -> Result<HashMap<String, u64>> {
+    get_jito_rewards_with_limit(solana_debt_calculator, validator_ids, epoch, DEFAULT_JITO_REWARDS_LIMIT).await
+}
+
+/// Get Jito rewards with configurable limit
+pub async fn get_jito_rewards_with_limit<T: ValidatorRewards>(
+    solana_debt_calculator: &T,
+    validator_ids: &[String],
+    epoch: u64,
+    limit: u16,
+) -> Result<HashMap<String, u64>> {
     let url = format!(
-        // TODO: make limit an env var
-        // based on very unscientific checking of a number of epochs, 1200 is the highest count
-        "{JITO_BASE_URL}validator_rewards?epoch={epoch}&limit={JITO_REWARDS_LIMIT}"
+        "{JITO_BASE_URL}validator_rewards?epoch={epoch}&limit={limit}"
     );
 
-    println!("Fetching Jito rewards for epoch {epoch}");
+    println!("Fetching Jito rewards for epoch {epoch} with limit {limit}");
     let rewards = (|| async { solana_debt_calculator.get::<JitoRewards>(&url).await })
         .retry(
             &ExponentialBuilder::default()
@@ -53,10 +75,10 @@ pub async fn get_jito_rewards<T: ValidatorRewards>(
             anyhow!("Failed to fetch Jito rewards for epoch {epoch} after retries: {e:#?}")
         })?;
 
-    if rewards.total_count > JITO_REWARDS_LIMIT {
+    if rewards.total_count > limit {
         println!(
-            "Unexpectedly received total count higher than 1500; actual count is {}",
-            rewards.total_count
+            "Warning: received total count ({}) higher than request limit ({}); some rewards may be missing",
+            rewards.total_count, limit
         );
     }
     let jito_rewards: HashMap<String, u64> = stream::iter(validator_ids)

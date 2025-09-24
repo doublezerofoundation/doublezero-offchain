@@ -71,14 +71,20 @@ impl Settings {
             .and_then(|config| config.try_deserialize())
     }
 
-    pub fn keypair(&self) -> Arc<Keypair> {
-        let file_content = fs::read_to_string(&self.keypair).expect("invalid keypair file path");
-        let secret_key_bytes: Vec<u8> =
-            serde_json::from_str(&file_content).expect("invalid keypair file contents");
-        Arc::new(Keypair::try_from(secret_key_bytes.as_slice()).expect("invalid keypair"))
+    pub fn keypair(&self) -> Result<Arc<Keypair>, Box<dyn std::error::Error>> {
+        let file_content = fs::read_to_string(&self.keypair)
+            .map_err(|e| format!("Failed to read keypair file '{}': {}", self.keypair, e))?;
+        
+        let secret_key_bytes: Vec<u8> = serde_json::from_str(&file_content)
+            .map_err(|e| format!("Invalid keypair file format: {}", e))?;
+        
+        let keypair = Keypair::try_from(secret_key_bytes.as_slice())
+            .map_err(|e| format!("Invalid keypair data: {}", e))?;
+        
+        Ok(Arc::new(keypair))
     }
 
-    pub fn sol_rpc(&self) -> Url {
+    pub fn sol_rpc(&self) -> Result<Url, Box<dyn std::error::Error>> {
         let url = match self.sol_rpc.as_ref() {
             "m" | "mainnet-beta" => "https://api.mainnet-beta.solana.com",
             "t" | "testnet" => "https://api.testnet.solana.com",
@@ -86,36 +92,37 @@ impl Settings {
             "l" | "localhost" => "http://localhost:8899",
             url => url,
         };
-        Url::parse(url).expect("invalid sol_rpc url")
+        Url::parse(url).map_err(|e| format!("Invalid sol_rpc URL '{}': {}", url, e).into())
     }
 
-    pub fn sol_ws(&self) -> Url {
+    pub fn sol_ws(&self) -> Result<Url, Box<dyn std::error::Error>> {
         if let Some(ref ws_url) = self.sol_ws {
-            Url::parse(ws_url).expect("invalid sol_ws url")
+            Url::parse(ws_url).map_err(|e| format!("Invalid sol_ws URL '{}': {}", ws_url, e).into())
         } else {
-            let mut ws_rpc = self.sol_rpc();
+            let mut ws_rpc = self.sol_rpc()?;
             let ws_scheme = match ws_rpc.scheme() {
                 "http" => "ws",
                 "https" => "wss",
-                _ => panic!("invalid ws url scheme"),
+                scheme => return Err(format!("Unsupported URL scheme for WebSocket: '{}'", scheme).into()),
             };
-            ws_rpc.set_scheme(ws_scheme).unwrap();
-            ws_rpc
+            ws_rpc.set_scheme(ws_scheme)
+                .map_err(|_| "Failed to set WebSocket scheme")?;
+            Ok(ws_rpc)
         }
     }
 
-    pub fn dz_rpc(&self) -> Url {
-        Url::parse(&self.dz_rpc).expect("invalid dz_rpc url")
+    pub fn dz_rpc(&self) -> Result<Url, Box<dyn std::error::Error>> {
+        Url::parse(&self.dz_rpc).map_err(|e| format!("Invalid dz_rpc URL '{}': {}", self.dz_rpc, e).into())
     }
 
     pub fn previous_leader_epochs(&self) -> u8 {
         self.previous_leader_epochs
     }
 
-    pub fn metrics_addr(&self) -> SocketAddr {
+    pub fn metrics_addr(&self) -> Result<SocketAddr, Box<dyn std::error::Error>> {
         self.metrics_addr
             .parse()
-            .expect("invalid metrics network address and port")
+            .map_err(|e| format!("Invalid metrics address '{}': {}", self.metrics_addr, e).into())
     }
 
     pub fn serviceability_program_id(

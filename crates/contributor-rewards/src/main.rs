@@ -1,4 +1,4 @@
-// TODO: keeping this for now, remove when 2z-cli is ported
+// NOTE: This CLI will be deprecated when 2z-cli is fully ported
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};

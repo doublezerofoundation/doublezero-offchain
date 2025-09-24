@@ -154,6 +154,22 @@ async fn handle_inspect_rewards(
         .await
 }
 
+/// Handle inspect shapley command with comprehensive Shapley value calculation debugging
+///
+/// This function fetches data for the specified epoch, builds network topology,
+/// and outputs detailed information about the Shapley value calculation inputs.
+///
+/// # Arguments
+/// * `orchestrator` - The orchestrator containing settings and configuration
+/// * `epoch` - Optional epoch number to inspect (uses latest if None)
+/// * `skip_users` - Whether to skip user validation checks
+/// * `use_test_demands` - Whether to use test demands instead of real data
+/// * `output_format` - Format for output (JSON, CSV, etc.)
+/// * `output_dir` - Optional directory to save output files
+/// * `output_file` - Optional specific output file name
+///
+/// # Returns
+/// Result indicating success or failure of the inspection operation
 async fn handle_inspect_shapley(
     orchestrator: &Orchestrator,
     epoch: Option<u64>,

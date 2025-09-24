@@ -21,15 +21,15 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     PrometheusBuilder::new()
-        .with_http_listener(settings.metrics_addr())
+        .with_http_listener(settings.metrics_addr()?)
         .install()?;
 
     export_build_info();
 
-    let sol_rpc = settings.sol_rpc();
-    let sol_ws = settings.sol_ws();
-    let dz_rpc = settings.dz_rpc();
-    let keypair = settings.keypair();
+    let sol_rpc = settings.sol_rpc()?;
+    let sol_ws = settings.sol_ws()?;
+    let dz_rpc = settings.dz_rpc()?;
+    let keypair = settings.keypair()?;
 
     info!(
         %sol_rpc,
