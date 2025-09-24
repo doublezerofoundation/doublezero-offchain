@@ -6,7 +6,7 @@ version: 2
 project_name: doublezero-solana-validator-debt
 
 monorepo:
-  tag_prefix: validator-debt/
+  tag_prefix: solana-validator-debt/
 
 builds:
   - id: doublezero-solana-validator-debt
@@ -86,13 +86,13 @@ announce:
 
 git:
   ignore_tags:
-    - validator-debt/daily
+    - solana-validator-debt/daily
 
 nightly:
   publish_release: true
   keep_single_release: true
   version_template: "{{ incpatch .Version }}~git{{ .Env.BUILD_DATE }}.{{ .ShortCommit }}"
-  tag_name: "validator-debt/daily"
+  tag_name: "solana-validator-debt/daily"
 
 cloudsmiths:
   - organization: malbeclabs
