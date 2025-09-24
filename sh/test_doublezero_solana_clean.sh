@@ -84,7 +84,19 @@ doublezero-revenue-distribution-admin configure \
     --initial-community-burn-rate 10.0
 echo
 
-### Request Solana validator access.
+### Passport commands.
+
+echo "doublezero-solana passport -h"
+$CLI_BIN passport -h
+echo
+
+echo "doublezero-solana passport fetch -h"
+$CLI_BIN passport fetch -h
+echo
+
+echo "doublezero-solana passport fetch -u l --config"
+$CLI_BIN passport fetch -u l --config
+echo
 
 echo "doublezero-solana passport request-solana-validator-access -h"
 $CLI_BIN passport request-solana-validator-access -h
@@ -111,13 +123,22 @@ echo "doublezero-solana revenue-distribution -h"
 $CLI_BIN revenue-distribution -h
 echo
 
-echo "doublezero-solana revenue-distribution initialize-contributor-rewards -h"
-$CLI_BIN revenue-distribution initialize-contributor-rewards -h
+echo "doublezero-solana revenue-distribution fetch -h"
+$CLI_BIN revenue-distribution fetch -h
 echo
 
-echo "doublezero-solana revenue-distribution initialize-contributor-rewards -u l -v $(solana address -k service_key_1.json)"
-$CLI_BIN revenue-distribution initialize-contributor-rewards \
+echo "doublezero-solana revenue-distribution fetch -u l --config"
+$CLI_BIN revenue-distribution fetch -u l --config
+echo
+
+echo "doublezero-solana revenue-distribution contributor-rewards -h"
+$CLI_BIN revenue-distribution contributor-rewards -h
+echo
+
+echo "doublezero-solana revenue-distribution contributor-rewards -u l --initialize -v $(solana address -k service_key_1.json)"
+$CLI_BIN revenue-distribution contributor-rewards \
     -u l \
+    --initialize \
     -v \
     $(solana address -k service_key_1.json)
 echo
