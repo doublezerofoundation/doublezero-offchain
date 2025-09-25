@@ -196,12 +196,13 @@ async fn handle_inspect_shapley(
     // Create an empty cache since we're just inspecting, not applying defaults
     let previous_epoch_cache = PreviousEpochCache::new();
 
-    let devices = build_devices(&fetch_data)?;
+    let (devices, device_ids) = build_devices(&fetch_data, &orchestrator.settings().network)?;
     let private_links = build_private_links(
         orchestrator.settings(),
         &fetch_data,
         &dzd_stats,
         &previous_epoch_cache,
+        &device_ids,
     );
     let public_links = build_public_links(
         orchestrator.settings(),

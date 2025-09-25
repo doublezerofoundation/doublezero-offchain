@@ -226,21 +226,16 @@ pub fn build_city_stats(
                 .exchanges
                 .get(&device.exchange_pk)
         {
-            let stats = match settings.network {
-                Network::Testnet | Network::Devnet => city_stats
-                    .entry(location.code.to_string())
-                    .or_insert(CityStat {
-                        validator_count: 0,
-                        total_stake_proxy: 0,
-                    }),
+            let city_code = match settings.network {
+                Network::Testnet | Network::Devnet => location.code.to_uppercase(),
                 // On mainnet, the exchange.code directly has the name of the city
-                Network::MainnetBeta | Network::Mainnet => city_stats
-                    .entry(exchange.code.to_string())
-                    .or_insert(CityStat {
-                        validator_count: 0,
-                        total_stake_proxy: 0,
-                    }),
+                Network::MainnetBeta | Network::Mainnet => exchange.code.to_uppercase(),
             };
+
+            let stats = city_stats.entry(city_code).or_insert(CityStat {
+                validator_count: 0,
+                total_stake_proxy: 0,
+            });
             stats.validator_count += 1;
             stats.total_stake_proxy += stake_proxy;
         }
@@ -261,6 +256,7 @@ pub fn generate(city_stats: &CityStats) -> Demands {
     cities_with_validators
         .par_iter()
         .flat_map(|(start_city, _start_stats)| {
+            let start_city_upper = start_city.to_uppercase();
             // Create demands from this city to all others
             cities_with_validators
                 .iter()
@@ -270,14 +266,16 @@ pub fn generate(city_stats: &CityStats) -> Demands {
                         return None;
                     }
 
+                    let end_city_upper = end_city.to_uppercase();
+
                     // Calculate priority using formula: (1/slots_in_epoch) * (total_stake_proxy/validator_count)
                     let slots_per_validator =
                         end_stats.total_stake_proxy as f64 / end_stats.validator_count as f64;
                     let priority = (1.0 / SLOTS_IN_EPOCH) * slots_per_validator;
 
                     Some(Demand {
-                        start: start_city.to_string(),
-                        end: end_city.to_string(),
+                        start: start_city_upper.clone(),
+                        end: end_city_upper,
                         receivers: end_stats.validator_count as u32,
                         traffic: DEMAND_TRAFFIC,
                         priority,

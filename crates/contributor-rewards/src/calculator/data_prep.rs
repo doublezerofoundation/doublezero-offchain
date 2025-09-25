@@ -2,7 +2,7 @@ use crate::{
     calculator::{
         input::ShapleyInputs,
         shapley_handler::{
-            PreviousEpochCache, build_demands, build_devices, build_private_links,
+            DeviceIdMap, PreviousEpochCache, build_demands, build_devices, build_private_links,
             build_public_links,
         },
         util::{calculate_city_weights, print_devices, print_private_links, print_public_links},
@@ -97,7 +97,7 @@ impl PreparedData {
         }
 
         // Build devices
-        let devices = build_and_log_devices(&fetch_data)?;
+        let (devices, device_ids) = build_and_log_devices(&fetcher.settings, &fetch_data)?;
 
         // Build private links
         let private_links = build_and_log_private_links(
@@ -105,6 +105,7 @@ impl PreparedData {
             &fetch_data,
             &device_telemetry,
             &previous_epoch_cache,
+            &device_ids,
         );
 
         // Build public links
@@ -191,10 +192,13 @@ fn process_internet_telemetry(fetch_data: &FetchData) -> Result<InternetTelemetr
 }
 
 /// Build devices and log output
-fn build_and_log_devices(fetch_data: &FetchData) -> Result<Devices> {
-    let devices = build_devices(fetch_data)?;
+fn build_and_log_devices(
+    settings: &Settings,
+    fetch_data: &FetchData,
+) -> Result<(Devices, DeviceIdMap)> {
+    let (devices, device_ids) = build_devices(fetch_data, &settings.network)?;
     info!("Devices:\n{}", print_devices(&devices));
-    Ok(devices)
+    Ok((devices, device_ids))
 }
 
 /// Build private links and log output
@@ -203,8 +207,15 @@ fn build_and_log_private_links(
     fetch_data: &FetchData,
     stat_map: &DZDTelemetryStatMap,
     previous_epoch_cache: &PreviousEpochCache,
+    device_ids: &DeviceIdMap,
 ) -> PrivateLinks {
-    let private_links = build_private_links(settings, fetch_data, stat_map, previous_epoch_cache);
+    let private_links = build_private_links(
+        settings,
+        fetch_data,
+        stat_map,
+        previous_epoch_cache,
+        device_ids,
+    );
     info!("Private Links:\n{}", print_private_links(&private_links));
     private_links
 }

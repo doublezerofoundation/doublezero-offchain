@@ -22,6 +22,8 @@ use tracing::{debug, info};
 type CityPair = (String, String);
 // key: city_pair, val: vec of latencies
 type CityPairLatencies = BTreeMap<CityPair, Vec<f64>>;
+// key: device pubkey, value: shapley-friendly device id
+pub type DeviceIdMap = BTreeMap<Pubkey, String>;
 
 /// Cache for previous epoch telemetry stats
 #[derive(Default)]
@@ -82,25 +84,58 @@ impl PreviousEpochCache {
     }
 }
 
-pub fn build_devices(fetch_data: &FetchData) -> Result<Devices> {
+pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devices, DeviceIdMap)> {
     let mut devices = Vec::new();
+    let mut device_ids: DeviceIdMap = DeviceIdMap::new();
+    let mut city_counts: BTreeMap<String, u32> = BTreeMap::new();
 
-    for device in fetch_data.dz_serviceability.devices.values() {
-        if let Some(contributor) = fetch_data
+    for (device_pk, device) in fetch_data.dz_serviceability.devices.iter() {
+        let Some(contributor) = fetch_data
             .dz_serviceability
             .contributors
             .get(&device.contributor_pk)
-        {
-            devices.push(Device {
-                device: device.code.clone(),
-                edge: DEFAULT_EDGE_BANDWIDTH_GBPS,
-                // Use owner pubkey as operator ID
-                operator: contributor.owner.to_string(),
-            });
-        }
+        else {
+            continue;
+        };
+
+        // Determine the city code for this device using the associated exchange/location
+        let Some(exchange) = fetch_data
+            .dz_serviceability
+            .exchanges
+            .get(&device.exchange_pk)
+        else {
+            continue;
+        };
+
+        let city_code = match network {
+            Network::Testnet | Network::Devnet => exchange
+                .code
+                .strip_prefix('x')
+                .unwrap_or(&exchange.code)
+                .to_string(),
+            Network::MainnetBeta | Network::Mainnet => exchange.code.clone(),
+        };
+
+        let city_upper = city_code.to_uppercase();
+        let counter = city_counts.entry(city_upper.clone()).or_insert(0);
+        *counter += 1;
+
+        // Use zero-padded numbering to keep IDs deterministic while ensuring
+        // the first three characters remain the city code as expected by
+        // network-shapley consolidation logic.
+        let shapley_id = format!("{}{:03}", city_upper, counter);
+
+        device_ids.insert(*device_pk, shapley_id.clone());
+
+        devices.push(Device {
+            device: shapley_id,
+            edge: DEFAULT_EDGE_BANDWIDTH_GBPS,
+            // Use owner pubkey as operator ID
+            operator: contributor.owner.to_string(),
+        });
     }
 
-    Ok(devices)
+    Ok((devices, device_ids))
 }
 
 pub async fn build_demands(
@@ -128,24 +163,16 @@ pub fn build_public_links(
             .exchanges
             .get(&device.exchange_pk)
         {
-            match settings.network {
-                Network::MainnetBeta | Network::Mainnet => {
-                    // NOTE: On mainnet-beta, the exchange struct has the city itself as its code
-                    // so we can directly use device's exchange pk -> exchange code
-                    exchange_to_location.insert(device.exchange_pk, exchange.code.clone());
-                }
-                Network::Testnet | Network::Devnet => {
-                    // NOTE: On testnet, the exchange codes are prefixed by 'x', we can strip and use that
-                    // This is unwise to be fair, but if we "standardize" that the exchanges which are on
-                    // testnet will always have the 'x' prefix, this will be just fine
-                    let ex_code = if let Some(c) = exchange.code.strip_prefix('x') {
-                        c.to_string()
-                    } else {
-                        exchange.code.clone()
-                    };
-                    exchange_to_location.insert(device.exchange_pk, ex_code);
-                }
-            }
+            let city_code = match settings.network {
+                Network::MainnetBeta | Network::Mainnet => exchange.code.clone(),
+                Network::Testnet | Network::Devnet => exchange
+                    .code
+                    .strip_prefix('x')
+                    .unwrap_or(&exchange.code)
+                    .to_string(),
+            };
+
+            exchange_to_location.insert(device.exchange_pk, city_code.to_uppercase());
         }
     }
 
@@ -251,6 +278,7 @@ pub fn build_private_links(
     fetch_data: &FetchData,
     telemetry_stats: &DZDTelemetryStatMap,
     previous_epoch_cache: &PreviousEpochCache,
+    device_ids: &DeviceIdMap,
 ) -> PrivateLinks {
     let mut private_links = Vec::new();
 
@@ -267,6 +295,13 @@ pub fn build_private_links(
                 (f, t)
             }
             _ => continue,
+        };
+
+        let Some(from_id) = device_ids.get(&link.side_a_pk) else {
+            continue;
+        };
+        let Some(to_id) = device_ids.get(&link.side_z_pk) else {
+            continue;
         };
 
         // Convert bandwidth from bits/sec to Gbps for network-shapley
@@ -365,8 +400,8 @@ pub fn build_private_links(
         // - bandwidth: gigabits per second (Gbps) - we convert from bits/sec
         // - uptime: fraction between 0.0 and 1.0 (1.0 = 100% uptime)
         private_links.push(PrivateLink::new(
-            from_device.code.to_string(),
-            to_device.code.to_string(),
+            from_id.clone(),
+            to_id.clone(),
             latency_ms,
             bandwidth_gbps,
             uptime,
