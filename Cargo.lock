@@ -1966,6 +1966,7 @@ dependencies = [
  "doublezero-solana-client-tools",
  "doublezero_sdk",
  "futures",
+ "metrics-exporter-prometheus",
  "mockall",
  "reqwest",
  "serde",
