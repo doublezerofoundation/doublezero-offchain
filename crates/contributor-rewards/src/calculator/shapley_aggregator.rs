@@ -1,6 +1,7 @@
 use anyhow::Result;
 use network_shapley::shapley::{ShapleyOutput, ShapleyValue};
 use std::collections::BTreeMap;
+use tabled::{builder::Builder as TableBuilder, settings::Style};
 use tracing::info;
 
 /// Aggregates per-city Shapley outputs using pre-calculated stake-share weights
@@ -15,17 +16,21 @@ pub fn aggregate_shapley_outputs(
     per_city_outputs: &BTreeMap<String, Vec<(String, f64)>>,
     city_weights: &BTreeMap<String, f64>,
 ) -> Result<ShapleyOutput> {
-    // Log the weights being used
+    // Log the weights being used in table format
     let weights_sum: f64 = city_weights.values().sum();
-    info!(
-        "City weights (sum={:.4}): {:?}",
-        weights_sum,
-        city_weights
-            .iter()
-            .map(|(city, weight)| format!("{city}: {weight:.4}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
+
+    let mut table_rows = vec![vec!["city".to_string(), "weight".to_string()]];
+    for (city, weight) in city_weights.iter() {
+        table_rows.push(vec![city.to_uppercase(), format!("{:.4}", weight)]);
+    }
+    table_rows.push(vec!["total".to_string(), format!("{:.4}", weights_sum)]);
+
+    let table = TableBuilder::from(table_rows)
+        .build()
+        .with(Style::psql().remove_horizontals())
+        .to_string();
+
+    info!("\n{}", table);
 
     // Aggregate values for each operator across all cities
     let mut operator_values: BTreeMap<String, f64> = BTreeMap::new();
