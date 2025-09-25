@@ -1,6 +1,6 @@
 use anyhow::Result;
 use doublezero_contributor_rewards::{
-    calculator::shapley_handler::{PreviousEpochCache, build_private_links},
+    calculator::shapley_handler::{PreviousEpochCache, build_devices, build_private_links},
     ingestor::types::FetchData,
     processor::telemetry::DZDTelemetryProcessor,
     settings,
@@ -192,12 +192,24 @@ mod tests {
         // Create an empty cache for tests
         let previous_epoch_cache = PreviousEpochCache::new();
 
+        // Build devices to obtain the shapley device identifiers and mapping back to original codes
+        let (devices, device_ids) = build_devices(&fetch_data, &settings.network)?;
+        println!("Constructed {} shapley device identifiers", devices.len());
+
+        let mut shapley_to_original: HashMap<String, String> = HashMap::new();
+        for (device_pk, shapley_id) in device_ids.iter() {
+            if let Some(device) = fetch_data.dz_serviceability.devices.get(device_pk) {
+                shapley_to_original.insert(shapley_id.clone(), device.code.clone());
+            }
+        }
+
         // Generate private links
         let private_links = build_private_links(
             &settings,
             &fetch_data,
             &telemetry_stats,
             &previous_epoch_cache,
+            &device_ids,
         );
 
         // Print results for verification
@@ -253,8 +265,16 @@ mod tests {
         // Create a map from private_links for easier comparison
         let mut result_map: HashMap<(String, String), (f64, f64, f64)> = HashMap::new();
         for link in &private_links {
+            let device1 = shapley_to_original
+                .get(&link.device1)
+                .cloned()
+                .unwrap_or_else(|| link.device1.clone());
+            let device2 = shapley_to_original
+                .get(&link.device2)
+                .cloned()
+                .unwrap_or_else(|| link.device2.clone());
             result_map.insert(
-                (link.device1.clone(), link.device2.clone()),
+                (device1, device2),
                 (link.latency, link.bandwidth, link.uptime),
             );
         }

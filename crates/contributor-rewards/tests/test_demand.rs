@@ -55,7 +55,7 @@ mod tests {
         }
 
         // With access pass changes, verify the cities expected exist
-        let expected_cities = ["ams", "fra", "lax", "lon", "nyc", "prg", "sin", "tyo"];
+        let expected_cities = ["AMS", "FRA", "LAX", "LON", "NYC", "PRG", "SIN", "TYO"];
 
         println!("{:#?}", result.demands);
 
