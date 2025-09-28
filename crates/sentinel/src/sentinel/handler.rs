@@ -161,7 +161,7 @@ impl Sentinel {
             Ok(v) => v,
             Err(e @ Error::SignatureVerify) => {
                 return {
-                    debug!(?access_mode, error = %e, "signature verification failed");
+                    debug!(error = %e, "signature verification failed");
                     Ok(vec![])
                 };
             }
@@ -240,6 +240,7 @@ mod tests {
     use doublezero_passport::instruction::SolanaValidatorAttestation;
     use solana_sdk::pubkey::Pubkey;
     use std::net::Ipv4Addr;
+    use tokio::sync::mpsc::unbounded_channel;
 
     // Mock implementations for testing
     struct MockSentinel {
@@ -555,5 +556,36 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, validator_id);
         assert_eq!(result[0].1, validator_ip);
+    }
+
+    #[tokio::test]
+    async fn test_verify_qualifiers_signature_verify_error_returns_empty() {
+        // Build a real Sentinel; it won't hit network because we short-circuit on signature
+        let (_tx, rx) = unbounded_channel();
+        let keypair = Arc::new(Keypair::new());
+        let dz_rpc = Url::parse("http://127.0.0.1:1234").unwrap();
+        let sol_rpc = Url::parse("http://127.0.0.1:1235").unwrap();
+        let serviceability_id = Pubkey::new_unique();
+
+        let sentinel = Sentinel {
+            dz_rpc_client: DzRpcClient::new(dz_rpc, keypair.clone(), serviceability_id),
+            sol_rpc_client: SolRpcClient::new(sol_rpc, keypair),
+            rx,
+            previous_leader_epochs: 0,
+        };
+
+        // Invalid signature -> verify_access_request(...) should return Error::SignatureVerify
+        let attestation = SolanaValidatorAttestation {
+            validator_id: Pubkey::new_unique(),
+            service_key: Pubkey::new_unique(),
+            ed25519_signature: [0u8; 64],
+        };
+        let access_mode = AccessMode::SolanaValidator(attestation);
+
+        let result = sentinel.verify_qualifiers(&access_mode).await.unwrap();
+        assert!(
+            result.is_empty(),
+            "expected empty vec when signature verification fails"
+        );
     }
 }
