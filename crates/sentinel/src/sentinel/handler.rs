@@ -1,5 +1,5 @@
 use crate::{
-    AccessIds, Result,
+    AccessIds, Error, Result,
     client::{doublezero_ledger::DzRpcClient, solana::SolRpcClient},
     error::rpc_with_retry,
     verify_access_request,
@@ -157,7 +157,11 @@ impl Sentinel {
 
     async fn verify_qualifiers(&self, access_mode: &AccessMode) -> Result<Vec<(Pubkey, Ipv4Addr)>> {
         // Return early if sig verification fails
-        let validator_id = verify_access_request(access_mode)?;
+        let validator_id = match verify_access_request(access_mode) {
+            Ok(v) => v,
+            Err(Error::SignatureVerify) => return Ok(vec![]),
+            Err(e) => return Err(e),
+        };
         debug!(%validator_id, "Validator passed signature validation");
 
         // Extract attestation and backup IDs
