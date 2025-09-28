@@ -12,7 +12,7 @@ use solana_sdk::{
 use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 use tokio::{sync::mpsc::UnboundedReceiver, time::interval};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use url::Url;
 
 const BACKFILL_TIMER: Duration = Duration::from_secs(60 * 60);
@@ -161,13 +161,13 @@ impl Sentinel {
             Ok(v) => v,
             Err(e @ Error::SignatureVerify) => {
                 return {
-                    debug!(error = %e, "signature verification failed");
+                    info!(error = %e, "signature verification failed");
                     Ok(vec![])
                 };
             }
             Err(e) => return Err(e),
         };
-        debug!(%validator_id, "Validator passed signature validation");
+        info!(%validator_id, "Validator passed signature validation");
 
         // Extract attestation and backup IDs
         let backup_ids = match access_mode {
@@ -180,7 +180,7 @@ impl Sentinel {
             .check_validator_in_leader_schedule(&validator_id)
             .await?
         {
-            debug!(
+            info!(
                 %validator_id,
                 "Validator failed leader schedule qualification"
             );
@@ -191,7 +191,7 @@ impl Sentinel {
         let validator_ip = match self.get_and_validate_validator_ip(&validator_id).await? {
             Some(ip) => ip,
             None => {
-                debug!(
+                info!(
                     %validator_id,
                     "Validator failed gossip protocol ip qualification"
                 );
@@ -207,7 +207,7 @@ impl Sentinel {
             for backup_id in backup_ids {
                 // Backup should NOT be in leader schedule
                 if self.check_validator_in_leader_schedule(backup_id).await? {
-                    debug!(
+                    info!(
                         %backup_id,
                         "Backup validator is in leader schedule (should not be)"
                     );
@@ -220,7 +220,7 @@ impl Sentinel {
                         ips.push((*backup_id, ip));
                     }
                     None => {
-                        debug!(
+                        info!(
                             %backup_id,
                             "Backup validator not found in gossip"
                         );
