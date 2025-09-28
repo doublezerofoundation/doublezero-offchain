@@ -159,7 +159,12 @@ impl Sentinel {
         // Return early if sig verification fails
         let validator_id = match verify_access_request(access_mode) {
             Ok(v) => v,
-            Err(Error::SignatureVerify) => return Ok(vec![]),
+            Err(e @ Error::SignatureVerify) => {
+                return {
+                    debug!(?access_mode, error = %e, "signature verification failed");
+                    Ok(vec![])
+                };
+            }
             Err(e) => return Err(e),
         };
         debug!(%validator_id, "Validator passed signature validation");
