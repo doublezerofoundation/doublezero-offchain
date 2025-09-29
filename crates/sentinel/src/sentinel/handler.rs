@@ -85,46 +85,67 @@ impl Sentinel {
         // Get the service key.
         let service_key = access_ids.mode.service_key();
 
-        let validator_ips = self.verify_qualifiers(&access_ids.mode).await?;
-
-        if !validator_ips.is_empty() {
-            // Issue access passes for all validators (primary + backups)
-            for (validator_id, validator_ip) in validator_ips {
-                rpc_with_retry(
+        match self.verify_qualifiers(&access_ids.mode).await {
+            // Request does not qualify
+            Err(e) => {
+                // Reject the access request
+                let signature = rpc_with_retry(
                     || async {
-                        self.dz_rpc_client
-                            .issue_access_pass(&service_key, &validator_ip, &validator_id)
+                        self.sol_rpc_client
+                            .deny_access(&access_ids.request_pda)
                             .await
                     },
-                    "issue_access_pass",
+                    "deny_access",
                 )
                 .await?;
-                info!(%validator_id, %validator_ip, user = %service_key, "access pass issued");
+                info!(%signature, user = %service_key, "access request denied: {}", e);
+                metrics::counter!("doublezero_sentinel_access_denied").increment(1);
             }
+            // Request qualifies
+            Ok(validator_ips) => {
+                if !validator_ips.is_empty() {
+                    // Issue access passes for all validators (primary + backups)
+                    for (validator_id, validator_ip) in validator_ips {
+                        rpc_with_retry(
+                            || async {
+                                self.dz_rpc_client
+                                    .issue_access_pass(&service_key, &validator_ip, &validator_id)
+                                    .await
+                            },
+                            "issue_access_pass",
+                        )
+                        .await?;
+                        info!(%validator_id, %validator_ip, user = %service_key, "access pass issued");
+                    }
 
-            let signature = rpc_with_retry(
-                || async {
-                    self.sol_rpc_client
-                        .grant_access(&access_ids.request_pda, &access_ids.rent_beneficiary_key)
-                        .await
-                },
-                "grant_access",
-            )
-            .await?;
-            info!(%signature, user = %service_key, "access request granted");
-            metrics::counter!("doublezero_sentinel_access_granted").increment(1);
-        } else {
-            let signature = rpc_with_retry(
-                || async {
-                    self.sol_rpc_client
-                        .deny_access(&access_ids.request_pda)
-                        .await
-                },
-                "deny_access",
-            )
-            .await?;
-            info!(%signature, user = %service_key, "access request denied");
-            metrics::counter!("doublezero_sentinel_access_denied").increment(1);
+                    let signature = rpc_with_retry(
+                        || async {
+                            self.sol_rpc_client
+                                .grant_access(
+                                    &access_ids.request_pda,
+                                    &access_ids.rent_beneficiary_key,
+                                )
+                                .await
+                        },
+                        "grant_access",
+                    )
+                    .await?;
+                    info!(%signature, user = %service_key, "access request granted");
+                    metrics::counter!("doublezero_sentinel_access_granted").increment(1);
+                } else {
+                    let signature = rpc_with_retry(
+                        || async {
+                            self.sol_rpc_client
+                                .deny_access(&access_ids.request_pda)
+                                .await
+                        },
+                        "deny_access",
+                    )
+                    .await?;
+                    info!(%signature, user = %service_key, "access request denied");
+                    metrics::counter!("doublezero_sentinel_access_denied").increment(1);
+                }
+            }
         }
 
         Ok(())
