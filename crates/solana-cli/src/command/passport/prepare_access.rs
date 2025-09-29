@@ -83,7 +83,7 @@ impl PrepareValidatorAccessCommand {
                 ));
             }
         } else {
-            println!(" ❌ gossip Fail",);
+            println!(" ❌ Gossip Fail",);
             errors.push(format!(
                 "Primary validator ID ({}) is not visible in gossip. The primary validator must appear in gossip to be considered active.",
                 primary_validator_id
@@ -111,7 +111,7 @@ impl PrepareValidatorAccessCommand {
                         println!(" ✅ OK (not a staked validator)");
                     }
                 } else {
-                    println!("❌ gossip Fail",);
+                    println!("❌ Gossip Fail",);
                     errors.push(format!(
                         "Backup validator ID ({}) is not visible in gossip. Backup validators must appear in gossip to be considered valid.",
                         backup_id

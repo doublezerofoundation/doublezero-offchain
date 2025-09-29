@@ -45,7 +45,7 @@ pub fn get_public_ipv4() -> anyhow::Result<String> {
 }
 
 pub fn parse_pubkey(s: &str) -> Result<Pubkey, String> {
-    Pubkey::from_str(s).map_err(|e| format!("Pubkey inválido {s}: {e}"))
+    Pubkey::from_str(s).map_err(|e| format!("Invalid Pubkey {s}: {e}"))
 }
 
 #[derive(Debug, PartialEq)]
