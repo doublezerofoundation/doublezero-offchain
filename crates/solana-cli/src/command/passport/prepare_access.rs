@@ -12,7 +12,7 @@ use doublezero_passport::{
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
 use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 
-use crate::helpers::{find_node_by_node_id, identify_cluster, parse_pubkey};
+use crate::helpers::{find_node_by_node_id, identify_cluster};
 
 /*
    doublezero-solana passport request-access --doublezero-address SSSS --primary-validator-id AAA --backup-validator-ids BBB,CCC --signature XXXXX
@@ -21,13 +21,13 @@ use crate::helpers::{find_node_by_node_id, identify_cluster, parse_pubkey};
 #[derive(Debug, Args)]
 pub struct PrepareValidatorAccessCommand {
     /// The DoubleZero service key to request access from
-    #[arg(long, value_parser = parse_pubkey)]
+    #[arg(long)]
     doublezero_address: Pubkey,
     /// The validator's node ID (identity pubkey)
-    #[arg(long, value_name = "PUBKEY", value_parser = parse_pubkey)]
+    #[arg(long, value_name = "PUBKEY")]
     primary_validator_id: Pubkey,
     /// Optional backup validator IDs (identity pubkeys)
-    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',', value_parser = parse_pubkey)]
+    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',')]
     backup_validator_ids: Vec<Pubkey>,
 
     #[arg(long, default_value_t = false)]

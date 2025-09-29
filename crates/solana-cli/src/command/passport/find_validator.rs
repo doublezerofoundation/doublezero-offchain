@@ -9,6 +9,7 @@ use doublezero_sdk::get_doublezero_pubkey;
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
 use solana_client::rpc_response::RpcContactInfo;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
+use url::Url;
 
 use crate::helpers::{find_node_by_ip, find_node_by_node_id, get_public_ipv4, identify_cluster};
 
@@ -37,8 +38,7 @@ impl FindValidatorCommand {
         // Establish a connection to the Solana cluster
         let connection = SolanaConnection::try_from(solana_connection_options)?;
         let sol_client = SolRpcClient::new(
-            solana_client::client_error::reqwest::Url::parse(&connection.rpc_client.url())
-                .expect("Invalid RPC URL"),
+            Url::parse(&connection.rpc_client.url()).expect("Invalid RPC URL"),
             Arc::new(Keypair::new()),
         );
 

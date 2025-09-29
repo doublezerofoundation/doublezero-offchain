@@ -1,8 +1,7 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use anyhow::{Result, bail};
 use clap::Args;
-use doublezero_ledger_sentinel::client::solana::SolRpcClient;
 use doublezero_passport::{
     ID,
     instruction::{
@@ -14,13 +13,9 @@ use doublezero_passport::{
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
-    offchain_message::OffchainMessage,
-    pubkey::Pubkey,
-    signature::{Keypair, Signature},
+    compute_budget::ComputeBudgetInstruction, offchain_message::OffchainMessage, pubkey::Pubkey,
+    signature::Signature,
 };
-
-use crate::helpers::parse_pubkey;
 
 /*
    doublezero-solana passport request-access --doublezero-address SSSS --primary-validator-id AAA --backup-validator-ids BBB,CCC --signature XXXXX
@@ -29,13 +24,13 @@ use crate::helpers::parse_pubkey;
 #[derive(Debug, Args)]
 pub struct RequestValidatorAccessCommand {
     /// The DoubleZero service key to request access from
-    #[arg(long, value_parser = parse_pubkey)]
+    #[arg(long)]
     doublezero_address: Pubkey,
     /// The validator's node ID (identity pubkey)
-    #[arg(long, value_name = "PUBKEY", value_parser = parse_pubkey)]
+    #[arg(long, value_name = "PUBKEY")]
     primary_validator_id: Pubkey,
     /// Optional backup validator IDs (identity pubkeys)
-    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',', value_parser = parse_pubkey)]
+    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',')]
     backup_validator_ids: Vec<Pubkey>,
     /// Base58-encoded ed25519 signature of the access request message (service_key=AAA,backup_ids=BBBB,CCCC,DDDD)
     #[arg(long, short = 's', value_name = "BASE58_STRING")]
@@ -52,11 +47,6 @@ pub struct RequestValidatorAccessCommand {
 impl RequestValidatorAccessCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let wallet = Wallet::try_from(self.solana_payer_options.clone())?;
-        let sol_client = SolRpcClient::new(
-            solana_client::client_error::reqwest::Url::parse(&wallet.connection.rpc_client.url())
-                .expect("Invalid RPC URL"),
-            Arc::new(Keypair::new()),
-        );
 
         let (address, _) = AccessRequest::find_address(&self.doublezero_address);
 
