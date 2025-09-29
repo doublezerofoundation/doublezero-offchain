@@ -131,8 +131,8 @@ echo "doublezero-solana revenue-distribution fetch -h"
 $CLI_BIN revenue-distribution fetch -h
 echo
 
-echo "doublezero-solana revenue-distribution fetch -u l --config --solana-validator-deposit $DUMMY_KEY"
-$CLI_BIN revenue-distribution fetch -u l --config --solana-validator-deposit $DUMMY_KEY
+echo "doublezero-solana revenue-distribution fetch -u l --config --validator-deposit $DUMMY_KEY"
+$CLI_BIN revenue-distribution fetch -u l --config --validator-deposit $DUMMY_KEY
 echo
 
 echo "doublezero-solana revenue-distribution contributor-rewards -h"
@@ -157,24 +157,24 @@ doublezero-revenue-distribution-admin set-rewards-manager \
     $(solana address -k rewards_manager.json)
 echo
 
-echo "doublezero-solana revenue-distribution solana-validator-deposit --fund 4.2069 -u l -v $DUMMY_KEY"
-$CLI_BIN revenue-distribution solana-validator-deposit \
+echo "doublezero-solana revenue-distribution validator-deposit --fund 4.2069 -u l -v $DUMMY_KEY"
+$CLI_BIN revenue-distribution validator-deposit \
     --fund 4.2069 \
     -u l \
     -v \
     $DUMMY_KEY
 echo
 
-echo "doublezero-solana revenue-distribution solana-validator-deposit --fund 69.420 -u l -v $DUMMY_KEY"
-$CLI_BIN revenue-distribution solana-validator-deposit \
+echo "doublezero-solana revenue-distribution validator-deposit --fund 69.420 -u l -v $DUMMY_KEY"
+$CLI_BIN revenue-distribution validator-deposit \
     --fund 69.420 \
     -u l \
     -v \
     $DUMMY_KEY
 echo
 
-echo "doublezero-solana revenue-distribution fetch -u l --solana-validator-deposit $DUMMY_KEY"
-$CLI_BIN revenue-distribution fetch -u l --solana-validator-deposit $DUMMY_KEY
+echo "doublezero-solana revenue-distribution fetch -u l --validator-deposit $DUMMY_KEY"
+$CLI_BIN revenue-distribution fetch -u l --validator-deposit $DUMMY_KEY
 echo
 
 ### ATA commands.
