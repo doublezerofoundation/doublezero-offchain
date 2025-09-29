@@ -111,7 +111,7 @@ impl PrepareValidatorAccessCommand {
                     print!("  Leader scheduler: ");
 
                     if sol_client
-                        .check_leader_schedule(&backup_id, ENV_PREVIOUS_LEADER_EPOCHS)
+                        .check_leader_schedule(backup_id, ENV_PREVIOUS_LEADER_EPOCHS)
                         .await
                         .is_err()
                     {
