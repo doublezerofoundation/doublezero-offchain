@@ -94,8 +94,8 @@ echo "doublezero-solana passport fetch -h"
 $CLI_BIN passport fetch -h
 echo
 
-echo "doublezero-solana passport fetch -u l --config --doublezero-address $DUMMY_KEY"
-$CLI_BIN passport fetch -u l --config --doublezero-address $DUMMY_KEY
+echo "doublezero-solana passport fetch -u l --config --access-request $DUMMY_KEY"
+$CLI_BIN passport fetch -u l --config --access-request $DUMMY_KEY
 echo
 
 echo "doublezero-solana passport request-validator-access -h"
@@ -117,8 +117,8 @@ $CLI_BIN passport request-validator-access \
     --doublezero-address $DUMMY_KEY
 echo
 
-echo "doublezero-solana passport fetch -u l --doublezero-address $DUMMY_KEY"
-$CLI_BIN passport fetch -u l --doublezero-address $DUMMY_KEY
+echo "doublezero-solana passport fetch -u l --access-request $DUMMY_KEY"
+$CLI_BIN passport fetch -u l --access-request $DUMMY_KEY
 echo
 
 ### Revenue distribution commands.
