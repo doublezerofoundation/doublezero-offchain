@@ -7,10 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, bail};
-use solana_client::{
-    nonblocking::rpc_client::RpcClient,
-    rpc_response::{RpcContactInfo, RpcVoteAccountInfo, RpcVoteAccountStatus},
-};
+use solana_client::{nonblocking::rpc_client::RpcClient, rpc_response::RpcContactInfo};
 use solana_sdk::pubkey::Pubkey;
 
 pub fn get_public_ipv4() -> anyhow::Result<String> {
@@ -95,12 +92,4 @@ pub fn find_node_by_ip(nodes: &[RpcContactInfo], ip: Ipv4Addr) -> Option<&RpcCon
     nodes
         .iter()
         .find(|n| n.gossip.as_ref().is_some_and(|gossip| gossip.ip() == ip))
-}
-
-pub fn find_voter_by_node_id<'a>(
-    voters: &'a RpcVoteAccountStatus,
-    node_id: &Pubkey,
-) -> Option<&'a RpcVoteAccountInfo> {
-    let node_id_str = node_id.to_string();
-    voters.current.iter().find(|v| v.node_pubkey == node_id_str)
 }

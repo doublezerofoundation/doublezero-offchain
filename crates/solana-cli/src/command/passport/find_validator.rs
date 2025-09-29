@@ -1,11 +1,14 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, sync::Arc};
 
 use anyhow::Result;
 use clap::Args;
+use doublezero_ledger_sentinel::{
+    client::solana::SolRpcClient, constants::ENV_PREVIOUS_LEADER_EPOCHS,
+};
 use doublezero_sdk::get_doublezero_pubkey;
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
-use solana_client::rpc_response::{RpcContactInfo, RpcVoteAccountStatus};
-use solana_sdk::{pubkey::Pubkey, signer::Signer};
+use solana_client::rpc_response::RpcContactInfo;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 use crate::helpers::{find_node_by_ip, find_node_by_node_id, get_public_ipv4, identify_cluster};
 
@@ -33,6 +36,12 @@ impl FindValidatorCommand {
 
         // Establish a connection to the Solana cluster
         let connection = SolanaConnection::try_from(solana_connection_options)?;
+        let sol_client = SolRpcClient::new(
+            solana_client::client_error::reqwest::Url::parse(&connection.rpc_client.url())
+                .expect("Invalid RPC URL"),
+            Arc::new(Keypair::new()),
+        );
+
         // Identify the cluster
         let cluster = identify_cluster(&connection).await;
         println!("Connected to Solana: {:}\n", cluster);
@@ -46,17 +55,12 @@ impl FindValidatorCommand {
         if nodes.is_empty() {
             anyhow::bail!("Unable to fetch cluster nodes. Is your RPC endpoint correct?");
         }
-        // Fetch the cluster voters
-        let voters = connection.get_vote_accounts().await?;
-        if voters.current.is_empty() {
-            anyhow::bail!("Unable to fetch cluster voters. Is your RPC endpoint correct?");
-        }
 
         // Check if either node_id or server_ip is provided
         if let Some(node_id) = validator_id {
             // Search by node_id
             if let Some(node) = find_node_by_node_id(&nodes, &node_id) {
-                print_node_info(node, voters);
+                print_node_info(node, &sol_client).await;
             } else {
                 println!(
                     "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
@@ -72,7 +76,7 @@ impl FindValidatorCommand {
                 }
             };
             if let Some(node) = find_node_by_ip(&nodes, server_ip) {
-                print_node_info(node, voters);
+                print_node_info(node, &sol_client).await;
             } else {
                 println!(
                     "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
@@ -91,7 +95,7 @@ impl FindValidatorCommand {
                         }
                     };
                     if let Some(node) = find_node_by_ip(&nodes, server_ip) {
-                        print_node_info(node, voters);
+                        print_node_info(node, &sol_client).await;
                     } else {
                         println!(
                             "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
@@ -106,25 +110,27 @@ impl FindValidatorCommand {
     }
 }
 
-fn print_node_info(node: &RpcContactInfo, voters: RpcVoteAccountStatus) {
+async fn print_node_info(node: &RpcContactInfo, sol_client: &SolRpcClient) {
     println!("Validator ID: {}", node.pubkey);
     match &node.gossip {
         Some(gossip) => println!("Gossip IP: {}", gossip.ip()),
         None => println!("Gossip IP: <unknown>"),
     }
 
-    let info = voters.current.iter().find(|v| v.node_pubkey == node.pubkey);
+    let pubkey = node.pubkey.parse::<Pubkey>().expect("Invalid pubkey");
 
-    if let Some(info) = info {
-        // 1 SOL = 1_000_000_000 lamports
-        let sol = info.activated_stake as f64 / 1_000_000_000.0;
-        println!("Active stake: {:.6} SOL", sol);
+    if sol_client
+        .check_leader_schedule(&pubkey, ENV_PREVIOUS_LEADER_EPOCHS)
+        .await
+        .is_ok()
+    {
+        println!("In Leader scheduler");
         println!(
-            "✅ This validator can connect as a primary in DoubleZero 🖥️  💎. It is a staked validator."
+            "✅ This validator can connect as a primary in DoubleZero 🖥️  💎. It is a leader scheduled validator."
         );
     } else {
         println!(
-            "✅ This validator can only connect as a backup in DoubleZero 🖥️  🛟. It is not staked and cannot act as a primary validator."
+            "✅ This validator can only connect as a backup in DoubleZero 🖥️  🛟. It is not leader scheduled and cannot act as a primary validator."
         );
     }
 }

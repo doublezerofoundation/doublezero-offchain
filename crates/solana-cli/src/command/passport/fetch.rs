@@ -9,8 +9,8 @@ pub struct FetchCommand {
     #[arg(long)]
     config: bool,
 
-    #[arg(long, value_name = "PUBKEY")]
-    doublezero_address: Option<Pubkey>,
+    #[arg(long, value_name = "DOUBLEZERO_PUBKEY")]
+    access_request: Option<Pubkey>,
 
     #[command(flatten)]
     solana_connection_options: SolanaConnectionOptions,
@@ -20,7 +20,7 @@ impl FetchCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let FetchCommand {
             config,
-            doublezero_address,
+            access_request,
             solana_connection_options,
         } = self;
 
@@ -68,7 +68,7 @@ impl FetchCommand {
         }
 
         // NOTE: If an access request is found, the sentinel is not doing its job.
-        if let Some(access_request) = doublezero_address {
+        if let Some(access_request) = access_request {
             let (access_request_key, access_request) =
                 super::fetch_access_request(&connection, &access_request).await?;
 

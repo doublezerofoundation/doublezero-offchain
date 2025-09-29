@@ -1,7 +1,8 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use anyhow::{Result, bail};
 use clap::Args;
+use doublezero_ledger_sentinel::client::solana::SolRpcClient;
 use doublezero_passport::{
     ID,
     instruction::{
@@ -13,8 +14,10 @@ use doublezero_passport::{
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, offchain_message::OffchainMessage, pubkey::Pubkey,
-    signature::Signature,
+    compute_budget::ComputeBudgetInstruction,
+    offchain_message::OffchainMessage,
+    pubkey::Pubkey,
+    signature::{Keypair, Signature},
 };
 
 use crate::helpers::parse_pubkey;
@@ -49,6 +52,11 @@ pub struct RequestValidatorAccessCommand {
 impl RequestValidatorAccessCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let wallet = Wallet::try_from(self.solana_payer_options.clone())?;
+        let sol_client = SolRpcClient::new(
+            solana_client::client_error::reqwest::Url::parse(&wallet.connection.rpc_client.url())
+                .expect("Invalid RPC URL"),
+            Arc::new(Keypair::new()),
+        );
 
         let (address, _) = AccessRequest::find_address(&self.doublezero_address);
 

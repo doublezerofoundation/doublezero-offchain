@@ -1,13 +1,18 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use clap::Args;
+use doublezero_ledger_sentinel::{
+    client::solana::SolRpcClient, constants::ENV_PREVIOUS_LEADER_EPOCHS,
+};
 use doublezero_passport::{
     instruction::{AccessMode, SolanaValidatorAttestation},
     state::AccessRequest,
 };
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 
-use crate::helpers::{find_node_by_node_id, find_voter_by_node_id, identify_cluster, parse_pubkey};
+use crate::helpers::{find_node_by_node_id, identify_cluster, parse_pubkey};
 
 /*
    doublezero-solana passport request-access --doublezero-address SSSS --primary-validator-id AAA --backup-validator-ids BBB,CCC --signature XXXXX
@@ -44,6 +49,12 @@ impl PrepareValidatorAccessCommand {
 
         // Establish a connection to the Solana cluster
         let connection = SolanaConnection::try_from(solana_connection_options)?;
+        let sol_client = SolRpcClient::new(
+            solana_client::client_error::reqwest::Url::parse(&connection.rpc_client.url())
+                .expect("Invalid RPC URL"),
+            Arc::new(Keypair::new()),
+        );
+
         // Identify the cluster
         let cluster = identify_cluster(&connection).await;
         // Fetch the cluster nodes
@@ -51,12 +62,6 @@ impl PrepareValidatorAccessCommand {
         if nodes.is_empty() {
             anyhow::bail!("Unable to fetch cluster nodes. Is your RPC endpoint correct?");
         }
-        // Fetch the cluster voters
-        let voters = connection.get_vote_accounts().await?;
-        if voters.current.is_empty() {
-            anyhow::bail!("Unable to fetch cluster voters. Is your RPC endpoint correct?");
-        }
-
         // Collect errors
         let mut errors = Vec::<String>::new();
 
@@ -72,11 +77,15 @@ impl PrepareValidatorAccessCommand {
                 node.gossip.as_ref().map(|g| g.ip()).unwrap()
             );
             print!("  Leader scheduler: ");
-            if let Some(voter) = find_voter_by_node_id(&voters, &primary_validator_id) {
-                let sol = voter.activated_stake as f64 / 1_000_000_000.0;
-                print!(" ✅ OK (Stake: {:.6} SOL)", sol);
+
+            if sol_client
+                .check_leader_schedule(&primary_validator_id, 5)
+                .await
+                .is_ok()
+            {
+                print!(" ✅ OK ");
             } else {
-                print!(" ❌ Invalid ",);
+                print!(" ❌ Invalid ");
                 errors.push(format!(
                     "Primary validator ID ({}) is not an active staked validator. The primary must have stake delegated and be participating in the leader scheduler.",
                     primary_validator_id
@@ -96,19 +105,23 @@ impl PrepareValidatorAccessCommand {
 
             for backup_id in &backup_validator_ids {
                 print!("  ID: {backup_id}\n  Gossip: ");
-                if let Some(node) = find_node_by_node_id(&nodes, backup_id) {
-                    println!(" ✅ OK ({})", node.gossip.as_ref().map(|g| g.ip()).unwrap());
+
+                if let Some(ip) = sol_client.get_validator_ip(backup_id).await? {
+                    println!(" ✅ OK ({})", ip);
                     print!("  Leader scheduler: ");
 
-                    if let Some(voter) = find_voter_by_node_id(&voters, backup_id) {
-                        let sol = voter.activated_stake as f64 / 1_000_000_000.0;
-                        println!(" ❌ Fail (stake: {:.2} SOL)", sol);
+                    if sol_client
+                        .check_leader_schedule(&backup_id, ENV_PREVIOUS_LEADER_EPOCHS)
+                        .await
+                        .is_err()
+                    {
+                        println!(" ✅ OK (not a leader scheduled validator)");
+                    } else {
+                        println!(" ❌ Fail (on leader scheduler)");
                         errors.push(format!(
-                            "Backup validator ID ({}) should not be on leader scheduler. It must be a non-staked validator.",
+                            "Backup validator ID ({}) should not be on leader scheduler. It must be a non-leader scheduled validator.",
                             backup_id
                         ));
-                    } else {
-                        println!(" ✅ OK (not a staked validator)");
                     }
                 } else {
                     println!("❌ Gossip Fail",);
