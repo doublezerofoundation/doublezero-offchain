@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use doublezero_contributor_rewards::{
     calculator::orchestrator::Orchestrator,
-    cli::{inspect::InspectCommands, rewards::RewardsCommands},
+    cli::{debug::DebugCommands, inspect::InspectCommands, rewards::RewardsCommands},
     settings::Settings,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -60,6 +60,11 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: InspectCommands,
     },
+    /// Debug reward calculations step-by-step
+    Debug {
+        #[command(subcommand)]
+        cmd: DebugCommands,
+    },
     /// Export raw chain data snapshots for debugging and analysis
     Snapshot {
         #[command(subcommand)]
@@ -110,6 +115,9 @@ impl Cli {
             }
             Commands::Inspect { cmd } => {
                 doublezero_contributor_rewards::cli::inspect::handle(&orchestrator, cmd).await
+            }
+            Commands::Debug { cmd } => {
+                doublezero_contributor_rewards::cli::debug::handle(&orchestrator, cmd).await
             }
             Commands::Snapshot { cmd } => {
                 doublezero_contributor_rewards::cli::snapshot::handle(&orchestrator, cmd).await
