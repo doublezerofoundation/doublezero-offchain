@@ -17,7 +17,10 @@ pub enum RewardsCommands {
     calculate-rewards --epoch 123 -k keypair.json
 
     # Dry run to preview without writing to DZ ledger
-    calculate-rewards --epoch 123 --dry-run"#
+    calculate-rewards --epoch 123 --dry-run
+
+    # Calculate from snapshot (deterministic mode)
+    calculate-rewards --snapshot epoch-123.json --dry-run"#
     )]
     CalculateRewards {
         /// DZ epoch to calculate rewards for (defaults to previous epoch)
@@ -36,6 +39,10 @@ pub enum RewardsCommands {
             required_unless_present = "dry_run"
         )]
         keypair: Option<PathBuf>,
+
+        /// Load data from snapshot file instead of fetching from RPC (deterministic mode)
+        #[arg(long, value_name = "FILE")]
+        snapshot: Option<PathBuf>,
     },
     #[command(
         about = "Read and display telemetry aggregate statistics from the ledger",
@@ -215,9 +222,10 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             epoch,
             dry_run,
             keypair,
+            snapshot,
         } => {
             orchestrator
-                .calculate_rewards(epoch, keypair, dry_run)
+                .calculate_rewards(epoch, keypair, snapshot, dry_run)
                 .await
         }
         RewardsCommands::ReadTelemAgg {

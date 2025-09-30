@@ -7,14 +7,20 @@ use crate::{
         },
         util::{calculate_city_weights, print_devices, print_private_links, print_public_links},
     },
-    ingestor::{demand::CityStats, fetcher::Fetcher, internet, types::FetchData},
+    cli::snapshot::CompleteSnapshot,
+    ingestor::{
+        demand::{self, CityStats},
+        fetcher::Fetcher,
+        internet,
+        types::FetchData,
+    },
     processor::{
         internet::{InternetTelemetryProcessor, InternetTelemetryStatMap, print_internet_stats},
         telemetry::{DZDTelemetryProcessor, DZDTelemetryStatMap, print_telemetry_stats},
     },
     settings::Settings,
 };
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use network_shapley::types::{Demand, Devices, PrivateLinks, PublicLinks};
 use std::collections::BTreeSet;
 use tracing::{info, warn};
@@ -133,6 +139,131 @@ impl PreparedData {
         };
 
         // Record overall Shapley inputs
+        metrics::gauge!(
+            "doublezero_contributor_rewards_shapley_inputs_total",
+            "kind" => "devices"
+        )
+        .set(shapley_inputs.devices.len() as f64);
+        metrics::gauge!(
+            "doublezero_contributor_rewards_shapley_inputs_total",
+            "kind" => "private_links"
+        )
+        .set(shapley_inputs.private_links.len() as f64);
+        metrics::gauge!(
+            "doublezero_contributor_rewards_shapley_inputs_total",
+            "kind" => "public_links"
+        )
+        .set(shapley_inputs.public_links.len() as f64);
+        metrics::gauge!(
+            "doublezero_contributor_rewards_shapley_inputs_total",
+            "kind" => "demands"
+        )
+        .set(shapley_inputs.demands.len() as f64);
+
+        for (city, weight) in shapley_inputs.city_weights.iter() {
+            metrics::gauge!(
+                "doublezero_contributor_rewards_shapley_city_weight",
+                "city" => city.clone()
+            )
+            .set(*weight);
+        }
+
+        Ok(Self {
+            epoch: fetch_epoch,
+            device_telemetry,
+            internet_telemetry,
+            shapley_inputs: Some(shapley_inputs),
+        })
+    }
+
+    /// Create PreparedData from a snapshot file (skip RPC fetching)
+    ///
+    /// This enables deterministic reward calculations by using captured historical state.
+    /// The snapshot must include all necessary data (fetch_data, leader_schedule, etc.)
+    ///
+    /// # Arguments
+    /// * `snapshot` - Complete snapshot containing all epoch data
+    /// * `settings` - Settings for processing configuration
+    /// * `require_shapley` - Whether to build shapley inputs
+    ///
+    /// # Returns
+    /// Result<PreparedData>
+    pub fn from_snapshot(
+        snapshot: &CompleteSnapshot,
+        settings: &Settings,
+        require_shapley: bool,
+    ) -> Result<Self> {
+        let fetch_epoch = snapshot.dz_epoch;
+        let fetch_data = &snapshot.fetch_data;
+
+        info!("Processing snapshot for epoch {}", fetch_epoch);
+
+        // Process telemetry (same as new())
+        let device_telemetry = process_device_telemetry(fetch_data)?;
+        let internet_telemetry = process_internet_telemetry(fetch_data)?;
+
+        if !require_shapley {
+            return Ok(Self {
+                epoch: fetch_epoch,
+                device_telemetry,
+                internet_telemetry,
+                shapley_inputs: None,
+            });
+        }
+
+        // Build devices
+        let (devices, device_ids) = build_and_log_devices(settings, fetch_data)?;
+
+        // Note: Snapshot already has processed data, so we use an empty previous epoch cache
+        // The snapshot-v2 command already applied previous epoch lookups during capture
+        let previous_epoch_cache = PreviousEpochCache::new();
+
+        // Build private links
+        let private_links = build_and_log_private_links(
+            settings,
+            fetch_data,
+            &device_telemetry,
+            &previous_epoch_cache,
+            &device_ids,
+        );
+
+        // Build public links
+        let public_links = build_and_log_public_links(
+            settings,
+            &internet_telemetry,
+            fetch_data,
+            &previous_epoch_cache,
+        )?;
+
+        // Build demands using snapshot's leader schedule
+        let leader_schedule = snapshot
+            .leader_schedule
+            .as_ref()
+            .ok_or_else(|| anyhow!("Snapshot missing leader schedule for epoch {}", fetch_epoch))?;
+
+        info!(
+            "Using leader schedule from snapshot (Solana epoch: {})",
+            leader_schedule.solana_epoch
+        );
+
+        let demand_output = demand::build_with_schedule(settings, fetch_data, leader_schedule)?;
+        let demands = demand_output.demands;
+        let city_stats = demand_output.city_stats;
+
+        // Calculate city weights
+        let city_weights = calculate_city_weights(&city_stats);
+
+        // Create ShapleyInputs
+        let shapley_inputs = ShapleyInputs {
+            devices,
+            private_links,
+            public_links,
+            demands,
+            city_stats,
+            city_weights,
+        };
+
+        // Record metrics
         metrics::gauge!(
             "doublezero_contributor_rewards_shapley_inputs_total",
             "kind" => "devices"

@@ -216,7 +216,7 @@ impl ScheduleWorker {
 
             // Calculate and write rewards for real
             self.orchestrator
-                .calculate_rewards(Some(target_epoch), self.keypair_path.clone(), false)
+                .calculate_rewards(Some(target_epoch), self.keypair_path.clone(), None, false)
                 .await?;
 
             // Mark success
