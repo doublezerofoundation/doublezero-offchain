@@ -1,17 +1,20 @@
 use anyhow::{Result, anyhow};
 use clap::{Args, Subcommand};
-use doublezero_program_tools::PrecomputedDiscriminator;
-use doublezero_program_tools::zero_copy;
-use doublezero_revenue_distribution::DOUBLEZERO_MINT_DECIMALS;
-use doublezero_revenue_distribution::state::Distribution;
-use doublezero_revenue_distribution::state::ProgramConfig;
-use doublezero_revenue_distribution::state::{CommunityBurnRateMode, Journal};
-use doublezero_revenue_distribution::types::DoubleZeroEpoch;
-use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
-use doublezero_solana_client_tools::zero_copy::ZeroCopyAccountOwned;
+use doublezero_program_tools::{PrecomputedDiscriminator, zero_copy};
+use doublezero_revenue_distribution::{
+    DOUBLEZERO_MINT_DECIMALS,
+    state::{CommunityBurnRateMode, Distribution, Journal, ProgramConfig},
+    types::DoubleZeroEpoch,
+};
+use doublezero_solana_client_tools::{
+    rpc::{SolanaConnection, SolanaConnectionOptions},
+    zero_copy::ZeroCopyAccountOwned,
+};
 use solana_account_decoder_client_types::UiAccountEncoding;
-use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
-use solana_client::rpc_filter::{Memcmp, RpcFilterType};
+use solana_client::{
+    rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    rpc_filter::{Memcmp, RpcFilterType},
+};
 use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, Subcommand)]
