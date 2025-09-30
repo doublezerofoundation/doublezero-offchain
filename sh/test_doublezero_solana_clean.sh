@@ -57,7 +57,7 @@ echo
 
 echo "doublezero-revenue-distribution-admin configure -u l -v --unpause" \
      "--contributor-manager $(solana address)" \
-     "--calculation-grace-period-seconds 3600" \
+     "--calculation-grace-period-minutes 60" \
      "--prepaid-connection-termination-relay-lamports 100000" \
      "--solana-validator-base-block-rewards-fee-pct 1.23" \
      "--solana-validator-priority-block-rewards-fee-pct 45.67" \
@@ -71,7 +71,7 @@ doublezero-revenue-distribution-admin configure \
     -v \
     --unpause \
     --contributor-manager $(solana address) \
-    --calculation-grace-period-seconds 3600 \
+    --calculation-grace-period-minutes 60 \
     --prepaid-connection-termination-relay-lamports 100000 \
     --solana-validator-base-block-rewards-fee-pct 1.23 \
     --solana-validator-priority-block-rewards-fee-pct 45.67 \
