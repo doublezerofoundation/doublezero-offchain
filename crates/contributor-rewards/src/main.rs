@@ -4,7 +4,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use doublezero_contributor_rewards::{
     calculator::orchestrator::Orchestrator,
-    cli::{debug::DebugCommands, inspect::InspectCommands, rewards::RewardsCommands},
+    cli::{
+        common::OutputFormat, debug::DebugCommands, inspect::InspectCommands,
+        rewards::RewardsCommands,
+    },
     settings::Settings,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -65,10 +68,38 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DebugCommands,
     },
-    /// Export raw chain data snapshots for debugging and analysis
+    #[command(
+        about = "Create a complete snapshot for deterministic reward calculations",
+        long_about = "Creates a complete snapshot with all processing applied (internet accumulator, \
+                      previous epoch lookups, etc.). This snapshot can be used with calculate-rewards \
+                      --snapshot for deterministic, reproducible reward calculations.",
+        after_help = r#"Examples:
+    # Export snapshot for epoch 27
+    snapshot --epoch 27 --output-file epoch-27.json
+
+    # Export to directory with automatic naming
+    snapshot --epoch 27 --output-dir ./snapshots/
+
+    # Use with calculate-rewards for deterministic results
+    snapshot --epoch 27 -o snapshot.json
+    calculate-rewards --snapshot snapshot.json --dry-run"#
+    )]
     Snapshot {
-        #[command(subcommand)]
-        cmd: doublezero_contributor_rewards::cli::snapshot::SnapshotCommands,
+        /// DZ epoch to snapshot (defaults to previous epoch)
+        #[arg(short, long, value_name = "EPOCH")]
+        epoch: Option<u64>,
+
+        /// Output format for export
+        #[arg(short = 'f', long, default_value = "json-pretty")]
+        output_format: OutputFormat,
+
+        /// Directory to export files
+        #[arg(short = 'o', long, value_name = "DIR")]
+        output_dir: Option<PathBuf>,
+
+        /// Specific output file path
+        #[arg(long, value_name = "FILE")]
+        output_file: Option<PathBuf>,
     },
     /// Analyze telemetry data (internet or device)
     Telemetry {
@@ -119,8 +150,20 @@ impl Cli {
             Commands::Debug { cmd } => {
                 doublezero_contributor_rewards::cli::debug::handle(&orchestrator, cmd).await
             }
-            Commands::Snapshot { cmd } => {
-                doublezero_contributor_rewards::cli::snapshot::handle(&orchestrator, cmd).await
+            Commands::Snapshot {
+                epoch,
+                output_format,
+                output_dir,
+                output_file,
+            } => {
+                doublezero_contributor_rewards::cli::snapshot::handle(
+                    &orchestrator,
+                    epoch,
+                    output_format,
+                    output_dir,
+                    output_file,
+                )
+                .await
             }
             Commands::Telemetry { cmd } => {
                 doublezero_contributor_rewards::cli::telemetry::handle(&orchestrator, cmd).await

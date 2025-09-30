@@ -48,8 +48,7 @@ impl Orchestrator {
 
         // Prepare all data - either from snapshot or from RPC
         let prep_data = if let Some(snapshot_file) = snapshot_path {
-            // Load from snapshot (deterministic mode)
-            info!("📸 Loading data from snapshot: {:?}", snapshot_file);
+            info!("Loading data from snapshot: {:?}", snapshot_file);
             let snapshot = CompleteSnapshot::load_from_file(&snapshot_file)?;
             info!(
                 "Snapshot loaded: epoch {}, created at {}",
@@ -57,7 +56,6 @@ impl Orchestrator {
             );
             PreparedData::from_snapshot(&snapshot, &self.settings, true)?
         } else {
-            // Fetch from RPC (live mode)
             let fetcher = Fetcher::from_settings(&self.settings)?;
             PreparedData::new(&fetcher, epoch, true).await?
         };
