@@ -214,8 +214,7 @@ impl PreparedData {
         // Build devices
         let (devices, device_ids) = build_and_log_devices(settings, fetch_data)?;
 
-        // Note: Snapshot already has processed data, so we use an empty previous epoch cache
-        // The snapshot-v2 command already applied previous epoch lookups during capture
+        // Use empty previous epoch cache since snapshot already has processed data
         let previous_epoch_cache = PreviousEpochCache::new();
 
         // Build private links
