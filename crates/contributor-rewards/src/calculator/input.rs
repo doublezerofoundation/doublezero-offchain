@@ -50,7 +50,9 @@ pub struct RewardInput {
     pub city_summaries: BTreeMap<String, CitySummary>,
 
     // Checksums for telemetry data verification
+    #[serde(skip)]
     pub device_telemetry_checksum: Hash,
+    #[serde(skip)]
     pub internet_telemetry_checksum: Hash,
 }
 

@@ -60,7 +60,7 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: InspectCommands,
     },
-    /// Export raw chain data snapshots for debugging and analysis
+    /// Create snapshots and extract Shapley inputs
     Snapshot {
         #[command(subcommand)]
         cmd: doublezero_contributor_rewards::cli::snapshot::SnapshotCommands,

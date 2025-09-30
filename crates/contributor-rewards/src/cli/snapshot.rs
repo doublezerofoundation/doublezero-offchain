@@ -1,5 +1,5 @@
 use crate::{
-    calculator::orchestrator::Orchestrator,
+    calculator::{data_prep::PreparedData, input::RewardInput, orchestrator::Orchestrator},
     cli::{
         common::{OutputFormat, OutputOptions, to_json_string},
         traits::Exportable,
@@ -10,26 +10,33 @@ use crate::{
         types::FetchData,
     },
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
 use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-/// Snapshot export commands for raw chain data
+/// Snapshot commands
 #[derive(Subcommand, Debug)]
 pub enum SnapshotCommands {
     #[command(
-        about = "Export all chain data for an epoch (fetch_data, leader schedule, etc.)",
+        about = "Create a complete snapshot for deterministic reward calculations",
+        long_about = "Creates a complete snapshot with all processing applied (internet accumulator, \
+                      previous epoch lookups, etc.). This snapshot can be used with calculate-rewards \
+                      --snapshot for deterministic, reproducible reward calculations.",
         after_help = r#"Examples:
-    # Export everything for epoch 9
-    snapshot all --epoch 9 --output-format json --output-file epoch-9-complete.json
+    # Export snapshot for epoch 27
+    snapshot all --epoch 27 --output-file epoch-27.json
 
     # Export to directory with automatic naming
-    snapshot all --epoch 9 --output-format json-pretty --output-dir ./snapshots/"#
+    snapshot all --epoch 27 --output-dir ./snapshots/
+
+    # Use with calculate-rewards for deterministic results
+    snapshot all --epoch 27 -o snapshot.json
+    calculate-rewards --snapshot snapshot.json --dry-run"#
     )]
     All {
-        /// DZ epoch to snapshot
+        /// DZ epoch to snapshot (defaults to previous epoch)
         #[arg(short, long, value_name = "EPOCH")]
         epoch: Option<u64>,
 
@@ -47,54 +54,34 @@ pub enum SnapshotCommands {
     },
 
     #[command(
-        about = "Export raw fetch_data from chain",
+        about = "Extract Shapley inputs from a snapshot",
+        long_about = "Extracts RewardInput (Shapley calculation inputs) from a complete snapshot. \
+                      Optionally filter by city to get inputs for a specific demand topology.",
         after_help = r#"Examples:
-    # Export fetch_data for debugging
-    snapshot fetch-data --epoch 9 --output-format json-pretty --output-file fetch-data.json"#
+    # Extract all Shapley inputs
+    snapshot shapley-inputs --from snapshot.json -o all-inputs.json
+
+    # Extract only Amsterdam-based demands
+    snapshot shapley-inputs --from snapshot.json --city AMS -o ams-inputs.json
+
+    # Extract for specific city with CSV format
+    snapshot shapley-inputs --from snapshot.json --city NYC -f json -o nyc.json"#
     )]
-    FetchData {
-        /// DZ epoch to fetch
-        #[arg(short, long, value_name = "EPOCH")]
-        epoch: Option<u64>,
+    ShapleyInputs {
+        /// Path to complete snapshot file
+        #[arg(long, value_name = "FILE")]
+        from: PathBuf,
+
+        /// Optional city code to filter demands (e.g., AMS, NYC, LAX)
+        #[arg(long, value_name = "CITY")]
+        city: Option<String>,
 
         /// Output format for export
         #[arg(short = 'f', long, default_value = "json-pretty")]
         output_format: OutputFormat,
 
-        /// Directory to export files
-        #[arg(short = 'o', long, value_name = "DIR")]
-        output_dir: Option<PathBuf>,
-
         /// Specific output file path
-        #[arg(long, value_name = "FILE")]
-        output_file: Option<PathBuf>,
-    },
-
-    #[command(
-        about = "Export Solana leader schedule for an epoch",
-        after_help = r#"Examples:
-    # Export leader schedule as CSV (using DZ epoch)
-    snapshot leader-schedule -e 83 --output-format csv --output-file leaders.csv
-
-    # Export as JSON for analysis
-    snapshot leader-schedule -e 83 --output-format json-pretty
-    "#
-    )]
-    LeaderSchedule {
-        /// DZ epoch to use for timestamp mapping
-        #[arg(short = 'e', long = "epoch", value_name = "EPOCH")]
-        epoch: u64,
-
-        /// Output format for export
-        #[arg(short = 'f', long, default_value = "json-pretty")]
-        output_format: OutputFormat,
-
-        /// Directory to export files
-        #[arg(short = 'o', long, value_name = "DIR")]
-        output_dir: Option<PathBuf>,
-
-        /// Specific output file path
-        #[arg(long, value_name = "FILE")]
+        #[arg(short = 'o', long, value_name = "FILE")]
         output_file: Option<PathBuf>,
     },
 }
@@ -119,6 +106,83 @@ pub struct SnapshotMetadata {
     pub devices_count: usize,
     pub internet_samples_count: usize,
     pub device_samples_count: usize,
+}
+
+impl CompleteSnapshot {
+    /// Load and validate snapshot from file
+    pub fn load_from_file(path: &std::path::Path) -> Result<Self> {
+        info!("Loading snapshot from: {:?}", path);
+        let contents = std::fs::read_to_string(path)?;
+        let snapshot: Self = serde_json::from_str(&contents)?;
+        snapshot.validate()?;
+        info!("Snapshot loaded and validated successfully");
+        Ok(snapshot)
+    }
+
+    /// Validate snapshot completeness and quality
+    pub fn validate(&self) -> Result<()> {
+        let mut issues = Vec::new();
+
+        // Check serviceability completeness
+        if self.fetch_data.dz_serviceability.devices.is_empty() {
+            issues.push("No devices in snapshot");
+        }
+        if self.fetch_data.dz_serviceability.contributors.is_empty() {
+            issues.push("No contributors in snapshot");
+        }
+        if self.fetch_data.dz_serviceability.exchanges.is_empty() {
+            issues.push("No exchanges in snapshot");
+        }
+        if self.fetch_data.dz_serviceability.users.is_empty() {
+            issues.push("No users in snapshot");
+        }
+
+        // Check telemetry completeness
+        if self
+            .fetch_data
+            .dz_telemetry
+            .device_latency_samples
+            .is_empty()
+        {
+            issues.push("No device telemetry samples");
+        }
+        if self
+            .fetch_data
+            .dz_internet
+            .internet_latency_samples
+            .is_empty()
+        {
+            issues.push("No internet telemetry samples");
+        }
+
+        // Check leader schedule
+        if self.leader_schedule.is_none() {
+            issues.push("Missing leader schedule");
+        } else if let Some(schedule) = &self.leader_schedule
+            && schedule.schedule_map.is_empty()
+        {
+            issues.push("Leader schedule is empty");
+        }
+
+        if !issues.is_empty() {
+            bail!("Snapshot validation failed:\n  - {}", issues.join("\n  - "));
+        }
+
+        info!("Snapshot validation passed");
+        info!("  - Epoch: {}", self.dz_epoch);
+        info!("  - Devices: {}", self.metadata.devices_count);
+        info!("  - Device samples: {}", self.metadata.device_samples_count);
+        info!(
+            "  - Internet samples: {}",
+            self.metadata.internet_samples_count
+        );
+        info!("  - Exchanges: {}", self.metadata.exchanges_count);
+        if let Some(schedule) = &self.leader_schedule {
+            info!("  - Leaders: {}", schedule.schedule_map.len());
+        }
+
+        Ok(())
+    }
 }
 
 // Implement Exportable traits
@@ -156,157 +220,233 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Resul
             output_format,
             output_dir,
             output_file,
-        } => {
-            info!("Starting complete snapshot export");
+        } => handle_all(orchestrator, epoch, output_format, output_dir, output_file).await,
+        SnapshotCommands::ShapleyInputs {
+            from,
+            city,
+            output_format,
+            output_file,
+        } => handle_shapley_inputs(orchestrator, from, city, output_format, output_file).await,
+    }
+}
 
-            // Create fetcher
-            let fetcher = Fetcher::from_settings(orchestrator.settings())?;
+/// Create a complete snapshot with all processing applied
+async fn handle_all(
+    orchestrator: &Orchestrator,
+    epoch: Option<u64>,
+    output_format: OutputFormat,
+    output_dir: Option<PathBuf>,
+    output_file: Option<PathBuf>,
+) -> Result<()> {
+    info!("Creating complete snapshot");
 
-            // Fetch data for epoch
-            let (fetch_epoch, fetch_data) = fetcher.fetch(epoch).await?;
+    // Create fetcher
+    let fetcher = Fetcher::from_settings(orchestrator.settings())?;
 
-            info!("Fetched data for DZ epoch {}", fetch_epoch);
+    // Use PreparedData to apply same processing as calculate-rewards
+    // This includes previous epoch cache lookups and internet telemetry accumulator
+    let prep_data = PreparedData::new(&fetcher, epoch, false).await?;
+    let fetch_epoch = prep_data.epoch;
 
-            // Try to get Solana epoch and leader schedule
-            let mut epoch_finder = EpochFinder::new(
-                fetcher.dz_rpc_client.clone(),
-                fetcher.solana_read_client.clone(),
+    info!("Processed data for DZ epoch {}", fetch_epoch);
+
+    // Get the fetch_data by re-fetching and applying same internet accumulator logic
+    let (_, mut fetch_data) = fetcher.fetch(Some(fetch_epoch)).await?;
+
+    // Apply internet accumulator if enabled (same as PreparedData does)
+    if fetcher.settings.inet_lookback.enable_accumulator {
+        use crate::ingestor::internet;
+        use std::collections::BTreeSet;
+
+        // Calculate expected internet links
+        let mut unique_routes = BTreeSet::new();
+        for sample in &fetch_data.dz_internet.internet_latency_samples {
+            unique_routes.insert((
+                sample.origin_exchange_pk,
+                sample.target_exchange_pk,
+                sample.data_provider_name.clone(),
+            ));
+        }
+        let expected_inet_samples = unique_routes.len();
+        let (inet_epoch, internet_data) = internet::fetch_with_accumulator(
+            &fetcher.dz_rpc_client,
+            &fetcher.settings,
+            fetch_epoch,
+            expected_inet_samples,
+        )
+        .await?;
+
+        if inet_epoch != fetch_epoch {
+            warn!(
+                "Using historical internet telemetry from epoch {} (target was {})",
+                inet_epoch, fetch_epoch
             );
-            let solana_epoch = match epoch_finder
-                .find_epoch_at_timestamp(fetch_data.start_us)
-                .await
-            {
-                Ok(epoch) => Some(epoch),
-                Err(e) => {
-                    warn!("Failed to determine Solana epoch: {}", e);
-                    None
-                }
-            };
+        }
 
-            let leader_schedule = if solana_epoch.is_some() {
-                match epoch_finder
-                    .fetch_leader_schedule(fetch_epoch, fetch_data.start_us)
-                    .await
-                {
-                    Ok(schedule) => Some(schedule),
-                    Err(e) => {
-                        warn!("Failed to get leader schedule: {}", e);
-                        None
-                    }
-                }
-            } else {
+        fetch_data.dz_internet = internet_data;
+    }
+
+    // Try to get Solana epoch and leader schedule
+    let mut epoch_finder = EpochFinder::new(
+        fetcher.dz_rpc_client.clone(),
+        fetcher.solana_read_client.clone(),
+    );
+    let solana_epoch = match epoch_finder
+        .find_epoch_at_timestamp(fetch_data.start_us)
+        .await
+    {
+        Ok(epoch) => Some(epoch),
+        Err(e) => {
+            warn!("Failed to determine Solana epoch: {}", e);
+            None
+        }
+    };
+
+    let leader_schedule = if solana_epoch.is_some() {
+        match epoch_finder
+            .fetch_leader_schedule(fetch_epoch, fetch_data.start_us)
+            .await
+        {
+            Ok(schedule) => Some(schedule),
+            Err(e) => {
+                warn!("Failed to get leader schedule: {}", e);
                 None
-            };
-
-            // Create metadata
-            let metadata = SnapshotMetadata {
-                created_at: chrono::Utc::now().to_rfc3339(),
-                network: orchestrator.settings().network.to_string(),
-                exchanges_count: fetch_data.dz_serviceability.exchanges.len(),
-                locations_count: fetch_data.dz_serviceability.locations.len(),
-                devices_count: fetch_data.dz_serviceability.devices.len(),
-                internet_samples_count: fetch_data.dz_internet.internet_latency_samples.len(),
-                device_samples_count: fetch_data.dz_telemetry.device_latency_samples.len(),
-            };
-
-            // Create complete snapshot
-            let snapshot = CompleteSnapshot {
-                dz_epoch: fetch_epoch,
-                solana_epoch,
-                fetch_data,
-                leader_schedule,
-                metadata,
-            };
-
-            // Export based on options
-            let export_options = OutputOptions {
-                output_format,
-                output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
-                output_file: output_file.map(|p| p.to_string_lossy().to_string()),
-            };
-
-            let default_filename = format!("snapshot-epoch-{fetch_epoch}");
-            export_options.write(&snapshot, &default_filename)?;
-
-            info!("Complete snapshot exported successfully");
-            Ok(())
+            }
         }
+    } else {
+        None
+    };
 
-        SnapshotCommands::FetchData {
-            epoch,
-            output_format,
-            output_dir,
-            output_file,
-        } => {
-            info!("Starting fetch_data export");
+    // Create metadata
+    let metadata = SnapshotMetadata {
+        created_at: chrono::Utc::now().to_rfc3339(),
+        network: orchestrator.settings().network.to_string(),
+        exchanges_count: fetch_data.dz_serviceability.exchanges.len(),
+        locations_count: fetch_data.dz_serviceability.locations.len(),
+        devices_count: fetch_data.dz_serviceability.devices.len(),
+        internet_samples_count: fetch_data.dz_internet.internet_latency_samples.len(),
+        device_samples_count: fetch_data.dz_telemetry.device_latency_samples.len(),
+    };
 
-            // Create fetcher
-            let fetcher = Fetcher::from_settings(orchestrator.settings())?;
+    // Create complete snapshot
+    let snapshot = CompleteSnapshot {
+        dz_epoch: fetch_epoch,
+        solana_epoch,
+        fetch_data,
+        leader_schedule,
+        metadata,
+    };
 
-            // Fetch data for epoch
-            let (fetch_epoch, fetch_data) = fetcher.fetch(epoch).await?;
+    info!("Snapshot processing summary:");
+    info!(
+        "  - Internet accumulator: {}",
+        fetcher.settings.inet_lookback.enable_accumulator
+    );
+    info!(
+        "  - Previous epoch lookups: {}",
+        fetcher
+            .settings
+            .telemetry_defaults
+            .enable_previous_epoch_lookup
+    );
+    info!("  - Devices: {}", snapshot.metadata.devices_count);
+    info!(
+        "  - Internet samples: {}",
+        snapshot.metadata.internet_samples_count
+    );
+    info!(
+        "  - Device samples: {}",
+        snapshot.metadata.device_samples_count
+    );
 
-            info!("Fetched data for DZ epoch {}", fetch_epoch);
-            info!(
-                "Data contains: {} exchanges, {} locations, {} devices",
-                fetch_data.dz_serviceability.exchanges.len(),
-                fetch_data.dz_serviceability.locations.len(),
-                fetch_data.dz_serviceability.devices.len(),
-            );
+    // Export based on options
+    let export_options = OutputOptions {
+        output_format,
+        output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
+        output_file: output_file.map(|p| p.to_string_lossy().to_string()),
+    };
 
-            // Export based on options
-            let export_options = OutputOptions {
-                output_format,
-                output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
-                output_file: output_file.map(|p| p.to_string_lossy().to_string()),
-            };
+    let default_filename = format!("snapshot-epoch-{fetch_epoch}");
+    export_options.write(&snapshot, &default_filename)?;
 
-            let default_filename = format!("fetch-data-epoch-{fetch_epoch}");
-            export_options.write(&fetch_data, &default_filename)?;
+    info!("Snapshot exported successfully");
+    Ok(())
+}
 
-            info!("Fetch data exported successfully");
-            Ok(())
-        }
+/// Extract Shapley inputs from a snapshot
+async fn handle_shapley_inputs(
+    orchestrator: &Orchestrator,
+    from: PathBuf,
+    city: Option<String>,
+    output_format: OutputFormat,
+    output_file: Option<PathBuf>,
+) -> Result<()> {
+    info!("Extracting Shapley inputs from snapshot: {:?}", from);
 
-        SnapshotCommands::LeaderSchedule {
-            epoch,
-            output_format,
-            output_dir,
-            output_file,
-        } => {
-            info!("Starting leader schedule export");
+    // Load snapshot
+    let snapshot = CompleteSnapshot::load_from_file(&from)?;
 
-            // Create fetcher
-            let fetcher = Fetcher::from_settings(orchestrator.settings())?;
+    // Generate PreparedData from snapshot with shapley inputs
+    let prep_data = PreparedData::from_snapshot(&snapshot, orchestrator.settings(), true)?;
 
-            // Create epoch finder with explicit RPC clients
-            let mut epoch_finder = EpochFinder::new(
-                fetcher.dz_rpc_client.clone(),
-                fetcher.solana_read_client.clone(),
-            );
+    // Extract shapley_inputs
+    let shapley_inputs = prep_data
+        .shapley_inputs
+        .ok_or_else(|| anyhow!("Shapley inputs not generated"))?;
 
-            info!("Using DZ epoch {}", epoch);
+    // Serialize telemetry for checksums
+    let device_telemetry_bytes = borsh::to_vec(&prep_data.device_telemetry)?;
+    let internet_telemetry_bytes = borsh::to_vec(&prep_data.internet_telemetry)?;
 
-            // Fetch DZ data to get timestamp
-            let (_, fetch_data) = fetcher.fetch(Some(epoch)).await?;
+    // Create RewardInput
+    let mut reward_input = RewardInput::new(
+        snapshot.dz_epoch,
+        orchestrator.settings().shapley.clone(),
+        &shapley_inputs,
+        &device_telemetry_bytes,
+        &internet_telemetry_bytes,
+    );
 
-            // Get leader schedule
-            let leader_schedule = epoch_finder
-                .fetch_leader_schedule(epoch, fetch_data.start_us)
-                .await?;
+    // Filter by city if specified
+    if let Some(ref city_code) = city {
+        let city_upper = city_code.to_uppercase();
+        info!("Filtering demands for city: {}", city_upper);
 
-            // Export based on options
-            let export_options = OutputOptions {
-                output_format,
-                output_dir: output_dir.map(|p| p.to_string_lossy().to_string()),
-                output_file: output_file.map(|p| p.to_string_lossy().to_string()),
-            };
+        let original_count = reward_input.demands.len();
+        reward_input
+            .demands
+            .retain(|demand| demand.start == city_upper);
 
-            let default_filename = format!("leader-schedule-epoch-{epoch}");
-            export_options.write(&leader_schedule, &default_filename)?;
+        let filtered_count = reward_input.demands.len();
+        info!(
+            "Filtered demands: {} -> {} (city: {})",
+            original_count, filtered_count, city_upper
+        );
 
-            info!("Leader schedule exported successfully");
-            Ok(())
+        if filtered_count == 0 {
+            warn!("No demands found for city: {}", city_upper);
         }
     }
+
+    // Export
+    let export_options = OutputOptions {
+        output_format,
+        output_dir: None,
+        output_file: output_file.map(|p| p.to_string_lossy().to_string()),
+    };
+
+    let default_filename = if let Some(ref city_code) = city {
+        format!(
+            "shapley-inputs-{}-epoch-{}",
+            city_code.to_lowercase(),
+            snapshot.dz_epoch
+        )
+    } else {
+        format!("shapley-inputs-epoch-{}", snapshot.dz_epoch)
+    };
+
+    export_options.write(&reward_input, &default_filename)?;
+
+    info!("Shapley inputs exported successfully");
+    Ok(())
 }
