@@ -25,6 +25,7 @@ use solana_client::{
 };
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     instruction::CompiledInstruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -69,7 +70,17 @@ impl SolRpcClient {
 
         let recent_blockhash = self.client.get_latest_blockhash().await?;
 
-        let transaction = new_transaction(&[grant_ix], &[signer], recent_blockhash);
+        // There should be ~5k CU buffer with this limit.
+        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(16_000);
+
+        // TODO: Consider using a priority fee API instead of a fixed price.
+        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
+
+        let transaction = new_transaction(
+            &[grant_ix, compute_limit_ix, compute_price_ix],
+            &[signer],
+            recent_blockhash,
+        );
 
         Ok(self
             .client
@@ -85,9 +96,19 @@ impl SolRpcClient {
             &PassportInstructionData::DenyAccess,
         )?;
 
+        // There should be ~5k CU buffer with this limit.
+        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(12_000);
+
+        // TODO: Consider using a priority fee API instead of a fixed price.
+        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
+
         let recent_blockhash = self.client.get_latest_blockhash().await?;
 
-        let transaction = new_transaction(&[deny_ix], &[signer], recent_blockhash);
+        let transaction = new_transaction(
+            &[deny_ix, compute_limit_ix, compute_price_ix],
+            &[signer],
+            recent_blockhash,
+        );
 
         Ok(self
             .client
