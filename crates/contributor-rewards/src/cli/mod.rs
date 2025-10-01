@@ -1,5 +1,4 @@
 pub mod common;
-pub mod debug;
 pub mod impls;
 pub mod inspect;
 pub mod rewards;

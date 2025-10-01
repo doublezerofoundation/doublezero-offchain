@@ -1,5 +1,5 @@
 use crate::{
-    calculator::{data_prep::PreparedData, orchestrator::Orchestrator},
+    calculator::{data_prep::PreparedData, input::RewardInput, orchestrator::Orchestrator},
     cli::{
         common::{OutputFormat, OutputOptions, to_json_string},
         traits::Exportable,
@@ -10,10 +10,81 @@ use crate::{
         types::FetchData,
     },
 };
-use anyhow::{Result, bail};
+use anyhow::{Result, anyhow, bail};
+use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tracing::{info, warn};
+
+/// Snapshot commands
+#[derive(Subcommand, Debug)]
+pub enum SnapshotCommands {
+    #[command(
+        about = "Create a complete snapshot for deterministic reward calculations",
+        long_about = "Creates a complete snapshot with all processing applied (internet accumulator, \
+                      previous epoch lookups, etc.). This snapshot can be used with calculate-rewards \
+                      --snapshot for deterministic, reproducible reward calculations.",
+        after_help = r#"Examples:
+    # Export snapshot for epoch 27
+    snapshot all --epoch 27 --output-file epoch-27.json
+
+    # Export to directory with automatic naming
+    snapshot all --epoch 27 --output-dir ./snapshots/
+
+    # Use with calculate-rewards for deterministic results
+    snapshot all --epoch 27 -o snapshot.json
+    calculate-rewards --snapshot snapshot.json --dry-run"#
+    )]
+    All {
+        /// DZ epoch to snapshot (defaults to previous epoch)
+        #[arg(short, long, value_name = "EPOCH")]
+        epoch: Option<u64>,
+
+        /// Output format for export
+        #[arg(short = 'f', long, default_value = "json-pretty")]
+        output_format: OutputFormat,
+
+        /// Directory to export files
+        #[arg(short = 'o', long, value_name = "DIR")]
+        output_dir: Option<PathBuf>,
+
+        /// Specific output file path
+        #[arg(long, value_name = "FILE")]
+        output_file: Option<PathBuf>,
+    },
+
+    #[command(
+        about = "Extract Shapley inputs from a snapshot",
+        long_about = "Extracts RewardInput (Shapley calculation inputs) from a complete snapshot. \
+                      Optionally filter by city to get inputs for a specific demand topology.",
+        after_help = r#"Examples:
+    # Extract all Shapley inputs
+    snapshot shapley-inputs --from snapshot.json -o all-inputs.json
+
+    # Extract only Amsterdam-based demands
+    snapshot shapley-inputs --from snapshot.json --city AMS -o ams-inputs.json
+
+    # Extract for specific city with CSV format
+    snapshot shapley-inputs --from snapshot.json --city NYC -f json -o nyc.json"#
+    )]
+    ShapleyInputs {
+        /// Path to complete snapshot file
+        #[arg(long, value_name = "FILE")]
+        from: PathBuf,
+
+        /// Optional city code to filter demands (e.g., AMS, NYC, LAX)
+        #[arg(long, value_name = "CITY")]
+        city: Option<String>,
+
+        /// Output format for export
+        #[arg(short = 'f', long, default_value = "json-pretty")]
+        output_format: OutputFormat,
+
+        /// Specific output file path
+        #[arg(short = 'o', long, value_name = "FILE")]
+        output_file: Option<PathBuf>,
+    },
+}
 
 /// Complete snapshot containing all data
 #[derive(Debug, Serialize, Deserialize)]
@@ -141,8 +212,26 @@ impl Exportable for FetchData {
     }
 }
 
+/// Handle snapshot commands
+pub async fn handle(orchestrator: &Orchestrator, cmd: SnapshotCommands) -> Result<()> {
+    match cmd {
+        SnapshotCommands::All {
+            epoch,
+            output_format,
+            output_dir,
+            output_file,
+        } => handle_all(orchestrator, epoch, output_format, output_dir, output_file).await,
+        SnapshotCommands::ShapleyInputs {
+            from,
+            city,
+            output_format,
+            output_file,
+        } => handle_shapley_inputs(orchestrator, from, city, output_format, output_file).await,
+    }
+}
+
 /// Create a complete snapshot with all processing applied
-pub async fn handle(
+async fn handle_all(
     orchestrator: &Orchestrator,
     epoch: Option<u64>,
     output_format: OutputFormat,
@@ -281,5 +370,83 @@ pub async fn handle(
     export_options.write(&snapshot, &default_filename)?;
 
     info!("Snapshot exported successfully");
+    Ok(())
+}
+
+/// Extract Shapley inputs from a snapshot
+async fn handle_shapley_inputs(
+    orchestrator: &Orchestrator,
+    from: PathBuf,
+    city: Option<String>,
+    output_format: OutputFormat,
+    output_file: Option<PathBuf>,
+) -> Result<()> {
+    info!("Extracting Shapley inputs from snapshot: {:?}", from);
+
+    // Load snapshot
+    let snapshot = CompleteSnapshot::load_from_file(&from)?;
+
+    // Generate PreparedData from snapshot with shapley inputs
+    let prep_data = PreparedData::from_snapshot(&snapshot, orchestrator.settings(), true)?;
+
+    // Extract shapley_inputs
+    let shapley_inputs = prep_data
+        .shapley_inputs
+        .ok_or_else(|| anyhow!("Shapley inputs not generated"))?;
+
+    // Serialize telemetry for checksums
+    let device_telemetry_bytes = borsh::to_vec(&prep_data.device_telemetry)?;
+    let internet_telemetry_bytes = borsh::to_vec(&prep_data.internet_telemetry)?;
+
+    // Create RewardInput
+    let mut reward_input = RewardInput::new(
+        snapshot.dz_epoch,
+        orchestrator.settings().shapley.clone(),
+        &shapley_inputs,
+        &device_telemetry_bytes,
+        &internet_telemetry_bytes,
+    );
+
+    // Filter by city if specified
+    if let Some(ref city_code) = city {
+        let city_upper = city_code.to_uppercase();
+        info!("Filtering demands for city: {}", city_upper);
+
+        let original_count = reward_input.demands.len();
+        reward_input
+            .demands
+            .retain(|demand| demand.start == city_upper);
+
+        let filtered_count = reward_input.demands.len();
+        info!(
+            "Filtered demands: {} -> {} (city: {})",
+            original_count, filtered_count, city_upper
+        );
+
+        if filtered_count == 0 {
+            warn!("No demands found for city: {}", city_upper);
+        }
+    }
+
+    // Export
+    let export_options = OutputOptions {
+        output_format,
+        output_dir: None,
+        output_file: output_file.map(|p| p.to_string_lossy().to_string()),
+    };
+
+    let default_filename = if let Some(ref city_code) = city {
+        format!(
+            "shapley-inputs-{}-epoch-{}",
+            city_code.to_lowercase(),
+            snapshot.dz_epoch
+        )
+    } else {
+        format!("shapley-inputs-epoch-{}", snapshot.dz_epoch)
+    };
+
+    export_options.write(&reward_input, &default_filename)?;
+
+    info!("Shapley inputs exported successfully");
     Ok(())
 }
