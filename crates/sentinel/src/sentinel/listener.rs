@@ -13,6 +13,7 @@ use url::Url;
 const ACCESS_REQ_INIT_LOG: &str = "Initialized user access request";
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(30);
 const RETRY_BACKOFF_MULTIPLIER: u32 = 2;
+const ERROR_AFTER_RETRIES: u32 = 3;
 
 pub struct ReqListener {
     pubsub_client: SolPubsubClient,
@@ -35,6 +36,7 @@ impl ReqListener {
         info!("AccessRequest listener subscribing to logs");
 
         let mut retry_delay = Duration::from_secs(1);
+        let mut retry_count = 0;
 
         loop {
             // Check for shutdown before attempting subscription
@@ -46,33 +48,49 @@ impl ReqListener {
             }
 
             // Attempt to subscribe with error handling
-            let (mut request_stream, subscription) =
-                match self.pubsub_client.subscribe_to_access_requests().await {
-                    Ok(result) => {
-                        // Reset retry delay on successful connection
-                        retry_delay = Duration::from_secs(1);
-                        metrics::counter!("doublezero_sentinel_pubsub_connected").increment(1);
-                        result
-                    }
-                    Err(err) => {
+            let (mut request_stream, subscription) = match self
+                .pubsub_client
+                .subscribe_to_access_requests()
+                .await
+            {
+                Ok(result) => {
+                    // Reset retry state on successful connection
+                    retry_delay = Duration::from_secs(1);
+                    retry_count = 0;
+                    metrics::counter!("doublezero_sentinel_pubsub_connected").increment(1);
+                    result
+                }
+                Err(err) => {
+                    retry_count += 1;
+                    metrics::counter!("doublezero_sentinel_pubsub_connection_failed").increment(1);
+
+                    // Only warn if we haven't exceeded ERROR_AFTER_RETRIES
+                    if retry_count <= ERROR_AFTER_RETRIES {
+                        warn!(
+                            ?err,
+                            ?retry_delay,
+                            retry_count,
+                            "failed to subscribe to access requests; retrying after delay (transient)"
+                        );
+                    } else {
                         error!(
                             ?err,
                             ?retry_delay,
-                            "failed to subscribe to access requests; retrying after delay"
+                            retry_count,
+                            "failed to subscribe to access requests after multiple retries (persistent issue)"
                         );
-                        metrics::counter!("doublezero_sentinel_pubsub_connection_failed")
-                            .increment(1);
-
-                        // Sleep with backoff before retrying
-                        sleep(retry_delay).await;
-
-                        // Exponential backoff with max cap
-                        retry_delay =
-                            std::cmp::min(retry_delay * RETRY_BACKOFF_MULTIPLIER, MAX_RETRY_DELAY);
-
-                        continue;
                     }
-                };
+
+                    // Sleep with backoff before retrying
+                    sleep(retry_delay).await;
+
+                    // Exponential backoff with max cap
+                    retry_delay =
+                        std::cmp::min(retry_delay * RETRY_BACKOFF_MULTIPLIER, MAX_RETRY_DELAY);
+
+                    continue;
+                }
+            };
 
             // Check the stream for new access requests and break on shutdown signals
             // If the stream returns a `None` then the server has disconnected and we resubscribe
