@@ -444,7 +444,7 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
 }
 
 fn has_overlapping_epoch(first_slot_solana_epoch: &u64, last_slot_solana_epoch: &u64) -> bool {
-    first_slot_solana_epoch > last_slot_solana_epoch
+    first_slot_solana_epoch >= last_slot_solana_epoch
 }
 
 #[cfg(test)]
