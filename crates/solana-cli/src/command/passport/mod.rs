@@ -46,7 +46,7 @@ async fn fetch_program_config(connection: &SolanaConnection) -> Result<(Pubkey, 
     let program_config =
         ZeroCopyAccountOwned::from_rpc_client(&connection.rpc_client, &program_config_key).await?;
 
-    Ok((program_config_key, program_config.data))
+    Ok((program_config_key, *program_config.data.unwrap().0))
 }
 
 async fn fetch_access_request(
@@ -59,7 +59,11 @@ async fn fetch_access_request(
         ZeroCopyAccountOwned::from_rpc_client(&connection.rpc_client, &access_request_key)
             .await
             .ok()
-            .map(|access_request| access_request.data);
+            .map(|access_request| access_request.data)
+            .flatten();
 
-    Ok((access_request_key, access_request))
+    Ok((
+        access_request_key,
+        access_request.map(|access_request| *access_request.0),
+    ))
 }
