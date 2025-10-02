@@ -59,8 +59,7 @@ async fn fetch_access_request(
         ZeroCopyAccountOwned::from_rpc_client(&connection.rpc_client, &access_request_key)
             .await
             .ok()
-            .map(|access_request| access_request.data)
-            .flatten();
+            .and_then(|access_request| access_request.data);
 
     Ok((
         access_request_key,
