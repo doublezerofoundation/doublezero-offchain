@@ -33,6 +33,7 @@ dotenvy = "0"
 futures = "0"
 futures-util = "0"
 governor = "0"
+indexmap = { version = "2", features = ["serde"] }
 itertools = "0"
 leaky-bucket = "1"
 metrics = "0"
@@ -56,6 +57,7 @@ solana-sdk = "2"
 solana-system-interface = "1"
 solana-transaction-status-client-types = "2"
 svm-hash = { version = "0.1.0", features = ["bytemuck", "borsh"] }
+statrs = "0.18.0"
 tabled = { version = "0", features = ["std", "derive"] }
 tempfile = "3"
 thiserror = "2"

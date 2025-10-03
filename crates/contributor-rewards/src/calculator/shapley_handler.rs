@@ -1,9 +1,10 @@
 use crate::{
-    calculator::constants::{BPS_TO_GBPS, DEFAULT_EDGE_BANDWIDTH_GBPS, SEC_TO_MS, SEC_TO_US},
+    calculator::constants::{BPS_TO_GBPS, DEFAULT_EDGE_BANDWIDTH_GBPS, SEC_TO_MS},
     ingestor::{demand, fetcher::Fetcher, types::FetchData},
     processor::{
-        constants::PENALTY_RTT_US, internet::InternetTelemetryStatMap,
+        internet::InternetTelemetryStatMap,
         telemetry::DZDTelemetryStatMap,
+        util::quantile_r_type7,
     },
     settings::{Settings, network::Network},
 };
@@ -75,19 +76,20 @@ impl PreviousEpochCache {
             .map(|stats| stats.rtt_mean_us)
     }
 
-    /// Get previous epoch average for a specific device circuit
+    /// Get previous epoch P95 for a specific device circuit
     pub fn get_device_circuit_average(&self, circuit_key: &str) -> Option<f64> {
         self.device_stats
             .as_ref()?
             .get(circuit_key)
-            .map(|stats| stats.rtt_mean_us)
+            .map(|stats| stats.rtt_p95_us)
     }
 }
 
 pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devices, DeviceIdMap)> {
-    let mut devices = Vec::new();
-    let mut device_ids: DeviceIdMap = DeviceIdMap::new();
-    let mut city_counts: BTreeMap<String, u32> = BTreeMap::new();
+    // First, collect all device metadata
+    // R canonical implementation merges devices with contributors (unittest.R line 25),
+    // which reorders devices by contributor_pk before assigning city-based sequential IDs
+    let mut device_data: Vec<(Pubkey, Pubkey, String, String)> = Vec::new(); // (device_pk, contributor_pk, city_code, owner)
 
     for (device_pk, device) in fetch_data.dz_serviceability.devices.iter() {
         let Some(contributor) = fetch_data
@@ -116,22 +118,43 @@ pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devic
             Network::MainnetBeta | Network::Mainnet => exchange.code.clone(),
         };
 
+        device_data.push((
+            *device_pk,
+            device.contributor_pk,
+            city_code,
+            contributor.owner.to_string(),
+        ));
+    }
+
+    // Sort by contributor_pk only (matches R's merge operation on line 25)
+    // R's merge preserves insertion order within each contributor group
+    device_data.sort_by_key(|item| item.1);
+
+    let mut devices = Vec::new();
+    let mut device_ids: DeviceIdMap = DeviceIdMap::new();
+    let mut city_counts: BTreeMap<String, u32> = BTreeMap::new();
+
+    for (device_pk, _contributor_pk, city_code, owner) in device_data {
         let city_upper = city_code.to_uppercase();
         let counter = city_counts.entry(city_upper.clone()).or_insert(0);
         *counter += 1;
 
-        // Use zero-padded numbering to keep IDs deterministic while ensuring
-        // the first three characters remain the city code as expected by
-        // network-shapley consolidation logic.
-        let shapley_id = format!("{}{:03}", city_upper, counter);
+        // Use 2-digit zero-padded numbering to match R canonical implementation
+        // (R uses sprintf("%02d", ...) on line 26)
+        let shapley_id = format!("{}{:02}", city_upper, counter);
 
-        device_ids.insert(*device_pk, shapley_id.clone());
+        // Debug: print NYC device ordering
+        if city_upper == "NYC" {
+            info!("NYC device mapping: {} -> {}", device_pk, shapley_id);
+        }
+
+        device_ids.insert(device_pk, shapley_id.clone());
 
         devices.push(Device {
             device: shapley_id,
             edge: DEFAULT_EDGE_BANDWIDTH_GBPS,
             // Use owner pubkey as operator ID
-            operator: contributor.owner.to_string(),
+            operator: owner,
         });
     }
 
@@ -154,26 +177,19 @@ pub fn build_public_links(
 ) -> Result<PublicLinks> {
     let mut exchange_to_location: BTreeMap<Pubkey, String> = BTreeMap::new();
 
-    // Build exchange to location mapping via devices
-    // device -> exchange_pk -> exchange_code
-    for device in fetch_data.dz_serviceability.devices.values() {
-        // Find the exchange for this device
-        if let Some(exchange) = fetch_data
-            .dz_serviceability
-            .exchanges
-            .get(&device.exchange_pk)
-        {
-            let city_code = match settings.network {
-                Network::MainnetBeta | Network::Mainnet => exchange.code.clone(),
-                Network::Testnet | Network::Devnet => exchange
-                    .code
-                    .strip_prefix('x')
-                    .unwrap_or(&exchange.code)
-                    .to_string(),
-            };
+    // Build exchange to location mapping from ALL exchanges (not just those with devices)
+    // This matches R canonical implementation which uses all exchanges
+    for (exchange_pk, exchange) in fetch_data.dz_serviceability.exchanges.iter() {
+        let city_code = match settings.network {
+            Network::MainnetBeta | Network::Mainnet => exchange.code.clone(),
+            Network::Testnet | Network::Devnet => exchange
+                .code
+                .strip_prefix('x')
+                .unwrap_or(&exchange.code)
+                .to_string(),
+        };
 
-            exchange_to_location.insert(device.exchange_pk, city_code.to_uppercase());
-        }
+        exchange_to_location.insert(*exchange_pk, city_code.to_uppercase());
     }
 
     // Group latencies by normalized city pairs
@@ -274,10 +290,10 @@ pub fn build_public_links(
 }
 
 pub fn build_private_links(
-    settings: &Settings,
+    _settings: &Settings,
     fetch_data: &FetchData,
-    telemetry_stats: &DZDTelemetryStatMap,
-    previous_epoch_cache: &PreviousEpochCache,
+    _telemetry_stats: &DZDTelemetryStatMap,
+    _previous_epoch_cache: &PreviousEpochCache,
     device_ids: &DeviceIdMap,
 ) -> PrivateLinks {
     let mut private_links = Vec::new();
@@ -307,93 +323,44 @@ pub fn build_private_links(
         // Convert bandwidth from bits/sec to Gbps for network-shapley
         let bandwidth_gbps = (link.bandwidth / BPS_TO_GBPS) as f64;
 
-        // Create circuit key to match telemetry stats
-        let circuit_key = format!("{}:{}:{}", link.side_a_pk, link.side_z_pk, link_pk);
+        // R canonical implementation (unittest.R lines 39-40) combines ALL samples for a link_pk,
+        // regardless of direction, then computes P95 from the combined samples.
+        // This matches: samples = unlist(sapply(which(schema == temp$pubkey), function(i) unlist(...)))
+        let mut combined_samples: Vec<f64> = Vec::new();
 
-        // Try both directions since telemetry is directional
-        let reverse_circuit_key = format!("{}:{}:{}", link.side_z_pk, link.side_a_pk, link_pk);
-
-        let stats = telemetry_stats
-            .get(&circuit_key)
-            .or_else(|| telemetry_stats.get(&reverse_circuit_key));
-
-        let latency_us = if let Some(stats) = stats {
-            // Check if this circuit has too much missing data
-            if stats.missing_data_ratio > settings.telemetry_defaults.missing_data_threshold {
-                // Try to get previous epoch average for this circuit
-                if settings.telemetry_defaults.enable_previous_epoch_lookup {
-                    // Try both forward and reverse circuit keys
-                    if let Some(prev_avg) = previous_epoch_cache
-                        .get_device_circuit_average(&circuit_key)
-                        .or_else(|| {
-                            previous_epoch_cache.get_device_circuit_average(&reverse_circuit_key)
-                        })
-                    {
-                        info!(
-                            "Private circuit {} has {:.1}% missing data, using previous epoch average: {:.2}ms",
-                            stats.circuit,
-                            stats.missing_data_ratio * 100.0,
-                            prev_avg / SEC_TO_MS
-                        );
-                        prev_avg
-                    } else {
-                        // No previous epoch data, fall back to configured default
-                        let default_latency_us =
-                            settings.telemetry_defaults.private_default_latency_ms * SEC_TO_MS;
-                        info!(
-                            "Private circuit {} has {:.1}% missing data, no previous epoch data, using default: {:.2}ms",
-                            stats.circuit,
-                            stats.missing_data_ratio * 100.0,
-                            settings.telemetry_defaults.private_default_latency_ms
-                        );
-                        default_latency_us
+        for sample in &fetch_data.dz_telemetry.device_latency_samples {
+            if sample.link_pk == *link_pk {
+                // Collect all valid (non-zero) samples from this record
+                for &raw_sample in &sample.samples {
+                    if raw_sample > 0 {
+                        combined_samples.push(raw_sample as f64);
                     }
-                } else {
-                    // Previous epoch lookup disabled, use configured default
-                    let default_latency_us =
-                        settings.telemetry_defaults.private_default_latency_ms * SEC_TO_MS;
-                    info!(
-                        "Private circuit {} has {:.1}% missing data, using default: {:.2}ms",
-                        stats.circuit,
-                        stats.missing_data_ratio * 100.0,
-                        settings.telemetry_defaults.private_default_latency_ms
-                    );
-                    default_latency_us
                 }
-            } else {
-                stats.rtt_mean_us
             }
-        } else {
-            // No stats at all - use penalty
+        }
+
+        // R canonical implementation (unittest.R line 40) only includes links with >20 valid samples
+        // Otherwise the link gets NA latency and is dropped (line 88)
+        if combined_samples.len() <= 20 {
             info!(
-                "Private circuit {} → {} has no telemetry data, using penalty: {:.2}ms",
+                "Private circuit {} → {} has only {} valid samples (need >20), skipping link (matches R line 40)",
                 from_device.code,
                 to_device.code,
-                PENALTY_RTT_US / SEC_TO_MS
+                combined_samples.len()
             );
-            PENALTY_RTT_US
-        };
+            continue;
+        }
 
-        let uptime = stats
-            .map(|stats| {
-                // Calculate time range in seconds
-                let time_range_seconds =
-                    (fetch_data.end_us.saturating_sub(fetch_data.start_us)) as f64 / SEC_TO_US;
+        // Compute P95 from combined samples using R type 7 quantile (linear interpolation)
+        // Matches R line 40: quantile(samples, 0.95) which defaults to type=7
+        combined_samples.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let latency_us = quantile_r_type7(&combined_samples, 0.95);
 
-                // Expected samples: one every 10 seconds
-                let expected_samples = time_range_seconds / 10.0;
+        // Convert latency from microseconds to milliseconds (R divides by 1e3 on line 40)
+        let latency_ms = latency_us / 1000.0;
 
-                // Uptime = actual samples / expected samples
-                if expected_samples > 0.0 {
-                    (stats.total_samples as f64 / expected_samples).clamp(0.0, 1.0)
-                } else {
-                    0.0
-                }
-            })
-            .unwrap_or(0.0); // Default to 0% if no stats found
-
-        // Convert latency from microseconds to milliseconds
-        let latency_ms = latency_us / SEC_TO_MS;
+        // R canonical implementation (unittest.R line 84) hardcodes Uptime = 1 for all private links
+        let uptime = 1.0;
 
         // network-shapley-rs expects the following units for PrivateLink:
         // - latency: milliseconds (ms) - we convert from microseconds
