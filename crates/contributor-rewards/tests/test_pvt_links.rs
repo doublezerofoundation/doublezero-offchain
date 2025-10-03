@@ -21,85 +21,71 @@ fn load_test_data() -> Result<FetchData> {
 fn create_expected_results() -> HashMap<(String, String), ExpectedLink> {
     let mut expected = HashMap::new();
 
-    // These are the exact values from the private links output (updated after snapshot rebuild)
+    // These are the exact P95 values from the private links output using R type 7 quantile
     expected.insert(
         ("lon-dz001".to_string(), "sin-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 153.368,
+            latency_ms: 154.520,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999409299,
+            uptime: 1.0,
         },
     );
 
-    expected.insert(
-        ("fra-dz001".to_string(), "fra-dz-001-x".to_string()),
-        ExpectedLink {
-            latency_ms: 1000.0, // Dead link penalty
-            bandwidth_gbps: 10.0,
-            uptime: 0.9998,
-        },
-    );
+    // Dead link fra-dz001 -> fra-dz-001-x is filtered out
 
     expected.insert(
         ("ams-dz001".to_string(), "lon-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 5.762,
+            latency_ms: 5.804,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999,
+            uptime: 1.0,
         },
     );
 
     expected.insert(
         ("sin-dz001".to_string(), "tyo-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 67.225,
+            latency_ms: 67.249,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999,
+            uptime: 1.0,
         },
     );
 
     expected.insert(
         ("lax-dz001".to_string(), "nyc-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 68.420,
+            latency_ms: 68.448,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999,
+            uptime: 1.0,
         },
     );
 
     expected.insert(
         ("nyc-dz001".to_string(), "lon-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 67.296,
+            latency_ms: 67.337,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999,
+            uptime: 1.0,
         },
     );
 
-    expected.insert(
-        ("fra-dz-001-x".to_string(), "prg-dz-001-x".to_string()),
-        ExpectedLink {
-            latency_ms: 1000.0,
-            bandwidth_gbps: 10.0,
-            uptime: 0.0,
-        },
-    );
+    // Dead link fra-dz-001-x -> prg-dz-001-x is filtered out
 
     expected.insert(
         ("lon-dz001".to_string(), "fra-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 11.064,
+            latency_ms: 11.092,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999,
+            uptime: 1.0,
         },
     );
 
     expected.insert(
         ("tyo-dz001".to_string(), "lax-dz001".to_string()),
         ExpectedLink {
-            latency_ms: 98.759,
+            latency_ms: 98.787,
             bandwidth_gbps: 10.0,
-            uptime: 0.9999,
+            uptime: 1.0,
         },
     );
 

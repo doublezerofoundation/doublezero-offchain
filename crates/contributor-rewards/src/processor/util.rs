@@ -321,9 +321,13 @@ mod tests {
         assert_eq!(stats.median_us, 300.0);
         assert_eq!(stats.min_us, 100.0);
         assert_eq!(stats.max_us, 500.0);
-        assert_eq!(stats.p90_us, 500.0);
-        assert_eq!(stats.p95_us, 500.0);
-        assert_eq!(stats.p99_us, 500.0);
+        // R type 7 quantile with linear interpolation:
+        // For n=5, p90: h=(5-1)*0.90=3.6, interpolate between index 3 (400) and 4 (500): 400 + 0.6*100 = 460
+        // For n=5, p95: h=(5-1)*0.95=3.8, interpolate between index 3 (400) and 4 (500): 400 + 0.8*100 = 480
+        // For n=5, p99: h=(5-1)*0.99=3.96, interpolate between index 3 (400) and 4 (500): 400 + 0.96*100 = 496
+        assert_eq!(stats.p90_us, 460.0);
+        assert_eq!(stats.p95_us, 480.0);
+        assert_eq!(stats.p99_us, 496.0);
         // Standard deviation calculation
         assert!((stats.stddev_us - 141.421).abs() < 0.01);
         assert!((stats.variance_us - 20000.0).abs() < 1.0);

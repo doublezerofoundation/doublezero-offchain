@@ -141,11 +141,6 @@ pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devic
         // (R uses sprintf("%02d", ...) on line 26)
         let shapley_id = format!("{}{:02}", city_upper, counter);
 
-        // Debug: print NYC device ordering
-        if city_upper == "NYC" {
-            info!("NYC device mapping: {} -> {}", device_pk, shapley_id);
-        }
-
         device_ids.insert(device_pk, shapley_id.clone());
 
         devices.push(Device {

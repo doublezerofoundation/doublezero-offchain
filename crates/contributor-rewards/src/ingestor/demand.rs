@@ -151,33 +151,32 @@ pub fn build_city_stats(
             .copied()
             .unwrap_or(0);
 
-        if let Some(device) = fetch_data.dz_serviceability.devices.get(&user.device_pk) {
-            if let Some(location) = fetch_data
+        if let Some(device) = fetch_data.dz_serviceability.devices.get(&user.device_pk)
+            && let Some(location) = fetch_data
                 .dz_serviceability
                 .locations
                 .get(&device.location_pk)
+        {
+            if let Some(exchange) = fetch_data
+                .dz_serviceability
+                .exchanges
+                .get(&device.exchange_pk)
             {
-                if let Some(exchange) = fetch_data
-                    .dz_serviceability
-                    .exchanges
-                    .get(&device.exchange_pk)
-                {
-                    let city_code = match settings.network {
-                        Network::Testnet | Network::Devnet => location.code.to_uppercase(),
-                        // On mainnet, the exchange.code directly has the name of the city
-                        Network::MainnetBeta | Network::Mainnet => exchange.code.to_uppercase(),
-                    };
+                let city_code = match settings.network {
+                    Network::Testnet | Network::Devnet => location.code.to_uppercase(),
+                    // On mainnet, the exchange.code directly has the name of the city
+                    Network::MainnetBeta | Network::Mainnet => exchange.code.to_uppercase(),
+                };
 
-                    let stats = city_stats.entry(city_code).or_insert(CityStat {
-                        validator_count: 0,
-                        total_stake_proxy: 0,
-                    });
-                    stats.validator_count += 1;
-                    stats.total_stake_proxy += stake_proxy;
+                let stats = city_stats.entry(city_code).or_insert(CityStat {
+                    validator_count: 0,
+                    total_stake_proxy: 0,
+                });
+                stats.validator_count += 1;
+                stats.total_stake_proxy += stake_proxy;
 
-                    processed_user_validator_pairs += 1;
-                    processed_slots += stake_proxy;
-                }
+                processed_user_validator_pairs += 1;
+                processed_slots += stake_proxy;
             }
         } else {
             pairs_without_device += 1;
