@@ -94,7 +94,8 @@ pub fn build_with_schedule(
     }
 
     // Process leaders and build city statistics
-    let city_stats = build_city_stats(settings, fetch_data, &validator_user_pairs, leader_schedule)?;
+    let city_stats =
+        build_city_stats(settings, fetch_data, &validator_user_pairs, leader_schedule)?;
     if city_stats.is_empty() {
         bail!("Could not build any city_stats!")
     }
@@ -126,8 +127,14 @@ pub fn build_city_stats(
     let total_user_validator_pairs = validator_user_pairs.len();
 
     info!("=== City Stats Debug ===");
-    info!("Total validators in leader schedule: {}", total_validators_in_schedule);
-    info!("Total slots in leader schedule: {}", total_slots_in_schedule);
+    info!(
+        "Total validators in leader schedule: {}",
+        total_validators_in_schedule
+    );
+    info!(
+        "Total slots in leader schedule: {}",
+        total_slots_in_schedule
+    );
     info!("User-validator pairs: {}", total_user_validator_pairs);
 
     let mut processed_user_validator_pairs = 0;
@@ -138,7 +145,11 @@ pub fn build_city_stats(
     // Note: R includes ALL users with devices, even if not in leader_schedule (assigns 0 slots)
     for (validator_pubkey, user) in validator_user_pairs {
         // Get stake_proxy from leader schedule, default to 0 if not found (matching R's all.x = TRUE)
-        let stake_proxy = leader_schedule.schedule_map.get(validator_pubkey).copied().unwrap_or(0);
+        let stake_proxy = leader_schedule
+            .schedule_map
+            .get(validator_pubkey)
+            .copied()
+            .unwrap_or(0);
 
         if let Some(device) = fetch_data.dz_serviceability.devices.get(&user.device_pk) {
             if let Some(location) = fetch_data
@@ -173,7 +184,10 @@ pub fn build_city_stats(
         }
     }
 
-    info!("Processed user-validator pairs: {}", processed_user_validator_pairs);
+    info!(
+        "Processed user-validator pairs: {}",
+        processed_user_validator_pairs
+    );
     info!("Processed slots: {}", processed_slots);
     info!("Pairs without device: {}", pairs_without_device);
     info!("R expects: 422 user-validator pairs, 97548 slots");
@@ -183,7 +197,10 @@ pub fn build_city_stats(
     let mut sorted_cities: Vec<_> = city_stats.iter().collect();
     sorted_cities.sort_by(|a, b| b.1.total_stake_proxy.cmp(&a.1.total_stake_proxy));
     for (city, stats) in sorted_cities.iter().take(5) {
-        info!("  {}: validators={}, slots={}", city, stats.validator_count, stats.total_stake_proxy);
+        info!(
+            "  {}: validators={}, slots={}",
+            city, stats.validator_count, stats.total_stake_proxy
+        );
     }
 
     Ok(city_stats)

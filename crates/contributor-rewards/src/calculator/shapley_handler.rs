@@ -2,9 +2,7 @@ use crate::{
     calculator::constants::{BPS_TO_GBPS, DEFAULT_EDGE_BANDWIDTH_GBPS, SEC_TO_MS},
     ingestor::{demand, fetcher::Fetcher, types::FetchData},
     processor::{
-        internet::InternetTelemetryStatMap,
-        telemetry::DZDTelemetryStatMap,
-        util::quantile_r_type7,
+        internet::InternetTelemetryStatMap, telemetry::DZDTelemetryStatMap, util::quantile_r_type7,
     },
     settings::{Settings, network::Network},
 };
