@@ -1,6 +1,8 @@
-use std::fs;
-use std::io::{self, Write};
-use std::process::Command;
+use std::{
+    fs,
+    io::{self, Write},
+    process::Command,
+};
 
 use anyhow::{Result, ensure};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
