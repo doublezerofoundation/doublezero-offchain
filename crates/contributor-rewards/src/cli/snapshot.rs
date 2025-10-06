@@ -51,6 +51,25 @@ pub struct SnapshotMetadata {
 }
 
 impl CompleteSnapshot {
+    /// Save snapshot to file
+    pub fn save_to_file(&self, path: &std::path::Path) -> Result<()> {
+        info!("Saving snapshot to: {:?}", path);
+
+        // Serialize snapshot
+        let contents = serde_json::to_string_pretty(self)?;
+
+        // Write to temporary file first (atomic write pattern)
+        let temp_path = path.with_extension("tmp");
+
+        std::fs::write(&temp_path, contents)?;
+
+        // Atomically rename temp file to final location
+        std::fs::rename(&temp_path, path)?;
+
+        info!("Snapshot saved successfully to: {:?}", path);
+        Ok(())
+    }
+
     /// Load and validate snapshot from file
     pub fn load_from_file(path: &std::path::Path) -> Result<Self> {
         info!("Loading snapshot from: {:?}", path);
