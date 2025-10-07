@@ -1982,6 +1982,7 @@ dependencies = [
  "borsh 1.5.7",
  "chrono",
  "clap",
+ "csv",
  "doublezero-program-tools",
  "doublezero-record",
  "doublezero-revenue-distribution",

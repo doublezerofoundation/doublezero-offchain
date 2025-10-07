@@ -6,6 +6,10 @@
 // generate merkle tree from debts
 // write record
 
+
+use std::fs::File;
+
+
 use doublezero_solana_client_tools::{log_info, log_warn};
 use leaky_bucket::RateLimiter;
 
@@ -33,11 +37,11 @@ const SOLANA_SEED_PREFIX: &[u8; 21] = b"solana_validator_debt";
 pub struct WriteSummary {
     pub validator_pubkey: String,
     pub total_debt: u64,
-    pub total_rewards: u64,
-    pub block_base_rewards: u64,
-    pub block_priority_rewards: u64,
-    pub inflation_rewards: u64,
-    pub jito_rewards: u64,
+    // pub total_rewards: u64,
+    // pub block_base_rewards: u64,
+    // pub block_priority_rewards: u64,
+    // pub inflation_rewards: u64,
+    // pub jito_rewards: u64,
 }
 
 fn serviceability_pubkey() -> Result<Pubkey> {
@@ -205,39 +209,54 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
     )
     .await?;
 
-    // gather rewards into debts for all validators
-    println!("Computing solana validator debt");
-    let computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = validator_rewards
-        .rewards
-        .iter()
-        .map(|reward| ComputedSolanaValidatorDebt {
-            node_id: Pubkey::from_str(&reward.validator_id).unwrap(),
-            amount: distribution
-                .solana_validator_fee_parameters
-                .base_block_rewards_pct
-                .mul_scalar(reward.block_base)
-                + distribution
-                    .solana_validator_fee_parameters
-                    .priority_block_rewards_pct
-                    .mul_scalar(reward.block_priority)
-                + distribution
-                    .solana_validator_fee_parameters
-                    .jito_tips_pct
-                    .mul_scalar(reward.jito)
-                + distribution
-                    .solana_validator_fee_parameters
-                    .inflation_rewards_pct
-                    .mul_scalar(reward.inflation)
-                + distribution
-                    .solana_validator_fee_parameters
-                    .fixed_sol_amount as u64,
-        })
-        .collect();
+    // // gather rewards into debts for all validators
+    // println!("Computing solana validator debt");
+    // let computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = validator_rewards
+    //     .rewards
+    //     .iter()
+    //     .map(|reward| ComputedSolanaValidatorDebt {
+    //         node_id: Pubkey::from_str(&reward.validator_id).unwrap(),
+    //         amount: distribution
+    //             .solana_validator_fee_parameters
+    //             .base_block_rewards_pct
+    //             .mul_scalar(reward.block_base)
+    //             + distribution
+    //                 .solana_validator_fee_parameters
+    //                 .priority_block_rewards_pct
+    //                 .mul_scalar(reward.block_priority)
+    //             + distribution
+    //                 .solana_validator_fee_parameters
+    //                 .jito_tips_pct
+    //                 .mul_scalar(reward.jito)
+    //             + distribution
+    //                 .solana_validator_fee_parameters
+    //                 .inflation_rewards_pct
+    //                 .mul_scalar(reward.inflation)
+    //             + distribution
+    //                 .solana_validator_fee_parameters
+    //                 .fixed_sol_amount as u64,
+    //     })
+    //     .collect();
 
     let recent_blockhash = solana_debt_calculator
         .ledger_rpc_client()
         .get_latest_blockhash()
         .await?;
+
+    let mut computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = Vec::new();
+
+let file = File::open("/Users/ben/src/malbec/fees/fees_859.csv")?;
+    let mut rdr = csv::Reader::from_reader(file);
+    for result in rdr.records() {
+        let record = result?; // Handle potential errors in reading a record
+        computed_solana_validator_debt_vec.push(ComputedSolanaValidatorDebt {
+            node_id: Pubkey::from_str_const(record.get(0).unwrap()),
+            amount: record.get(2).unwrap().parse::<u64>()?,
+        });
+    }
+
+
+
 
     let computed_solana_validator_debts = ComputedSolanaValidatorDebts {
         blockhash: recent_blockhash,
@@ -275,23 +294,27 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         .map(|debt| (debt.node_id.to_string(), debt.amount))
         .collect();
 
-    let write_summaries: Vec<WriteSummary> = validator_rewards
-        .rewards
+    let write_summaries: Vec<WriteSummary> = computed_solana_validator_debt_vec.clone()
+        // .rewards
         .into_iter()
         .map(|vr| WriteSummary {
-            validator_pubkey: vr.validator_id.clone(),
-            jito_rewards: vr.jito,
-            block_base_rewards: vr.block_base,
-            block_priority_rewards: vr.block_priority,
-            inflation_rewards: vr.inflation,
-            total_rewards: vr.total,
-            total_debt: debt_map[&vr.validator_id], // this should panic if not found
+
+            validator_pubkey: vr.node_id.to_string().clone(),
+            total_debt: debt_map[&vr.node_id.to_string()], // this should panic if not found
+            // validator_pubkey: vr.validator_id.clone(),
+            // jito_rewards: vr.jito,
+            // block_base_rewards: vr.block_base,
+            // block_priority_rewards: vr.block_priority,
+            // inflation_rewards: vr.inflation,
+            // total_rewards: vr.total,
+            // total_debt: debt_map[&vr.validator_id], // this should panic if not found
         })
         .collect();
 
     println!(
         "Validator rewards for solana epoch {} and validator debt for DoubleZero epoch {dz_epoch}:\n{}",
-        validator_rewards.epoch,
+        859,
+        // validator_rewards.epoch,
         Table::new(write_summaries).with(Style::psql().remove_horizontals())
     );
 
@@ -445,6 +468,8 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
         }
     }
 
+    dbg!(&pubkeys);
+    // let pubkeys = vec!["6LCpzSkg3Ud1SpCnsYtmByWiiW6tcjSPNmJQmFGQcwaL".to_string()];
     Ok(pubkeys)
 }
 
