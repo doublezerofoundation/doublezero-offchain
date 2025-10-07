@@ -3,6 +3,7 @@ use crate::{
     cli::snapshot::CompleteSnapshot,
     ingestor::{epoch::EpochFinder, fetcher::Fetcher},
     scheduler::state::SchedulerState,
+    settings::network::Network,
 };
 use anyhow::{Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
@@ -17,7 +18,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     signal,
@@ -370,7 +371,7 @@ impl ScheduleWorker {
 
     /// Create a snapshot for a given epoch
     async fn create_epoch_snapshot(&self, epoch: u64) -> Result<PathBuf> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         info!("Creating snapshot for epoch {}", epoch);
 
@@ -384,7 +385,6 @@ impl ScheduleWorker {
         })?;
 
         // Determine network prefix (mn for mainnet, tn for testnet)
-        use crate::settings::network::Network;
         let network_prefix = match self.orchestrator.settings.network {
             Network::MainnetBeta | Network::Mainnet => "mn",
             Network::Testnet => "tn",

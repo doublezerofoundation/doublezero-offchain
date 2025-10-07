@@ -95,7 +95,7 @@ impl InternetTelemetryProcessor {
             .map(|(pubkey, exch)| (*pubkey, exch.code.to_string()))
             .collect();
 
-        // Filter out ripeatlas samples (canonical R implementation excludes ripeatlas)
+        // Filter out ripeatlas samples (R implementation excludes ripeatlas)
         let filtered_samples: Vec<DZInternetLatencySamples> = fetch_data
             .dz_internet
             .internet_latency_samples

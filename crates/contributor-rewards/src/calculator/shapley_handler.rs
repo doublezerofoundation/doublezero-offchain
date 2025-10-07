@@ -85,9 +85,11 @@ impl PreviousEpochCache {
 
 pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devices, DeviceIdMap)> {
     // First, collect all device metadata
-    // R canonical implementation merges devices with contributors (unittest.R line 25),
+    // R implementation merges devices with contributors
     // which reorders devices by contributor_pk before assigning city-based sequential IDs
-    let mut device_data: Vec<(Pubkey, Pubkey, String, String)> = Vec::new(); // (device_pk, contributor_pk, city_code, owner)
+
+    // (device_pk, contributor_pk, city_code, owner)
+    let mut device_data: Vec<(Pubkey, Pubkey, String, String)> = Vec::new();
 
     for (device_pk, device) in fetch_data.dz_serviceability.devices.iter() {
         let Some(contributor) = fetch_data
@@ -124,7 +126,7 @@ pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devic
         ));
     }
 
-    // Sort by contributor_pk only (matches R's merge operation on line 25)
+    // Sort by contributor_pk only (matches R's merge operation)
     // R's merge preserves insertion order within each contributor group
     device_data.sort_by_key(|item| item.1);
 
@@ -137,8 +139,7 @@ pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devic
         let counter = city_counts.entry(city_upper.clone()).or_insert(0);
         *counter += 1;
 
-        // Use 2-digit zero-padded numbering to match R canonical implementation
-        // (R uses sprintf("%02d", ...) on line 26)
+        // Use 2-digit zero-padded numbering to match R implementation
         let shapley_id = format!("{}{:02}", city_upper, counter);
 
         device_ids.insert(device_pk, shapley_id.clone());
@@ -171,7 +172,7 @@ pub fn build_public_links(
     let mut exchange_to_location: BTreeMap<Pubkey, String> = BTreeMap::new();
 
     // Build exchange to location mapping from ALL exchanges (not just those with devices)
-    // This matches R canonical implementation which uses all exchanges
+    // This matches R implementation which uses all exchanges
     for (exchange_pk, exchange) in fetch_data.dz_serviceability.exchanges.iter() {
         let city_code = match settings.network {
             Network::MainnetBeta | Network::Mainnet => exchange.code.clone(),
@@ -282,13 +283,7 @@ pub fn build_public_links(
     Ok(public_links)
 }
 
-pub fn build_private_links(
-    _settings: &Settings,
-    fetch_data: &FetchData,
-    _telemetry_stats: &DZDTelemetryStatMap,
-    _previous_epoch_cache: &PreviousEpochCache,
-    device_ids: &DeviceIdMap,
-) -> PrivateLinks {
+pub fn build_private_links(fetch_data: &FetchData, device_ids: &DeviceIdMap) -> PrivateLinks {
     let mut private_links = Vec::new();
 
     for (link_pk, link) in fetch_data.dz_serviceability.links.iter() {
@@ -316,24 +311,25 @@ pub fn build_private_links(
         // Convert bandwidth from bits/sec to Gbps for network-shapley
         let bandwidth_gbps = (link.bandwidth / BPS_TO_GBPS) as f64;
 
-        // R canonical implementation (unittest.R lines 39-40) combines ALL samples for a link_pk,
+        // R implementation combines ALL samples for a link_pk,
         // regardless of direction, then computes P95 from the combined samples.
         // This matches: samples = unlist(sapply(which(schema == temp$pubkey), function(i) unlist(...)))
         let mut combined_samples: Vec<f64> = Vec::new();
 
         for sample in &fetch_data.dz_telemetry.device_latency_samples {
             if sample.link_pk == *link_pk {
-                // Collect all valid (non-zero) samples from this record
+                // Collect all valid samples, filtering out zeros and near-zero noise
+                // Matches R implementation: samples[which(samples > 1e-10)]
                 for &raw_sample in &sample.samples {
-                    if raw_sample > 0 {
+                    if raw_sample as f64 > 1e-10 {
                         combined_samples.push(raw_sample as f64);
                     }
                 }
             }
         }
 
-        // R canonical implementation (unittest.R line 40) only includes links with >20 valid samples
-        // Otherwise the link gets NA latency and is dropped (line 88)
+        // R implementation only includes links with >20 valid samples
+        // Otherwise the link gets NA latency and is dropped
         if combined_samples.len() <= 20 {
             info!(
                 "Private circuit {} → {} has only {} valid samples (need >20), skipping link (matches R line 40)",
@@ -352,7 +348,7 @@ pub fn build_private_links(
         // Convert latency from microseconds to milliseconds (R divides by 1e3 on line 40)
         let latency_ms = latency_us / 1000.0;
 
-        // R canonical implementation (unittest.R line 84) hardcodes Uptime = 1 for all private links
+        // R implementation hardcodes Uptime = 1 for all private links
         let uptime = 1.0;
 
         // network-shapley-rs expects the following units for PrivateLink:

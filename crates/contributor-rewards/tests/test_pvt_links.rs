@@ -176,9 +176,6 @@ mod tests {
         let telemetry_stats = DZDTelemetryProcessor::process(&fetch_data)?;
         println!("Processed {} device telemetry stats", telemetry_stats.len());
 
-        // Create an empty cache for tests
-        let previous_epoch_cache = PreviousEpochCache::new();
-
         // Build devices to obtain the shapley device identifiers and mapping back to original codes
         let (devices, device_ids) = build_devices(&fetch_data, &settings.network)?;
         println!("Constructed {} shapley device identifiers", devices.len());
@@ -191,13 +188,7 @@ mod tests {
         }
 
         // Generate private links
-        let private_links = build_private_links(
-            &settings,
-            &fetch_data,
-            &telemetry_stats,
-            &previous_epoch_cache,
-            &device_ids,
-        );
+        let private_links = build_private_links(&fetch_data, &device_ids);
 
         // Print results for verification
         println!("\nPrivate Links Generated:");

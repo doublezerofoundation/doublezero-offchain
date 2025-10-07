@@ -106,13 +106,7 @@ impl PreparedData {
         let (devices, device_ids) = build_and_log_devices(&fetcher.settings, &fetch_data)?;
 
         // Build private links
-        let private_links = build_and_log_private_links(
-            &fetcher.settings,
-            &fetch_data,
-            &device_telemetry,
-            &previous_epoch_cache,
-            &device_ids,
-        );
+        let private_links = build_and_log_private_links(&fetch_data, &device_ids);
 
         // Build public links
         let public_links = build_and_log_public_links(
@@ -218,13 +212,7 @@ impl PreparedData {
         let previous_epoch_cache = PreviousEpochCache::new();
 
         // Build private links
-        let private_links = build_and_log_private_links(
-            settings,
-            fetch_data,
-            &device_telemetry,
-            &previous_epoch_cache,
-            &device_ids,
-        );
+        let private_links = build_and_log_private_links(fetch_data, &device_ids);
 
         // Build public links
         let public_links = build_and_log_public_links(
@@ -332,20 +320,8 @@ fn build_and_log_devices(
 }
 
 /// Build private links and log output
-fn build_and_log_private_links(
-    settings: &Settings,
-    fetch_data: &FetchData,
-    stat_map: &DZDTelemetryStatMap,
-    previous_epoch_cache: &PreviousEpochCache,
-    device_ids: &DeviceIdMap,
-) -> PrivateLinks {
-    let private_links = build_private_links(
-        settings,
-        fetch_data,
-        stat_map,
-        previous_epoch_cache,
-        device_ids,
-    );
+fn build_and_log_private_links(fetch_data: &FetchData, device_ids: &DeviceIdMap) -> PrivateLinks {
+    let private_links = build_private_links(fetch_data, device_ids);
     info!("Private Links:\n{}", print_private_links(&private_links));
     private_links
 }
