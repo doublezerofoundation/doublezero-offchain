@@ -449,7 +449,7 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
 }
 
 fn has_overlapping_epoch(first_slot_solana_epoch: &u64, last_slot_solana_epoch: &u64) -> bool {
-    first_slot_solana_epoch >= last_slot_solana_epoch
+    first_slot_solana_epoch > last_slot_solana_epoch
 }
 
 #[cfg(test)]
@@ -626,7 +626,7 @@ mod tests {
 
         mock_solana_debt_calculator
             .expect_get_leader_schedule()
-            .returning(move || Ok(leader_schedule.clone()));
+            .returning(move |_| Ok(leader_schedule.clone()));
 
         let mock_block = UiConfirmedBlock {
             num_reward_partitions: Some(1),
