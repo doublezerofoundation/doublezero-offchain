@@ -1,12 +1,13 @@
 use crate::{
     calculator::{orchestrator::Orchestrator, recorder::compute_record_address},
-    cli::snapshot::CompleteSnapshot,
+    cli::snapshot::{CompleteSnapshot, SnapshotMetadata},
     ingestor::{epoch::EpochFinder, fetcher::Fetcher},
     scheduler::state::SchedulerState,
     settings::network::Network,
 };
 use anyhow::{Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
+use chrono::Utc;
 use doublezero_program_tools::zero_copy;
 use doublezero_revenue_distribution::state::ProgramConfig;
 use solana_client::client_error::ClientError as SolanaClientError;
@@ -440,8 +441,7 @@ impl ScheduleWorker {
         };
 
         // Create metadata
-        use chrono::Utc;
-        let metadata = crate::cli::snapshot::SnapshotMetadata {
+        let metadata = SnapshotMetadata {
             created_at: Utc::now().to_rfc3339(),
             network: format!("{:?}", self.orchestrator.settings.network),
             exchanges_count: fetch_data.dz_serviceability.exchanges.len(),

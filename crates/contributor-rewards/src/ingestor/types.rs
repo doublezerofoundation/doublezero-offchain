@@ -80,6 +80,10 @@ impl FetchData {
 }
 
 /// Struct for all network data
+///
+/// Note: Use IndexMap to preserve insertion order during serialization/deserialization. This
+/// ensures deterministic JSON output and consistent iteration order, which is critical for
+/// snapshot-based reward calculations that must match R implementation exactly.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct DZServiceabilityData {
     #[serde(
