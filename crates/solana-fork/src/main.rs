@@ -21,7 +21,7 @@ use solana_sdk::{pubkey::Pubkey, signer::Signer};
 const ACCOUNTS_PATH: &str = "forked-accounts";
 
 #[derive(Serialize)]
-struct AccountData {
+struct WrittenAccountInfo {
     lamports: u64,
     data: (String, String),
     owner: String,
@@ -32,9 +32,9 @@ struct AccountData {
 }
 
 #[derive(Serialize)]
-struct AccountWrapper {
+struct WrittenAccount {
     pubkey: String,
-    account: AccountData,
+    account: WrittenAccountInfo,
 }
 
 #[derive(Parser, Debug)]
@@ -45,6 +45,10 @@ struct Args {
     #[arg(long)]
     upgrade_authority: Option<Pubkey>,
 
+    /// Overwrite existing accounts without prompting.
+    #[arg(long)]
+    overwrite_accounts: bool,
+
     #[command(flatten)]
     solana_connection_options: SolanaConnectionOptions,
 }
@@ -52,14 +56,15 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let Args {
-        upgrade_authority,
+        upgrade_authority: upgrade_authority_key,
+        overwrite_accounts: should_overwrite_accounts,
         solana_connection_options,
     } = Args::parse();
 
     let connection = SolanaConnection::try_from(solana_connection_options)?;
 
     // Get upgrade authority from argument or default keypair.
-    let upgrade_authority = match upgrade_authority {
+    let upgrade_authority_key = match upgrade_authority_key {
         Some(key) => key,
         None => {
             let keypair = try_load_keypair(None)?;
@@ -67,34 +72,23 @@ async fn main() -> Result<()> {
         }
     };
 
-    let should_fetch = if fs::metadata(ACCOUNTS_PATH).is_ok() {
-        // If the directory exists, prompt user.
-        print!(
-            "Directory {} already exists. Clear contents and fetch fresh data? [y/N]: ",
+    let should_fetch = if should_overwrite_accounts {
+        // Force remove and recreate the directory.
+        if fs::metadata(ACCOUNTS_PATH).is_ok() {
+            fs::remove_dir_all(ACCOUNTS_PATH)?;
+        }
+
+        true
+    } else if fs::metadata(ACCOUNTS_PATH).is_ok() {
+        // If the directory exists and overwrite_accounts is false, skip
+        // fetching.
+        eprintln!(
+            "Directory {} already exists. Use --overwrite-accounts to force a new fork.",
             ACCOUNTS_PATH
         );
-        io::stdout().flush()?;
 
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-
-        if input.trim().to_lowercase().starts_with('y') {
-            // Clear directory contents.
-            for entry in fs::read_dir(ACCOUNTS_PATH)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_file() {
-                    fs::remove_file(path)?;
-                }
-            }
-
-            true
-        } else {
-            false
-        }
+        false
     } else {
-        // If the directory does not exist, create it.
-        fs::create_dir_all(ACCOUNTS_PATH)?;
         true
     };
 
@@ -102,6 +96,8 @@ async fn main() -> Result<()> {
     let passport_program_path = format!("{}/passport.so", ACCOUNTS_PATH);
 
     if should_fetch {
+        fs::create_dir_all(ACCOUNTS_PATH)?;
+
         let config = RpcProgramAccountsConfig {
             filters: None,
             account_config: RpcAccountInfoConfig {
@@ -169,11 +165,11 @@ async fn main() -> Result<()> {
         .arg("--upgradeable-program")
         .arg(REVENUE_DISTRIBUTION_PROGRAM_ID.to_string())
         .arg(&revenue_distribution_program_path)
-        .arg(upgrade_authority.to_string())
+        .arg(upgrade_authority_key.to_string())
         .arg("--upgradeable-program")
         .arg(PASSPORT_PROGRAM_ID.to_string())
         .arg(&passport_program_path)
-        .arg(upgrade_authority.to_string())
+        .arg(upgrade_authority_key.to_string())
         .status()?;
 
     ensure!(
@@ -199,7 +195,7 @@ async fn try_fetch_and_write_program_accounts(
         .await?;
 
     for (key, account) in &accounts {
-        let account_data = AccountData {
+        let account_data = WrittenAccountInfo {
             lamports: account.lamports,
             data: (BASE64.encode(&account.data), "base64".to_string()),
             owner: account.owner.to_string(),
@@ -208,7 +204,7 @@ async fn try_fetch_and_write_program_accounts(
             space: account.data.len(),
         };
 
-        let wrapper = AccountWrapper {
+        let wrapper = WrittenAccount {
             pubkey: key.to_string(),
             account: account_data,
         };
