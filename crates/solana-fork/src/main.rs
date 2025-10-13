@@ -1,14 +1,10 @@
-use std::{
-    fs,
-    io::{self, Write},
-    process::Command,
-};
+use std::{fs, process::Command};
 
 use anyhow::{Result, ensure};
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use clap::Parser;
 use doublezero_passport::ID as PASSPORT_PROGRAM_ID;
-use doublezero_revenue_distribution::ID as REVENUE_DISTRIBUTION_PROGRAM_ID;
+use doublezero_revenue_distribution::{ID as REVENUE_DISTRIBUTION_PROGRAM_ID, env};
 use doublezero_solana_client_tools::{
     payer::try_load_keypair,
     rpc::{SolanaConnection, SolanaConnectionOptions},
@@ -16,9 +12,10 @@ use doublezero_solana_client_tools::{
 use serde::Serialize;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
-use solana_sdk::{pubkey::Pubkey, signer::Signer};
+use solana_sdk::{account::Account, pubkey::Pubkey, signer::Signer};
 
 const ACCOUNTS_PATH: &str = "forked-accounts";
+const TMP_ACCOUNTS_PATH: &str = "forked-accounts.tmp";
 
 #[derive(Serialize)]
 struct WrittenAccountInfo {
@@ -38,11 +35,13 @@ struct WrittenAccount {
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
+#[command(term_width = 0)]
+#[command(version = option_env!("BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")))]
+#[command(about = "Solana local validator fork of DoubleZero programs", long_about = None)]
 struct Args {
-    /// Upgrade authority for the program (defaults to pubkey from default
+    /// Upgrade authority for the program (defaults to pubkey from Solana config
     /// keypair).
-    #[arg(long)]
+    #[arg(long, value_name = "PUBKEY")]
     upgrade_authority: Option<Pubkey>,
 
     /// Overwrite existing accounts without prompting.
@@ -61,7 +60,8 @@ async fn main() -> Result<()> {
         solana_connection_options,
     } = Args::parse();
 
-    let connection = SolanaConnection::try_from(solana_connection_options)?;
+    let mut connection = SolanaConnection::try_from(solana_connection_options)?;
+    connection.cache_if_mainnet().await?;
 
     // Get upgrade authority from argument or default keypair.
     let upgrade_authority_key = match upgrade_authority_key {
@@ -72,78 +72,90 @@ async fn main() -> Result<()> {
         }
     };
 
-    let should_fetch = if should_overwrite_accounts {
-        // Force remove and recreate the directory.
-        if fs::metadata(ACCOUNTS_PATH).is_ok() {
-            fs::remove_dir_all(ACCOUNTS_PATH)?;
-        }
+    if fs::metadata(ACCOUNTS_PATH).is_err() || should_overwrite_accounts {
+        fs::create_dir_all(TMP_ACCOUNTS_PATH)?;
 
-        true
-    } else if fs::metadata(ACCOUNTS_PATH).is_ok() {
-        // If the directory exists and overwrite_accounts is false, skip
-        // fetching.
-        eprintln!(
-            "Directory {} already exists. Use --overwrite-accounts to force a new fork.",
-            ACCOUNTS_PATH
-        );
+        let fetch_result = async {
+            // Fetch 2Z mint account.
 
-        false
-    } else {
-        true
-    };
+            let token_2z_mint_key = if connection.is_mainnet {
+                env::mainnet::DOUBLEZERO_MINT_KEY
+            } else {
+                env::development::DOUBLEZERO_MINT_KEY
+            };
 
-    let revenue_distribution_program_path = format!("{}/revenue_distribution.so", ACCOUNTS_PATH);
-    let passport_program_path = format!("{}/passport.so", ACCOUNTS_PATH);
+            let mint_account = connection.get_account(&token_2z_mint_key).await?;
+            write_account_to_file(&token_2z_mint_key, &mint_account, TMP_ACCOUNTS_PATH)?;
+            println!("Wrote 2Z mint account to {TMP_ACCOUNTS_PATH}/");
 
-    if should_fetch {
-        fs::create_dir_all(ACCOUNTS_PATH)?;
+            // Now fetch program accounts.
 
-        let config = RpcProgramAccountsConfig {
-            filters: None,
-            account_config: RpcAccountInfoConfig {
-                encoding: Some(UiAccountEncoding::Base64),
+            let config = RpcProgramAccountsConfig {
+                filters: None,
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64),
+                    ..Default::default()
+                },
                 ..Default::default()
-            },
-            ..Default::default()
+            };
+
+            // Fetch all program accounts.
+
+            try_fetch_and_write_program_accounts(
+                &connection,
+                &REVENUE_DISTRIBUTION_PROGRAM_ID,
+                "Revenue Distribution",
+                TMP_ACCOUNTS_PATH,
+                &config,
+            )
+            .await?;
+
+            try_fetch_and_write_program_accounts(
+                &connection,
+                &PASSPORT_PROGRAM_ID,
+                "Passport",
+                TMP_ACCOUNTS_PATH,
+                &config,
+            )
+            .await?;
+
+            // Dump programs.
+
+            try_dump_program(
+                &connection,
+                &REVENUE_DISTRIBUTION_PROGRAM_ID,
+                "Revenue Distribution",
+                &format!("{TMP_ACCOUNTS_PATH}/revenue_distribution.so"),
+            )?;
+
+            try_dump_program(
+                &connection,
+                &PASSPORT_PROGRAM_ID,
+                "Passport",
+                &format!("{TMP_ACCOUNTS_PATH}/passport.so"),
+            )?;
+
+            Ok(())
         };
 
-        // Fetch all program accounts.
-
-        try_fetch_and_write_program_accounts(
-            &connection,
-            &REVENUE_DISTRIBUTION_PROGRAM_ID,
-            "revenue distribution",
-            ACCOUNTS_PATH,
-            &config,
-        )
-        .await?;
-
-        try_fetch_and_write_program_accounts(
-            &connection,
-            &PASSPORT_PROGRAM_ID,
-            "passport",
-            ACCOUNTS_PATH,
-            &config,
-        )
-        .await?;
-
-        // Dump programs.
-
-        try_dump_program(
-            &connection,
-            &REVENUE_DISTRIBUTION_PROGRAM_ID,
-            "Revenue distribution",
-            &revenue_distribution_program_path,
-        )?;
-
-        try_dump_program(
-            &connection,
-            &PASSPORT_PROGRAM_ID,
-            "Passport",
-            &passport_program_path,
-        )?;
+        match fetch_result.await {
+            Ok(_) => {
+                // Remove existing accounts directory if it exists, then rename
+                // temporary directory to final location.
+                if fs::metadata(ACCOUNTS_PATH).is_ok() {
+                    fs::remove_dir_all(ACCOUNTS_PATH)?;
+                }
+                fs::rename(TMP_ACCOUNTS_PATH, ACCOUNTS_PATH)?;
+            }
+            Err(e) => {
+                fs::remove_dir_all(TMP_ACCOUNTS_PATH)?;
+                return Err(e);
+            }
+        }
     } else {
-        println!("Using existing accounts from {}/", ACCOUNTS_PATH);
+        eprintln!(
+            "Directory {ACCOUNTS_PATH} already exists. Use --overwrite-accounts to force a new fork"
+        );
     }
 
     // Check if solana-test-validator is available.
@@ -153,7 +165,7 @@ async fn main() -> Result<()> {
 
     ensure!(
         check.status.success(),
-        "solana-test-validator not found. Please install Solana CLI tools."
+        "solana-test-validator not found. Please install Solana CLI tools"
     );
 
     let status = Command::new("solana-test-validator")
@@ -164,24 +176,47 @@ async fn main() -> Result<()> {
         .arg("--reset")
         .arg("--upgradeable-program")
         .arg(REVENUE_DISTRIBUTION_PROGRAM_ID.to_string())
-        .arg(&revenue_distribution_program_path)
+        .arg(format!("{ACCOUNTS_PATH}/revenue_distribution.so"))
         .arg(upgrade_authority_key.to_string())
         .arg("--upgradeable-program")
         .arg(PASSPORT_PROGRAM_ID.to_string())
-        .arg(&passport_program_path)
+        .arg(format!("{ACCOUNTS_PATH}/passport.so"))
         .arg(upgrade_authority_key.to_string())
         .status()?;
 
     ensure!(
         status.success(),
-        "solana-test-validator exited with status: {}",
-        status
+        "solana-test-validator exited with status: {status}"
     );
 
     Ok(())
 }
 
 //
+
+fn write_account_to_file(
+    account_key: &Pubkey,
+    account: &Account,
+    accounts_dir: &str,
+) -> Result<()> {
+    let wrapper = WrittenAccount {
+        pubkey: account_key.to_string(),
+        account: WrittenAccountInfo {
+            lamports: account.lamports,
+            data: (BASE64.encode(&account.data), "base64".to_string()),
+            owner: account.owner.to_string(),
+            executable: account.executable,
+            rent_epoch: account.rent_epoch,
+            space: account.data.len(),
+        },
+    };
+
+    let json = serde_json::to_string_pretty(&wrapper)?;
+    let file_path = format!("{accounts_dir}/{account_key}.json");
+    fs::write(&file_path, json)?;
+
+    Ok(())
+}
 
 async fn try_fetch_and_write_program_accounts(
     connection: &SolanaConnection,
@@ -195,23 +230,7 @@ async fn try_fetch_and_write_program_accounts(
         .await?;
 
     for (key, account) in &accounts {
-        let account_data = WrittenAccountInfo {
-            lamports: account.lamports,
-            data: (BASE64.encode(&account.data), "base64".to_string()),
-            owner: account.owner.to_string(),
-            executable: account.executable,
-            rent_epoch: account.rent_epoch,
-            space: account.data.len(),
-        };
-
-        let wrapper = WrittenAccount {
-            pubkey: key.to_string(),
-            account: account_data,
-        };
-
-        let json = serde_json::to_string_pretty(&wrapper)?;
-        let file_path = format!("{}/{}.json", accounts_dir, key);
-        fs::write(&file_path, json)?;
+        write_account_to_file(key, account, accounts_dir)?;
     }
 
     println!(
