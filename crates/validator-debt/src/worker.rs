@@ -315,15 +315,18 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         debts: computed_solana_validator_debt_vec.clone(),
     };
 
-    // read record
-    create_or_validate_ledger_record(
-        solana_debt_calculator,
-        &transaction,
-        computed_solana_validator_debts.clone(),
-        seed,
-        recent_blockhash,
-    )
-    .await?;
+    if transaction.dry_run {
+        println!("posting to ledger is not supported with `--dry-run`");
+    } else {
+        create_or_validate_ledger_record(
+            solana_debt_calculator,
+            &transaction,
+            computed_solana_validator_debts.clone(),
+            seed,
+            recent_blockhash,
+        )
+        .await?;
+    }
 
     if post_to_ledger_only {
         bail!("Debt posted only to DoubleZero Ledger and process exited")
