@@ -117,20 +117,35 @@ async fn execute_pay_solana_validator_debt(
         .pay_solana_validator_debt(&wallet.connection.rpc_client, computed_debt, epoch)
         .await?;
 
-    validator_debt::post_debt_collection_to_slack(tx_results.len(), epoch, wallet.dry_run).await?;
+    let mut filename: Option<String> = None;
 
     if let Some(ExportFormat::Csv) = export {
         let now = Utc::now();
         let timestamp_milliseconds: i64 = now.timestamp_millis();
-        let filename = format!("dz_epoch_{epoch}_{timestamp_milliseconds}.csv");
-        let mut writer = csv::Writer::from_path(filename)?;
+        let string_filename = if wallet.dry_run {
+            format!("DRY_RUN_dz_epoch_{epoch}_pay_solana_debt_{timestamp_milliseconds}.csv")
+        } else {
+            format!("dz_epoch_{epoch}_pay_solana_debt_{timestamp_milliseconds}.csv")
+        };
+        let mut writer = csv::Writer::from_path(string_filename.clone())?;
 
-        for tx_result in tx_results {
+        for tx_result in tx_results.collection_results {
             writer.serialize(tx_result)?;
         }
-
+        filename = Some(string_filename);
         writer.flush()?;
     };
+
+    validator_debt::post_debt_collection_to_slack(
+        tx_results.total_transactions_attempted,
+        tx_results.successful_transactions,
+        tx_results.insufficient_funds,
+        tx_results.already_paid,
+        epoch,
+        filename,
+        wallet.dry_run,
+    )
+    .await?;
 
     Ok(())
 }
