@@ -1,7 +1,7 @@
 use anyhow::Result;
 use borsh::de::BorshDeserialize;
 use chrono::Utc;
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, Wallet},
     rpc::DoubleZeroLedgerConnectionOptions,
@@ -13,6 +13,11 @@ use doublezero_solana_validator_debt::{
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum ExportFormat {
+    Csv,
+}
 
 #[derive(Debug, Args)]
 pub struct RevenueDistributionRelayCommand {
@@ -27,8 +32,8 @@ pub enum RevenueDistributionRelaySubcommand {
         epoch: u64,
 
         /// export results: csv
-        #[arg(long)]
-        export: Option<String>,
+        #[arg(long, value_enum)]
+        export: Option<ExportFormat>,
 
         #[command(flatten)]
         solana_payer_options: SolanaPayerOptions,
@@ -65,7 +70,7 @@ pub async fn execute_pay_solana_validator_debt(
     epoch: u64,
     solana_payer_options: SolanaPayerOptions,
     dz_ledger_connection_options: DoubleZeroLedgerConnectionOptions,
-    export: Option<String>,
+    export: Option<ExportFormat>,
 ) -> Result<()> {
     let dz_epoch_bytes = epoch.to_le_bytes();
     let seeds: &[&[u8]] = &[SOLANA_SEED_PREFIX, &dz_epoch_bytes];
@@ -90,7 +95,7 @@ pub async fn execute_pay_solana_validator_debt(
         .pay_solana_validator_debt(&wallet.connection.rpc_client, deserialized, epoch)
         .await?;
 
-    if let Some("csv") = export.as_deref() {
+    if let Some(ExportFormat::Csv) = export {
         let now = Utc::now();
         let timestamp_milliseconds: i64 = now.timestamp_millis();
         let filename = format!("dz_epoch_{epoch}_{timestamp_milliseconds}.csv");
