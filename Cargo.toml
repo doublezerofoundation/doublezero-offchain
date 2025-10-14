@@ -3,11 +3,11 @@ members = [
     "crates/contributor-rewards",
     "crates/scheduled-command",
     "crates/sentinel",
+    "crates/slack-notifier",
     "crates/solana-interface/sol-conversion",
     "crates/solana-admin-cli/passport",
     "crates/solana-admin-cli/revenue-distribution",
     "crates/solana-admin-cli/sol-conversion",
-    "crates/solana-cli",
     "crates/solana-client-tools",
     "crates/solana-fork",
     "crates/validator-debt",
@@ -143,6 +143,9 @@ path = "crates/solana-client-tools"
 
 [workspace.dependencies.doublezero-solana-validator-debt]
 path = "crates/validator-debt"
+
+[workspace.dependencies.slack-notifier]
+path = "crates/slack-notifier"
 
 [profile.release]
 lto = true

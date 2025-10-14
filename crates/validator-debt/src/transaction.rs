@@ -200,6 +200,7 @@ impl Transaction {
             let simulation_response = solana_rpc_client.simulate_transaction(transaction).await?;
             Ok(Some(simulation_response.value.logs.unwrap().join(", ")))
         } else {
+            anyhow::bail!("fuuuuuuuu");
             let tx_sig = solana_rpc_client
                 .send_and_confirm_transaction(transaction)
                 .await?;
