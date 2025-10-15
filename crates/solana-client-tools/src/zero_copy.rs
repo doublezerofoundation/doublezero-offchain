@@ -1,6 +1,6 @@
 use anyhow::Result;
 use bytemuck::Pod;
-use doublezero_program_tools::{zero_copy, PrecomputedDiscriminator};
+use doublezero_program_tools::{PrecomputedDiscriminator, zero_copy};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 

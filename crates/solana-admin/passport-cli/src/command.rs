@@ -1,12 +1,12 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::{Args, Subcommand};
 use doublezero_passport::{
+    ID,
     instruction::{
-        account::{ConfigureProgramAccounts, InitializeProgramAccounts, SetAdminAccounts},
         PassportInstructionData, ProgramConfiguration, ProgramFlagConfiguration,
+        account::{ConfigureProgramAccounts, InitializeProgramAccounts, SetAdminAccounts},
     },
     state::ProgramConfig,
-    ID,
 };
 use doublezero_program_tools::{get_program_data_address, instruction::try_build_instruction};
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
@@ -243,7 +243,9 @@ pub async fn execute_configure_program(
 
     match (pause_request_access, unpause_request_access) {
         (true, true) => {
-            bail!("Cannot use both --pause_request_access and --unpause_request_access at the same time");
+            bail!(
+                "Cannot use both --pause_request_access and --unpause_request_access at the same time"
+            );
         }
         (true, false) => {
             let configure_program_ix = try_build_configure_program_instruction(

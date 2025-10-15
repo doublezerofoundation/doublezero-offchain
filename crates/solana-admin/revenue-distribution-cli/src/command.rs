@@ -1,18 +1,18 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{Result, anyhow, bail};
 use clap::{Args, Subcommand};
 use doublezero_program_tools::{get_program_data_address, instruction::try_build_instruction};
 use doublezero_revenue_distribution::{
+    ID,
     instruction::{
+        ProgramConfiguration, ProgramFlagConfiguration, RevenueDistributionInstructionData,
         account::{
             ConfigureProgramAccounts, InitializeContributorRewardsAccounts,
             InitializeJournalAccounts, InitializeProgramAccounts,
             InitializeSwapDestinationAccounts, MigrateProgramAccounts, SetAdminAccounts,
             SetRewardsManagerAccounts,
         },
-        ProgramConfiguration, ProgramFlagConfiguration, RevenueDistributionInstructionData,
     },
     state::{self, ContributorRewards, Journal, ProgramConfig},
-    ID,
 };
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
 use solana_sdk::{
