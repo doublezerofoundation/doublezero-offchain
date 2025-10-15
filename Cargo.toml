@@ -3,6 +3,8 @@ members = [
     "crates/contributor-rewards",
     "crates/scheduled-command",
     "crates/sentinel",
+    "crates/solana-admin/passport-cli",
+    "crates/solana-admin/revenue-distribution-cli",
     "crates/solana-cli",
     "crates/solana-client-tools",
     "crates/solana-fork",

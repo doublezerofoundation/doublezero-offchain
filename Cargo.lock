@@ -1818,6 +1818,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "doublezero-passport-admin-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "doublezero-passport",
+ "doublezero-program-tools",
+ "doublezero-solana-client-tools",
+ "solana-sdk",
+ "tokio",
+]
+
+[[package]]
 name = "doublezero-program-common"
 version = "0.6.4"
 source = "git+https://github.com/malbeclabs/doublezero?rev=89a675d#89a675daff59fd2f4bb30f130b7859d201c35151"
@@ -1883,6 +1896,19 @@ dependencies = [
  "spl-associated-token-account-interface",
  "spl-token",
  "svm-hash",
+]
+
+[[package]]
+name = "doublezero-revenue-distribution-admin-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "doublezero-program-tools",
+ "doublezero-revenue-distribution",
+ "doublezero-solana-client-tools",
+ "solana-sdk",
+ "tokio",
 ]
 
 [[package]]
