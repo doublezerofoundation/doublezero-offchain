@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, ensure};
-use clap::Subcommand;
+use clap::{Args, Subcommand};
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
 use doublezero_revenue_distribution::state::Journal;
 use doublezero_sol_conversion_interface::{
@@ -29,7 +29,7 @@ pub enum SolConversionAdminSubcommand {
         fixed_fill_quantity: u64,
 
         #[arg(long, value_name = "SECONDS")]
-        price_maximum_age: i64,
+        price_maximum_age_seconds: u32,
 
         #[arg(long, value_name = "DECIMAL")]
         coefficient: String,
@@ -49,36 +49,7 @@ pub enum SolConversionAdminSubcommand {
         solana_payer_options: SolanaPayerOptions,
     },
 
-    Configure {
-        /// Whether to pause the program. Cannot be used with --unpause.
-        #[arg(long)]
-        pause: bool,
-
-        /// Whether to unpause the program. Cannot be used with --pause.
-        #[arg(long)]
-        unpause: bool,
-
-        #[arg(long, value_name = "PUBKEY")]
-        oracle: Option<Pubkey>,
-
-        #[arg(long, value_name = "LAMPORTS")]
-        fixed_fill_quantity: Option<u64>,
-
-        #[arg(long, value_name = "SECONDS")]
-        price_maximum_age: Option<i64>,
-
-        #[arg(long, value_name = "DECIMAL")]
-        coefficient: Option<String>,
-
-        #[arg(long, value_name = "PERCENTAGE")]
-        max_discount_rate_pct: Option<String>,
-
-        #[arg(long, value_name = "PERCENTAGE")]
-        min_discount_rate_pct: Option<String>,
-
-        #[command(flatten)]
-        solana_payer_options: SolanaPayerOptions,
-    },
+    Configure(ConfigureCommand),
 }
 
 impl SolConversionAdminSubcommand {
@@ -86,14 +57,14 @@ impl SolConversionAdminSubcommand {
         match self {
             Self::Initialize {
                 fixed_fill_quantity,
-                price_maximum_age,
+                price_maximum_age_seconds,
                 coefficient,
                 max_discount_rate_pct,
                 solana_payer_options,
             } => {
                 execute_initialize(
                     fixed_fill_quantity,
-                    price_maximum_age,
+                    price_maximum_age_seconds,
                     coefficient,
                     max_discount_rate_pct,
                     solana_payer_options,
@@ -104,37 +75,14 @@ impl SolConversionAdminSubcommand {
                 admin_key,
                 solana_payer_options,
             } => execute_set_admin(admin_key, solana_payer_options).await,
-            Self::Configure {
-                pause,
-                unpause,
-                oracle,
-                fixed_fill_quantity,
-                price_maximum_age,
-                coefficient,
-                max_discount_rate_pct,
-                min_discount_rate_pct,
-                solana_payer_options,
-            } => {
-                execute_configure(
-                    pause,
-                    unpause,
-                    oracle,
-                    fixed_fill_quantity,
-                    price_maximum_age,
-                    coefficient,
-                    max_discount_rate_pct,
-                    min_discount_rate_pct,
-                    solana_payer_options,
-                )
-                .await
-            }
+            Self::Configure(command) => command.try_into_execute().await,
         }
     }
 }
 
 async fn execute_initialize(
     fixed_fill_quantity_lamports: u64,
-    price_maximum_age_seconds: i64,
+    price_maximum_age_seconds: u32,
     coefficient_str: String,
     max_discount_rate_pct_str: String,
     solana_payer_options: SolanaPayerOptions,
@@ -172,7 +120,7 @@ async fn execute_initialize(
         &SolConversionInstructionData::InitializeSystem {
             oracle_key: Default::default(),
             fixed_fill_quantity_lamports,
-            price_maximum_age_seconds,
+            price_maximum_age_seconds: price_maximum_age_seconds.into(),
             coefficient,
             max_discount_rate,
             min_discount_rate: 0,
@@ -238,113 +186,149 @@ async fn execute_set_admin(
     Ok(())
 }
 
-async fn execute_configure(
+#[derive(Debug, Args, Clone)]
+pub struct ConfigureCommand {
+    /// Whether to pause the program. Cannot be used with --unpause.
+    #[arg(long)]
     pause: bool,
+
+    /// Whether to unpause the program. Cannot be used with --pause.
+    #[arg(long)]
     unpause: bool,
-    oracle_key: Option<Pubkey>,
-    fixed_fill_quantity_lamports: Option<u64>,
-    price_maximum_age_seconds: Option<i64>,
-    coefficient_str: Option<String>,
-    max_discount_rate_pct_str: Option<String>,
-    min_discount_rate_pct_str: Option<String>,
+
+    #[arg(long, value_name = "PUBKEY")]
+    oracle: Option<Pubkey>,
+
+    #[arg(long, value_name = "LAMPORTS")]
+    fixed_fill_quantity: Option<u64>,
+
+    #[arg(long, value_name = "SECONDS")]
+    price_maximum_age_seconds: Option<u32>,
+
+    #[arg(long, value_name = "DECIMAL")]
+    coefficient: Option<String>,
+
+    #[arg(long, value_name = "PERCENTAGE")]
+    max_discount_rate_pct: Option<String>,
+
+    #[arg(long, value_name = "PERCENTAGE")]
+    min_discount_rate_pct: Option<String>,
+
+    #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
-) -> Result<()> {
-    // Revert if all specified configurables are none
-    ensure!(
-        pause
-            || unpause
-            || oracle_key.is_some()
+}
+
+impl ConfigureCommand {
+    pub async fn try_into_execute(self) -> Result<()> {
+        let Self {
+            pause,
+            unpause,
+            oracle: oracle_key,
+            fixed_fill_quantity: fixed_fill_quantity_lamports,
+            price_maximum_age_seconds,
+            coefficient: coefficient_str,
+            max_discount_rate_pct: max_discount_rate_pct_str,
+            min_discount_rate_pct: min_discount_rate_pct_str,
+            solana_payer_options,
+        } = self;
+
+        // Revert if all specified configurables are none
+        ensure!(
+            pause
+                || unpause
+                || oracle_key.is_some()
+                || fixed_fill_quantity_lamports.is_some()
+                || price_maximum_age_seconds.is_some()
+                || coefficient_str.is_some()
+                || max_discount_rate_pct_str.is_some()
+                || min_discount_rate_pct_str.is_some(),
+            "At least one configuration parameter must be specified"
+        );
+
+        // Check for conflicting pause/unpause flags
+        ensure!(
+            !(pause && unpause),
+            "Cannot use both --pause and --unpause at the same time"
+        );
+
+        let wallet = Wallet::try_from(solana_payer_options)?;
+        let wallet_key = wallet.pubkey();
+
+        // Parse string arguments if provided
+        let coefficient = coefficient_str.map(parse_coefficient).transpose()?;
+        let max_discount_rate = max_discount_rate_pct_str
+            .map(parse_discount_rate_percentage)
+            .transpose()?;
+        let min_discount_rate = min_discount_rate_pct_str
+            .map(parse_discount_rate_percentage)
+            .transpose()?;
+
+        let mut instructions = vec![];
+        let mut compute_unit_limit = 10_000;
+
+        // Handle pause/unpause if specified.
+        if pause {
+            let toggle_system_state_ix = try_build_instruction(
+                &ID,
+                ToggleSystemStateAccounts::new(&wallet_key),
+                &SolConversionInstructionData::ToggleSystemState(true),
+            )?;
+            instructions.push(toggle_system_state_ix);
+        } else if unpause {
+            let toggle_system_state_ix = try_build_instruction(
+                &ID,
+                ToggleSystemStateAccounts::new(&wallet_key),
+                &SolConversionInstructionData::ToggleSystemState(false),
+            )?;
+            instructions.push(toggle_system_state_ix);
+            compute_unit_limit += 5_000;
+        }
+
+        // Handle configuration updates if any are specified
+        if oracle_key.is_some()
             || fixed_fill_quantity_lamports.is_some()
             || price_maximum_age_seconds.is_some()
-            || coefficient_str.is_some()
-            || max_discount_rate_pct_str.is_some()
-            || min_discount_rate_pct_str.is_some(),
-        "At least one configuration parameter must be specified"
-    );
+            || coefficient.is_some()
+            || max_discount_rate.is_some()
+            || min_discount_rate.is_some()
+        {
+            let update_configuration_ix = try_build_instruction(
+                &ID,
+                UpdateConfigurationRegistryAccounts::new(&wallet_key),
+                &SolConversionInstructionData::UpdateConfigurationRegistry {
+                    oracle_key,
+                    fixed_fill_quantity_lamports,
+                    price_maximum_age_seconds: price_maximum_age_seconds.map(Into::into),
+                    coefficient,
+                    max_discount_rate,
+                    min_discount_rate,
+                },
+            )?;
+            instructions.push(update_configuration_ix);
+            compute_unit_limit += 15_000;
+        }
 
-    // Check for conflicting pause/unpause flags
-    ensure!(
-        !(pause && unpause),
-        "Cannot use both --pause and --unpause at the same time"
-    );
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
+            compute_unit_limit,
+        ));
 
-    let wallet = Wallet::try_from(solana_payer_options)?;
-    let wallet_key = wallet.pubkey();
+        if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
+            instructions.push(compute_unit_price_ix.clone());
+        }
 
-    // Parse string arguments if provided
-    let coefficient = coefficient_str.map(parse_coefficient).transpose()?;
-    let max_discount_rate = max_discount_rate_pct_str
-        .map(parse_discount_rate_percentage)
-        .transpose()?;
-    let min_discount_rate = min_discount_rate_pct_str
-        .map(parse_discount_rate_percentage)
-        .transpose()?;
+        let transaction = wallet
+            .new_transaction_with_additional_signers(&instructions, &[])
+            .await?;
+        let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
-    let mut instructions = vec![];
-    let mut compute_unit_limit = 10_000;
+        if let Some(tx_sig) = tx_sig {
+            println!("Updated configuration: {tx_sig}");
 
-    // Handle pause/unpause if specified.
-    if pause {
-        let toggle_system_state_ix = try_build_instruction(
-            &ID,
-            ToggleSystemStateAccounts::new(&wallet_key),
-            &SolConversionInstructionData::ToggleSystemState(true),
-        )?;
-        instructions.push(toggle_system_state_ix);
-    } else if unpause {
-        let toggle_system_state_ix = try_build_instruction(
-            &ID,
-            ToggleSystemStateAccounts::new(&wallet_key),
-            &SolConversionInstructionData::ToggleSystemState(false),
-        )?;
-        instructions.push(toggle_system_state_ix);
-        compute_unit_limit += 5_000;
+            wallet.print_verbose_output(&[tx_sig]).await?;
+        }
+
+        Ok(())
     }
-
-    // Handle configuration updates if any are specified
-    if oracle_key.is_some()
-        || fixed_fill_quantity_lamports.is_some()
-        || price_maximum_age_seconds.is_some()
-        || coefficient.is_some()
-        || max_discount_rate.is_some()
-        || min_discount_rate.is_some()
-    {
-        let update_configuration_ix = try_build_instruction(
-            &ID,
-            UpdateConfigurationRegistryAccounts::new(&wallet_key),
-            &SolConversionInstructionData::UpdateConfigurationRegistry {
-                oracle_key,
-                fixed_fill_quantity_lamports,
-                price_maximum_age_seconds,
-                coefficient,
-                max_discount_rate,
-                min_discount_rate,
-            },
-        )?;
-        instructions.push(update_configuration_ix);
-        compute_unit_limit += 15_000;
-    }
-
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
-        compute_unit_limit,
-    ));
-
-    if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
-        instructions.push(compute_unit_price_ix.clone());
-    }
-
-    let transaction = wallet
-        .new_transaction_with_additional_signers(&instructions, &[])
-        .await?;
-    let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
-
-    if let Some(tx_sig) = tx_sig {
-        println!("Updated configuration: {tx_sig}");
-
-        wallet.print_verbose_output(&[tx_sig]).await?;
-    }
-
-    Ok(())
 }
 
 /// Parse a coefficient string (e.g., "1.23456789") into a u64 value.

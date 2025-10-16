@@ -149,7 +149,7 @@ async fn try_initialize_missing_deposit_accounts(
     for node_ids_chunk in node_ids.chunks(100) {
         let deposit_keys_and_bumps = node_ids_chunk
             .iter()
-            .map(|node_id| SolanaValidatorDeposit::find_address(node_id))
+            .map(SolanaValidatorDeposit::find_address)
             .collect::<Vec<_>>();
         let deposit_accounts = wallet
             .connection
