@@ -4,8 +4,8 @@ use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    state::{ConfigurationRegistry, DenyListRegistry, ProgramState},
     ID,
+    state::{ConfigurationRegistry, DenyListRegistry, ProgramState},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
