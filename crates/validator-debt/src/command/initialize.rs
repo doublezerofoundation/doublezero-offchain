@@ -65,8 +65,8 @@ impl Schedulable for InitializeDistributionCommand {
             CommitmentConfig::confirmed(),
         );
 
-        //super::ensure_same_network_environment(&dz_ledger_rpc_client, wallet.connection.is_mainnet)
-        //    .await?;
+        super::ensure_same_network_environment(&dz_ledger_rpc_client, wallet.connection.is_mainnet)
+            .await?;
 
         // We want to make sure the next DZ epoch is in sync with the last
         // completed DZ epoch.
