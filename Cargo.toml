@@ -82,15 +82,15 @@ url = "2"
 [workspace.dependencies.doublezero-passport]
 features = ["offchain"]
 git = "https://github.com/doublezerofoundation/doublezero-solana"
-rev = "52963ee"
+rev = "0a59eac"
 
 [workspace.dependencies.doublezero-program-tools]
 git = "https://github.com/doublezerofoundation/doublezero-solana"
-rev = "52963ee"
+rev = "0a59eac"
 
 [workspace.dependencies.doublezero-revenue-distribution]
 git = "https://github.com/doublezerofoundation/doublezero-solana"
-rev = "52963ee"
+rev = "0a59eac"
 
 ### Dependencies found in github.com/malbeclabs/doublezero
 
