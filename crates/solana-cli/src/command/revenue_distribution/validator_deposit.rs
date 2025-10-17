@@ -13,9 +13,10 @@ use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 
 #[derive(Debug, Args)]
 pub struct ValidatorDepositCommand {
+    #[arg(long, short = 'n', value_name = "PUBKEY")]
     node_id: Pubkey,
 
-    #[arg(long)]
+    #[arg(long, short = 'i')]
     initialize: bool,
 
     #[arg(long, value_name = "SOL")]

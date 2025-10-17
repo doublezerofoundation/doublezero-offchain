@@ -1,16 +1,15 @@
-use core::fmt;
 use std::{
+    fmt,
     io::{Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpStream, ToSocketAddrs},
-    str::FromStr,
     time::Duration,
 };
 
-use anyhow::{Context, bail};
+use anyhow::{Context, Result, bail};
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_response::RpcContactInfo};
 use solana_sdk::pubkey::Pubkey;
 
-pub fn get_public_ipv4() -> anyhow::Result<String> {
+pub fn try_get_public_ipv4() -> Result<String> {
     // Resolve the host `ifconfig.me` to IPv4 addresses
     let socket_addr = "ifconfig.me:80"
         .to_socket_addrs()?
@@ -39,10 +38,6 @@ pub fn get_public_ipv4() -> anyhow::Result<String> {
     }
 
     bail!("Failed to extract the IP from the response")
-}
-
-pub fn parse_pubkey(s: &str) -> Result<Pubkey, String> {
-    Pubkey::from_str(s).map_err(|e| format!("Invalid Pubkey {s}: {e}"))
 }
 
 #[derive(Debug, PartialEq)]
