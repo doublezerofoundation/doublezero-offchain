@@ -11,11 +11,13 @@ homepage.workspace = true
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
+borsh.workspace = true
 bytemuck.workspace = true
 clap.workspace = true
 doublezero-passport.workspace = true
 doublezero-revenue-distribution.workspace = true
 doublezero-program-tools.workspace = true
+doublezero-sol-conversion-interface.workspace = true
 doublezero-solana-client-tools.workspace = true
 serde.workspace = true
 serde_json.workspace = true

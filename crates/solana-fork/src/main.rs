@@ -12,6 +12,9 @@ use doublezero_revenue_distribution::{
     state::{Distribution, Journal, ProgramConfig as RevenueDistributionProgramConfig},
     types::DoubleZeroEpoch,
 };
+use doublezero_sol_conversion_interface::{
+    ID as SOL_CONVERSION_PROGRAM_ID, state::ProgramState as SolConversionProgramState,
+};
 use doublezero_solana_client_tools::{
     payer::try_load_keypair,
     rpc::{SolanaConnection, SolanaConnectionOptions},
@@ -87,7 +90,9 @@ async fn main() -> Result<()> {
 
     // Warn if god mode is enabled but reset is not.
     if should_god_mode && !should_reset {
-        eprintln!("Warning: --god-mode was passed but --reset was not. God mode will not apply without resetting accounts");
+        eprintln!(
+            "Warning: --god-mode was passed but --reset was not. God mode will not apply without resetting accounts"
+        );
     }
 
     if should_reset {
@@ -103,12 +108,8 @@ async fn main() -> Result<()> {
 
         fs::create_dir_all(TMP_ACCOUNTS_PATH)?;
 
-        match fetch_and_write_accounts(
-            &connection,
-            upgrade_authority_key,
-            should_god_mode,
-        )
-        .await
+        match try_fetch_and_write_accounts(&connection, upgrade_authority_key, should_god_mode)
+            .await
         {
             Ok(_) => {
                 // Rename temporary directory to final location.
@@ -150,6 +151,10 @@ async fn main() -> Result<()> {
         .arg("--upgradeable-program")
         .arg(PASSPORT_PROGRAM_ID.to_string())
         .arg(format!("{ACCOUNTS_PATH}/passport.so"))
+        .arg(upgrade_authority_key.to_string())
+        .arg("--upgradeable-program")
+        .arg(SOL_CONVERSION_PROGRAM_ID.to_string())
+        .arg(format!("{ACCOUNTS_PATH}/sol_conversion.so"))
         .arg(upgrade_authority_key.to_string());
 
     if should_reset {
@@ -168,7 +173,7 @@ async fn main() -> Result<()> {
 
 //
 
-async fn fetch_and_write_accounts(
+async fn try_fetch_and_write_accounts(
     connection: &SolanaConnection,
     upgrade_authority_key: Pubkey,
     should_god_mode: bool,
@@ -182,7 +187,7 @@ async fn fetch_and_write_accounts(
     };
 
     let mint_account = connection.get_account(&token_2z_mint_key).await?;
-    write_account_to_file(&token_2z_mint_key, &mint_account, TMP_ACCOUNTS_PATH)?;
+    try_write_account_to_file(&token_2z_mint_key, &mint_account, TMP_ACCOUNTS_PATH)?;
     println!("Wrote 2Z mint account to {TMP_ACCOUNTS_PATH}/");
 
     // Fetch program accounts.
@@ -216,6 +221,15 @@ async fn fetch_and_write_accounts(
     )
     .await?;
 
+    try_fetch_and_write_program_accounts(
+        connection,
+        &SOL_CONVERSION_PROGRAM_ID,
+        "SOL Conversion",
+        TMP_ACCOUNTS_PATH,
+        &config,
+    )
+    .await?;
+
     // Dump programs.
 
     try_dump_program(
@@ -232,10 +246,17 @@ async fn fetch_and_write_accounts(
         &format!("{TMP_ACCOUNTS_PATH}/passport.so"),
     )?;
 
+    try_dump_program(
+        connection,
+        &SOL_CONVERSION_PROGRAM_ID,
+        "SOL Conversion",
+        &format!("{TMP_ACCOUNTS_PATH}/sol_conversion.so"),
+    )?;
+
     if should_god_mode {
         eprintln!("God mode enabled");
 
-        modify_zero_copy_account::<RevenueDistributionProgramConfig>(
+        try_modify_zero_copy_account::<RevenueDistributionProgramConfig>(
             &RevenueDistributionProgramConfig::find_address().0,
             TMP_ACCOUNTS_PATH,
             |config| {
@@ -247,7 +268,7 @@ async fn fetch_and_write_accounts(
         )?;
         eprintln!("Updated Revenue Distribution config authorities");
 
-        modify_zero_copy_account::<PassportProgramConfig>(
+        try_modify_zero_copy_account::<PassportProgramConfig>(
             &PassportProgramConfig::find_address().0,
             TMP_ACCOUNTS_PATH,
             |config| {
@@ -256,6 +277,17 @@ async fn fetch_and_write_accounts(
             },
         )?;
         eprintln!("Updated Passport config authorities");
+
+        try_modify_borsh_account::<SolConversionProgramState>(
+            &SolConversionProgramState::find_address().0,
+            TMP_ACCOUNTS_PATH,
+            |config| {
+                config.admin_key = upgrade_authority_key;
+                config.last_trade_slot = 0;
+                config.deny_list_authority = upgrade_authority_key;
+            },
+        )?;
+        eprintln!("Updated SOL Conversion config authorities");
 
         // Override mint authority.
 
@@ -269,7 +301,7 @@ async fn fetch_and_write_accounts(
 
         spl_token::state::Mint::pack(mint, &mut mint_data)?;
         mint_wrapper.account.data.0 = BASE64.encode(&mint_data);
-        write_wrapped_account_to_file(&token_2z_mint_key, &mint_wrapper, TMP_ACCOUNTS_PATH)?;
+        try_write_wrapped_account_to_file(&token_2z_mint_key, &mint_wrapper, TMP_ACCOUNTS_PATH)?;
     }
 
     // Fetch various 2Z Token PDAs.
@@ -297,9 +329,11 @@ async fn fetch_and_write_accounts(
     // For existing distributions, fetch the 2Z token PDAs. Read the
     // Revenue Distribution config account file to deserialize the data
     // and read the next completed DZ epoch.
-    let (_, revenue_distribution_config, _) = read_zero_copy_account::<
-        RevenueDistributionProgramConfig,
-    >(&revenue_distribution_config_key, TMP_ACCOUNTS_PATH)?;
+    let (_, revenue_distribution_config, _) =
+        try_read_zero_copy_account::<RevenueDistributionProgramConfig>(
+            &revenue_distribution_config_key,
+            TMP_ACCOUNTS_PATH,
+        )?;
 
     for epoch in 0..revenue_distribution_config.next_completed_dz_epoch.value() {
         let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(epoch));
@@ -308,15 +342,19 @@ async fn fetch_and_write_accounts(
         );
     }
 
-    // Fetch all 2Z token PDA accounts.
-    let token_accounts = connection.get_multiple_accounts(&token_pda_keys).await?;
-
-    for (key, token_account) in token_pda_keys.iter().zip(token_accounts) {
-        let account = token_account
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Account does not exist: {}", key))?;
-        write_account_to_file(key, account, TMP_ACCOUNTS_PATH)?;
+    // Fetch all 2Z token PDA accounts, chunking 100 accounts at a time.
+    for token_pda_keys_chunk in token_pda_keys.chunks(100) {
+        let token_accounts = connection
+            .get_multiple_accounts(token_pda_keys_chunk)
+            .await?;
+        for (key, token_account) in token_pda_keys_chunk.iter().zip(token_accounts) {
+            let account = token_account
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Account does not exist: {}", key))?;
+            try_write_account_to_file(key, account, TMP_ACCOUNTS_PATH)?;
+        }
     }
+
     println!(
         "Wrote {} 2Z token PDA accounts to {TMP_ACCOUNTS_PATH}/",
         token_pda_keys.len()
@@ -325,7 +363,7 @@ async fn fetch_and_write_accounts(
     Ok(())
 }
 
-fn read_zero_copy_account<T>(
+fn try_read_zero_copy_account<T>(
     account_key: &Pubkey,
     accounts_dir: &str,
 ) -> Result<(WrittenAccount, Box<T>, Vec<u8>)>
@@ -345,7 +383,7 @@ where
     Ok((wrapper, mucked_data, remaining_data.to_vec()))
 }
 
-fn modify_zero_copy_account<T>(
+fn try_modify_zero_copy_account<T>(
     account_key: &Pubkey,
     accounts_dir: &str,
     modify_fn: impl FnOnce(&mut T),
@@ -354,7 +392,7 @@ where
     T: PrecomputedDiscriminator + bytemuck::Pod,
 {
     let (wrapper, mut mucked_data, remaining_data) =
-        read_zero_copy_account::<T>(account_key, accounts_dir)?;
+        try_read_zero_copy_account::<T>(account_key, accounts_dir)?;
 
     modify_fn(&mut mucked_data);
 
@@ -371,10 +409,60 @@ where
         rent_epoch: wrapper.account.rent_epoch,
     };
 
-    write_account_to_file(account_key, &modified_account, accounts_dir)
+    try_write_account_to_file(account_key, &modified_account, accounts_dir)
 }
 
-fn write_account_to_file(
+fn try_read_borsh_account<T>(
+    account_key: &Pubkey,
+    accounts_dir: &str,
+) -> Result<(WrittenAccount, Box<T>)>
+where
+    T: PrecomputedDiscriminator + borsh::BorshDeserialize,
+{
+    let path = format!("{accounts_dir}/{account_key}.json");
+    let json = fs::read_to_string(&path)?;
+    let wrapper = serde_json::from_str::<WrittenAccount>(&json)?;
+    let data = BASE64.decode(&wrapper.account.data.0)?;
+
+    ensure!(
+        data.len() > 8 && &data[..8] == T::discriminator_slice(),
+        "Invalid discriminator for account: {account_key}",
+    );
+
+    let borshed_data = T::deserialize(&mut &data[8..]).map(Box::new)?;
+
+    Ok((wrapper, borshed_data))
+}
+
+fn try_modify_borsh_account<T>(
+    account_key: &Pubkey,
+    accounts_dir: &str,
+    modify_fn: impl FnOnce(&mut Box<T>),
+) -> Result<()>
+where
+    T: PrecomputedDiscriminator + borsh::BorshDeserialize + borsh::BorshSerialize,
+{
+    let (wrapper, mut borshed_data) = try_read_borsh_account::<T>(account_key, accounts_dir)?;
+
+    modify_fn(&mut borshed_data);
+
+    let serialized_data = borsh::to_vec(&borshed_data)?;
+    let mut modified_data = Vec::with_capacity(8 + serialized_data.len());
+    modified_data.extend_from_slice(T::discriminator_slice());
+    modified_data.extend_from_slice(&serialized_data);
+
+    let modified_account = Account {
+        lamports: wrapper.account.lamports,
+        data: modified_data,
+        owner: wrapper.account.owner.parse()?,
+        executable: wrapper.account.executable,
+        rent_epoch: wrapper.account.rent_epoch,
+    };
+
+    try_write_account_to_file(account_key, &modified_account, accounts_dir)
+}
+
+fn try_write_account_to_file(
     account_key: &Pubkey,
     account: &Account,
     accounts_dir: &str,
@@ -391,10 +479,10 @@ fn write_account_to_file(
         },
     };
 
-    write_wrapped_account_to_file(account_key, &wrapper, accounts_dir)
+    try_write_wrapped_account_to_file(account_key, &wrapper, accounts_dir)
 }
 
-fn write_wrapped_account_to_file(
+fn try_write_wrapped_account_to_file(
     account_key: &Pubkey,
     wrapper: &WrittenAccount,
     accounts_dir: &str,
@@ -416,7 +504,7 @@ async fn try_fetch_and_write_program_accounts(
         .await?;
 
     for (key, account) in &accounts {
-        write_account_to_file(key, account, accounts_dir)?;
+        try_write_account_to_file(key, account, accounts_dir)?;
     }
 
     println!(
