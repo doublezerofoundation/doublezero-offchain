@@ -26,7 +26,7 @@ impl ConfigCommand {
         let (program_config_key, program_config) = try_fetch_program_config(&connection).await?;
 
         if program_config.is_paused() {
-            println!("Warning: Program is paused");
+            println!("⚠️  Warning: Program is paused");
             println!();
         }
 

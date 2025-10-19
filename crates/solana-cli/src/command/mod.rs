@@ -25,3 +25,27 @@ impl DoubleZeroSolanaCommand {
         }
     }
 }
+
+fn try_prompt_proceed_confirmation(prompt_message: String, abort_message: &str) -> Result<()> {
+    loop {
+        println!("⚠️  {prompt_message}. Proceed? [y/N]");
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+
+        let first_char = input
+            .trim()
+            .chars()
+            .next()
+            .map(|c| c.to_lowercase().next().unwrap());
+
+        match first_char {
+            Some('y') => return Ok(()),
+            Some('n') | None => anyhow::bail!("{abort_message}"),
+            _ => {
+                println!("Invalid input. Please enter 'y' for yes or 'n' for no.");
+                continue;
+            }
+        }
+    }
+}

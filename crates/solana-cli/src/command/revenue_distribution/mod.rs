@@ -42,7 +42,8 @@ pub enum RevenueDistributionSubcommand {
     /// Convert SOL to 2Z tokens.
     ConvertSol(convert_sol::ConvertSolCommand),
 
-    /// Solana validator deposit account management.
+    /// Manage a Solana validator deposit account. Funding can be directly with
+    /// SOL or with 2Z limited by specified conversion rate for 2Z -> SOL.
     ValidatorDeposit(validator_deposit::ValidatorDepositCommand),
 
     /// Relayer instructions for the Revenue Distribution program.

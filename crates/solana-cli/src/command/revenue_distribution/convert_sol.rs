@@ -1,12 +1,15 @@
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use clap::Args;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_sol_conversion_interface::{
     ID,
     instruction::{SolConversionInstructionData, account::BuySolAccounts},
+    oracle::RATE_PRECISION,
 };
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
-use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
+use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction, instruction::Instruction, pubkey::Pubkey,
+};
 
 use crate::command::revenue_distribution::{
     SolConversionState, try_request_oracle_conversion_price,
@@ -18,44 +21,26 @@ pub struct ConvertSolCommand {
     #[arg(long, value_name = "DECIMAL")]
     limit_price: Option<String>,
 
-    /// Token account must be owned by the signer.
+    /// Token account must be owned by the signer. Defaults to signer ATA if not
+    /// specified.
     #[arg(long, value_name = "PUBKEY")]
-    source_token_account: Option<Pubkey>,
-
-    /// For testing purposes if RPC is a mainnet-beta fork.
-    #[arg(long, short = 'm')]
-    mainnet_fork: bool,
+    source_2z_account: Option<Pubkey>,
 
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
 }
 
 impl ConvertSolCommand {
-    pub async fn try_into_execute(self) -> Result<()> {
-        let Self {
-            limit_price: limit_price_str,
-            source_token_account: source_token_account_key,
-            mainnet_fork: is_mainnet_fork,
-            solana_payer_options,
-        } = self;
+    pub const BUY_SOL_COMPUTE_UNIT_LIMIT: u32 = 80_000;
 
-        let mut wallet = Wallet::try_from(solana_payer_options)?;
+    pub async fn try_build_buy_sol_instruction(
+        wallet: &Wallet,
+        limit_price_str: Option<String>,
+        source_token_account_key: Option<Pubkey>,
+    ) -> Result<Instruction> {
         let wallet_key = wallet.pubkey();
 
-        wallet.connection.cache_if_mainnet().await?;
-
-        let dz_mint_key = if is_mainnet_fork || wallet.connection.is_mainnet {
-            doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
-        } else {
-            doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
-        };
-
-        let oracle_price_data = try_request_oracle_conversion_price().await?;
-
-        let limit_price = match limit_price_str {
-            Some(limit_price_str) => parse_bid_price_to_u64(limit_price_str)?,
-            None => oracle_price_data.swap_rate,
-        };
+        let dz_mint_key = doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY;
 
         let user_token_account_key = source_token_account_key.unwrap_or(
             spl_associated_token_account_interface::address::get_associated_token_address(
@@ -69,10 +54,14 @@ impl ConvertSolCommand {
             ..
         } = SolConversionState::try_fetch(&wallet.connection).await?;
 
-        let mut instructions = Vec::new();
-        let compute_unit_limit = 80_000;
+        let oracle_price_data = try_request_oracle_conversion_price().await?;
 
-        let buy_sol_ix = try_build_instruction(
+        let limit_price = match limit_price_str {
+            Some(limit_price_str) => parse_limit_price_to_u64(limit_price_str)?,
+            None => oracle_price_data.swap_rate,
+        };
+
+        try_build_instruction(
             &ID,
             BuySolAccounts::new(
                 &sol_conversion_program_state.fills_registry_key,
@@ -84,12 +73,27 @@ impl ConvertSolCommand {
                 limit_price,
                 oracle_price_data,
             },
-        )?;
-        instructions.push(buy_sol_ix);
+        )
+        .context("Failed to build buy SOL instruction")
+    }
 
-        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
-            compute_unit_limit,
-        ));
+    pub async fn try_into_execute(self) -> Result<()> {
+        let Self {
+            limit_price: limit_price_str,
+            source_2z_account: source_token_account_key,
+            solana_payer_options,
+        } = self;
+
+        let wallet = Wallet::try_from(solana_payer_options)?;
+
+        let buy_sol_ix =
+            Self::try_build_buy_sol_instruction(&wallet, limit_price_str, source_token_account_key)
+                .await?;
+
+        let mut instructions = vec![
+            buy_sol_ix,
+            ComputeBudgetInstruction::set_compute_unit_limit(Self::BUY_SOL_COMPUTE_UNIT_LIMIT),
+        ];
 
         if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
             instructions.push(compute_unit_price_ix.clone());
@@ -109,8 +113,8 @@ impl ConvertSolCommand {
 
 //
 
-fn parse_bid_price_to_u64(bid_price_str: String) -> Result<u64> {
-    const SCALE_FACTOR: f64 = 1e8;
+fn parse_limit_price_to_u64(bid_price_str: String) -> Result<u64> {
+    const RATE_PRECISION_F64: f64 = RATE_PRECISION as f64;
 
     let bid_price_str = bid_price_str.trim();
 
@@ -126,7 +130,7 @@ fn parse_bid_price_to_u64(bid_price_str: String) -> Result<u64> {
         bail!("Bid price must be a positive value");
     }
 
-    if bid_price > (u64::MAX as f64 / SCALE_FACTOR) {
+    if bid_price > (u64::MAX as f64 / RATE_PRECISION_F64) {
         bail!("Bid price too large");
     }
 
@@ -138,5 +142,5 @@ fn parse_bid_price_to_u64(bid_price_str: String) -> Result<u64> {
         }
     }
 
-    Ok((bid_price * SCALE_FACTOR).round() as u64)
+    Ok((bid_price * RATE_PRECISION_F64).round() as u64)
 }

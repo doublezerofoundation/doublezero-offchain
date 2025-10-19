@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, bail, ensure};
 use clap::Args;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_revenue_distribution::{
@@ -11,16 +11,35 @@ use doublezero_revenue_distribution::{
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 
+use crate::command::{
+    revenue_distribution::{SolConversionState, convert_sol::ConvertSolCommand},
+    try_prompt_proceed_confirmation,
+};
+
 #[derive(Debug, Args)]
 pub struct ValidatorDepositCommand {
+    /// Node (Validator) identity.
     #[arg(long, short = 'n', value_name = "PUBKEY")]
     node_id: Pubkey,
 
+    /// Initialize the Solana validator deposit account if it does not exist.
     #[arg(long, short = 'i')]
     initialize: bool,
 
+    /// Fund the Solana validator deposit account with SOL. When
+    /// `--convert-2z-limit-price` is specified, the fund amount must match the
+    /// required (fixed fill quantity) amount for the 2Z -> SOL conversion.
     #[arg(long, value_name = "SOL")]
     fund: Option<String>,
+
+    /// Fund with 2Z limited by specified conversion rate for 2Z -> SOL.
+    #[arg(long, value_name = "PRICE_LIMIT")]
+    convert_2z_limit_price: Option<String>,
+
+    /// Token account must be owned by the signer. Defaults to signer ATA if not
+    /// specified.
+    #[arg(long, value_name = "PUBKEY")]
+    source_2z_account: Option<Pubkey>,
 
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
@@ -32,6 +51,8 @@ impl ValidatorDepositCommand {
             node_id,
             initialize,
             fund,
+            convert_2z_limit_price: convert_2z_limit_price_str,
+            source_2z_account: source_2z_account_key,
             solana_payer_options,
         } = self;
 
@@ -76,6 +97,37 @@ impl ValidatorDepositCommand {
         } else {
             ""
         };
+
+        if let Some(limit_price_str) = convert_2z_limit_price_str {
+            let SolConversionState {
+                configuration_registry: (_, configuration_registry),
+                ..
+            } = SolConversionState::try_fetch(&wallet.connection).await?;
+            let required_lamports = configuration_registry.fixed_fill_quantity;
+
+            ensure!(
+                fund_lamports == required_lamports,
+                "Fund amount does not match required amount for 2Z -> SOL conversion: {fund_lamports} != {required_lamports}"
+            );
+
+            try_prompt_proceed_confirmation(
+                format!(
+                    "By specifying --fund-2z with a price limit, you are funding {:0.9} SOL to your deposit account",
+                    required_lamports as f64 * 1e-9,
+                ),
+                "Aborting command with --fund-2z",
+            )?;
+
+            let buy_sol_ix = ConvertSolCommand::try_build_buy_sol_instruction(
+                &wallet,
+                Some(limit_price_str),
+                source_2z_account_key,
+            )
+            .await?;
+
+            instructions.push(buy_sol_ix);
+            compute_unit_limit += ConvertSolCommand::BUY_SOL_COMPUTE_UNIT_LIMIT;
+        }
 
         if fund_lamports != 0 {
             deposit_balance += fund_lamports;
