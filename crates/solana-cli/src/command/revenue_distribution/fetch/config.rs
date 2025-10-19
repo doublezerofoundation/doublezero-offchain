@@ -114,14 +114,12 @@ impl ConfigCommand {
                     field: "Community Burn Rate Increases After",
                     value: format!(
                         "{} epoch{}",
-                        community_burn_rate_params
-                            .dz_epochs_to_increasing
-                            .to_string(),
+                        community_burn_rate_params.dz_epochs_to_increasing,
                         if community_burn_rate_params.dz_epochs_to_increasing == 1 {
                             ""
                         } else {
                             "s"
-                        }
+                        },
                     ),
                     note: "Determines the epoch when the community burn rate increases".to_string(),
                 });

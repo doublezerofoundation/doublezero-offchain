@@ -77,7 +77,7 @@ impl ValidatorDepositsCommand {
                 (
                     vec![ValidatorDepositsTableRow {
                         deposit_pda: deposit_key,
-                        node_id: node_id,
+                        node_id,
                         amount: format!("{:.9}", deposit_balance as f64 * 1e-9),
                     }],
                     Some(format!(
