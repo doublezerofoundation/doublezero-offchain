@@ -117,13 +117,7 @@ async fn execute_pay_solana_validator_debt(
         .pay_solana_validator_debt(&wallet.connection.rpc_client, computed_debt, epoch)
         .await?;
 
-
-    validator_debt::post_debt_collection_to_slack(
-        tx_results.len(),
-        epoch,
-        wallet.dry_run,
-    )
-    .await?;
+    validator_debt::post_debt_collection_to_slack(tx_results.len(), epoch, wallet.dry_run).await?;
 
     if let Some(ExportFormat::Csv) = export {
         let now = Utc::now();
