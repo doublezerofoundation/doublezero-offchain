@@ -91,7 +91,7 @@ impl ValidatorDepositsCommand {
             }
         } else {
             if balance_only {
-                bail!("Cannot only use --balance-only when specifying --node-id");
+                bail!("Cannot use --balance-only without specifying --node-id");
             }
 
             let config = RpcProgramAccountsConfig {

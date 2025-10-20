@@ -23,8 +23,6 @@ jobs:
         run: solana-keygen new --silent --no-bip39-passphrase
       - name: Start Solana mainnet-beta fork in background
         run: cargo run --bin doublezero-solana-fork -- -um --reset --god-mode > /dev/null 2>&1 &
-      - name: Wait for fork to start
-        run: sleep 42
       - name: Build DoubleZero Solana
         run: cargo build --bin doublezero-solana
       - name: Check starting SOL balance
