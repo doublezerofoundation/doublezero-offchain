@@ -9,6 +9,7 @@ mod validator_deposit;
 use anyhow::{Context, Result, ensure};
 use borsh::BorshDeserialize;
 use clap::{Args, Subcommand};
+use doublezero_program_tools::zero_copy;
 use doublezero_revenue_distribution::state::{Journal, ProgramConfig, SolanaValidatorDeposit};
 use doublezero_sol_conversion_interface::{
     oracle::OraclePriceData,
@@ -122,34 +123,41 @@ async fn fetch_solana_validator_deposit(
 pub struct SolConversionState {
     pub program_state: (Pubkey, Box<SolConversionProgramState>),
     pub configuration_registry: (Pubkey, Box<SolConversionConfigurationRegistry>),
+    pub journal: (Pubkey, Box<Journal>, Vec<u8>),
 }
 
 impl SolConversionState {
     pub async fn try_fetch(rpc_client: &RpcClient) -> Result<Self> {
         let (program_state_key, _) = SolConversionProgramState::find_address();
         let (configuration_registry_key, _) = SolConversionConfigurationRegistry::find_address();
+        let (journal_key, _) = Journal::find_address();
 
         let accounts = rpc_client
-            .get_multiple_accounts(&[program_state_key, configuration_registry_key])
+            .get_multiple_accounts(&[program_state_key, configuration_registry_key, journal_key])
             .await?;
         let account_datas = accounts
             .into_iter()
             .filter_map(|account| account.map(|account| account.data))
             .collect::<Vec<_>>();
         ensure!(
-            account_datas.len() == 2,
+            account_datas.len() == 3,
             "SOL Conversion program not initialized"
         );
 
-        let program_state_data =
-            SolConversionProgramState::deserialize(&mut &account_datas[0][8..]).map(Into::into)?;
-        let configuration_registry_data =
-            SolConversionConfigurationRegistry::deserialize(&mut &account_datas[1][8..])
-                .map(Into::into)?;
+        let program_state_data = Box::<_>::deserialize(&mut &account_datas[0][8..])?;
+        let configuration_registry_data = Box::<_>::deserialize(&mut &account_datas[1][8..])?;
+
+        let (journal_data, journal_remaining_data) =
+            zero_copy::checked_from_bytes_with_discriminator(&account_datas[2])
+                .map(|(mucked_data, remaining_data)| {
+                    (Box::new(*mucked_data), remaining_data.to_vec())
+                })
+                .context("Revenue Distribution program not initialized")?;
 
         Ok(Self {
             program_state: (program_state_key, program_state_data),
             configuration_registry: (configuration_registry_key, configuration_registry_data),
+            journal: (journal_key, journal_data, journal_remaining_data),
         })
     }
 }

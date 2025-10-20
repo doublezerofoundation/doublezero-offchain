@@ -59,10 +59,16 @@ impl ConvertSolCommand {
         let SolConversionState {
             program_state: (_, sol_conversion_program_state),
             configuration_registry: (_, configuration_registry),
+            journal: (_, journal, _),
         } = SolConversionState::try_fetch(&wallet.connection).await?;
 
+        let required_lamports = configuration_registry.fixed_fill_quantity;
+        ensure!(
+            journal.total_sol_balance >= required_lamports,
+            "Not enough SOL liquidity to cover conversion"
+        );
+
         if let Some(specified_lamports) = checked_lamports {
-            let required_lamports = configuration_registry.fixed_fill_quantity;
             ensure!(
                 specified_lamports == required_lamports,
                 "SOL amount must be {:0.9} for 2Z -> SOL conversion. Got {:0.9}",

@@ -30,7 +30,7 @@ impl SolConversionCommand {
         let SolConversionState {
             program_state: (_, program_state),
             configuration_registry: (_, configuration_registry),
-            ..
+            journal: (_, journal, _),
         } = SolConversionState::try_fetch(&connection).await?;
         let last_slot = program_state.last_trade_slot;
 
@@ -63,6 +63,12 @@ impl SolConversionCommand {
                 description: "2Z amount for 1 SOL",
                 value: format!("{:.8}", discounted_swap_rate as f64 * 1e-8),
                 note: format!("Includes {:.8}% discount", discount as f64 * 1e-6),
+            },
+            SolConversionTableRow {
+                field: "Journal Balance",
+                description: "SOL available for conversion",
+                value: format!("{:.9}", journal.total_sol_balance as f64 * 1e-9),
+                note: Default::default(),
             },
         ];
 
