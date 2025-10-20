@@ -123,7 +123,7 @@ impl ValidatorDepositsCommand {
                 let (account, _) = zero_copy::checked_from_bytes_with_discriminator::<
                     SolanaValidatorDeposit,
                 >(&account.data)
-                .context("Failed to deserialize solana validator deposit")?;
+                .context("Failed to deserialize Solana validator deposit")?;
                 outputs.push(ValidatorDepositsTableRow {
                     deposit_pda: pubkey,
                     node_id: account.node_id,

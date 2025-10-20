@@ -58,7 +58,7 @@ impl ValidatorDepositCommand {
         let wallet = Wallet::try_from(solana_payer_options)?;
         let wallet_key = wallet.pubkey();
 
-        // First check if the solana validator deposit is already initialized.
+        // First check if the Solana validator deposit is already initialized.
         let (deposit_key, deposit, mut deposit_balance) =
             super::fetch_solana_validator_deposit(&wallet.connection, &node_id).await;
 

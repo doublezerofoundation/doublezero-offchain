@@ -133,7 +133,7 @@ impl DistributionCommand {
         });
 
         value_rows.push(DistributionTableRow {
-            field: "Total solana validators",
+            field: "Total Solana validators",
             value: account.total_solana_validators.to_string(),
             note: Default::default(),
         });
@@ -145,7 +145,7 @@ impl DistributionCommand {
         });
 
         value_rows.push(DistributionTableRow {
-            field: "Total solana validator debt",
+            field: "Total Solana validator debt",
             value: format!(
                 "{:.9} SOL",
                 account.total_solana_validator_debt as f64 * 1e-9
@@ -154,7 +154,7 @@ impl DistributionCommand {
         });
 
         value_rows.push(DistributionTableRow {
-            field: "Collected solana validator payments",
+            field: "Collected Solana validator payments",
             value: format!(
                 "{:.9} SOL",
                 account.collected_solana_validator_payments as f64 * 1e-9
