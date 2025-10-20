@@ -67,7 +67,7 @@ impl ConfigCommand {
                 note: Default::default(),
             },
             ConfigTableRow {
-                field: "Calculation Grace Period",
+                field: "Calculation grace period",
                 value: format!(
                     "{:?}",
                     std::time::Duration::from_secs(
