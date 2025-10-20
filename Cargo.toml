@@ -8,6 +8,7 @@ members = [
     "crates/solana-admin-cli/passport",
     "crates/solana-admin-cli/revenue-distribution",
     "crates/solana-admin-cli/sol-conversion",
+    "crates/solana-cli",
     "crates/solana-client-tools",
     "crates/solana-fork",
     "crates/validator-debt",

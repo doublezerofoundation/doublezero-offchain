@@ -1,5 +1,5 @@
 use crate::{ledger, validator_debt::ComputedSolanaValidatorDebts};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use borsh::BorshDeserialize;
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
 use doublezero_revenue_distribution::{
