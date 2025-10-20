@@ -247,11 +247,11 @@ pub fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
 
 fn try_load_specified_keypair(path: &PathBuf) -> Result<Keypair> {
     let keypair_file = std::fs::read_to_string(path)
-        .context(format!("Keypair not found at {}", path.display()))?;
+        .with_context(|| format!("Keypair not found at {}", path.display()))?;
     let keypair_bytes = serde_json::from_str::<Vec<u8>>(&keypair_file)
-        .context(format!("Keypair not valid JSON at {}", path.display()))?;
+        .with_context(|| format!("Keypair not valid JSON at {}", path.display()))?;
     let default_keypair = Keypair::try_from(keypair_bytes.as_slice())
-        .context(format!("Invalid keypair found at {}", path.display()))?;
+        .with_context(|| format!("Invalid keypair found at {}", path.display()))?;
 
     Ok(default_keypair)
 }

@@ -52,7 +52,7 @@ impl DistributionCommand {
         let account =
             ZeroCopyAccountOwned::<Distribution>::from_rpc_client(&connection, &distribution_key)
                 .await
-                .context(format!("Distribution account not found for epoch {epoch}"))
+                .with_context(|| format!("Distribution account not found for epoch {epoch}"))
                 .map(|config| config.data.unwrap().0)?;
 
         let mut value_rows = vec![

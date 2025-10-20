@@ -162,7 +162,5 @@ pub async fn try_request_oracle_conversion_price() -> Result<OraclePriceData> {
         .await?
         .json()
         .await
-        .context(format!(
-            "Failed to request SOL/2Z price from {SOL_2Z_ORACLE_ENDPOINT}"
-        ))
+        .with_context(|| format!("Failed to request SOL/2Z price from {SOL_2Z_ORACLE_ENDPOINT}"))
 }

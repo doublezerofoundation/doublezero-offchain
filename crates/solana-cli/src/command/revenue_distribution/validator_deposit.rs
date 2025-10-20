@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, bail};
 use clap::Args;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_revenue_distribution::{
@@ -12,8 +12,7 @@ use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 
 use crate::command::{
-    revenue_distribution::{SolConversionState, convert_sol::ConvertSolCommand},
-    try_prompt_proceed_confirmation,
+    revenue_distribution::convert_sol::ConvertSolCommand, try_prompt_proceed_confirmation,
 };
 
 #[derive(Debug, Args)]
@@ -70,7 +69,7 @@ impl ValidatorDepositCommand {
         // Parse fund amount from SOL string (representing 9 decimal places at
         // most) to lamports.
         let fund_lamports = match fund {
-            Some(fund) => parse_sol_to_lamports(fund)?,
+            Some(fund) => crate::utils::parse_sol_amount_to_lamports(fund)?,
             None => 0,
         };
 
@@ -99,29 +98,19 @@ impl ValidatorDepositCommand {
         };
 
         if let Some(limit_price_str) = convert_2z_limit_price_str {
-            let SolConversionState {
-                configuration_registry: (_, configuration_registry),
-                ..
-            } = SolConversionState::try_fetch(&wallet.connection).await?;
-            let required_lamports = configuration_registry.fixed_fill_quantity;
-
-            ensure!(
-                fund_lamports == required_lamports,
-                "Fund amount does not match required amount for 2Z -> SOL conversion: {fund_lamports} != {required_lamports}"
-            );
-
             try_prompt_proceed_confirmation(
                 format!(
-                    "By specifying --fund-2z with a price limit, you are funding {:0.9} SOL to your deposit account",
-                    required_lamports as f64 * 1e-9,
+                    "By specifying --convert-2z-limit-price, you are funding {:0.9} SOL to your deposit account",
+                    fund_lamports as f64 * 1e-9,
                 ),
-                "Aborting command with --fund-2z",
+                "Aborting command with --convert-2z-limit-price".to_string(),
             )?;
 
             let buy_sol_ix = ConvertSolCommand::try_build_buy_sol_instruction(
                 &wallet,
                 Some(limit_price_str),
                 source_2z_account_key,
+                Some(fund_lamports),
             )
             .await?;
 
@@ -168,36 +157,4 @@ impl ValidatorDepositCommand {
 
         Ok(())
     }
-}
-
-//
-
-fn parse_sol_to_lamports(sol_amount_str: String) -> Result<u64> {
-    let sol_amount_str = sol_amount_str.trim();
-
-    if sol_amount_str.is_empty() {
-        bail!("SOL amount cannot be empty");
-    }
-
-    let sol_amount = sol_amount_str
-        .parse::<f64>()
-        .map_err(|_| anyhow::anyhow!("Invalid SOL amount: '{sol_amount_str}'"))?;
-
-    if sol_amount <= 0.0 {
-        bail!("SOL amount must be a positive value");
-    }
-
-    if sol_amount > (u64::MAX as f64 / 1e9) {
-        bail!("SOL amount too large");
-    }
-
-    // Check that value is at most 9 decimal places.
-    if let Some(decimal_index) = sol_amount_str.find('.') {
-        let decimal_places = sol_amount_str.len() - decimal_index - 1;
-        if decimal_places > 9 {
-            bail!("SOL amount cannot have more than 9 decimal places");
-        }
-    }
-
-    Ok((sol_amount * 1e9).round() as u64)
 }

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_sol_conversion_interface::{
@@ -11,8 +11,9 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction, instruction::Instruction, pubkey::Pubkey,
 };
 
-use crate::command::revenue_distribution::{
-    SolConversionState, try_request_oracle_conversion_price,
+use crate::command::{
+    revenue_distribution::{SolConversionState, try_request_oracle_conversion_price},
+    try_prompt_proceed_confirmation,
 };
 
 #[derive(Debug, Args, Clone)]
@@ -26,6 +27,11 @@ pub struct ConvertSolCommand {
     #[arg(long, value_name = "PUBKEY")]
     source_2z_account: Option<Pubkey>,
 
+    /// Explicitly check SOL amount. When specified, this amount will be checked
+    /// against the fixed fill quantity.
+    #[arg(long, value_name = "SOL")]
+    checked_sol_amount: Option<String>,
+
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
 }
@@ -37,6 +43,7 @@ impl ConvertSolCommand {
         wallet: &Wallet,
         limit_price_str: Option<String>,
         source_token_account_key: Option<Pubkey>,
+        checked_lamports: Option<u64>,
     ) -> Result<Instruction> {
         let wallet_key = wallet.pubkey();
 
@@ -51,8 +58,18 @@ impl ConvertSolCommand {
 
         let SolConversionState {
             program_state: (_, sol_conversion_program_state),
-            ..
+            configuration_registry: (_, configuration_registry),
         } = SolConversionState::try_fetch(&wallet.connection).await?;
+
+        if let Some(specified_lamports) = checked_lamports {
+            let required_lamports = configuration_registry.fixed_fill_quantity;
+            ensure!(
+                specified_lamports == required_lamports,
+                "SOL amount must be {:0.9} for 2Z -> SOL conversion. Got {:0.9}",
+                required_lamports as f64 * 1e-9,
+                specified_lamports as f64 * 1e-9,
+            );
+        }
 
         let oracle_price_data = try_request_oracle_conversion_price().await?;
 
@@ -81,14 +98,37 @@ impl ConvertSolCommand {
         let Self {
             limit_price: limit_price_str,
             source_2z_account: source_token_account_key,
+            checked_sol_amount: checked_sol_amount_str,
             solana_payer_options,
         } = self;
 
         let wallet = Wallet::try_from(solana_payer_options)?;
 
-        let buy_sol_ix =
-            Self::try_build_buy_sol_instruction(&wallet, limit_price_str, source_token_account_key)
-                .await?;
+        let checked_lamports = match checked_sol_amount_str {
+            Some(checked_sol_amount_str) => {
+                let checked_lamports =
+                    crate::utils::parse_sol_amount_to_lamports(checked_sol_amount_str)?;
+
+                try_prompt_proceed_confirmation(
+                    format!(
+                        "You are converting 2Z to exactly {:0.9} SOL",
+                        checked_lamports as f64 * 1e-9
+                    ),
+                    "Aborting command with --checked-sol-amount".to_string(),
+                )?;
+
+                Some(checked_lamports)
+            }
+            None => None,
+        };
+
+        let buy_sol_ix = Self::try_build_buy_sol_instruction(
+            &wallet,
+            limit_price_str,
+            source_token_account_key,
+            checked_lamports,
+        )
+        .await?;
 
         let mut instructions = vec![
             buy_sol_ix,

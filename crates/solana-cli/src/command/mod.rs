@@ -26,7 +26,7 @@ impl DoubleZeroSolanaCommand {
     }
 }
 
-fn try_prompt_proceed_confirmation(prompt_message: String, abort_message: &str) -> Result<()> {
+fn try_prompt_proceed_confirmation(prompt_message: String, abort_message: String) -> Result<()> {
     loop {
         println!("⚠️  {prompt_message}. Proceed? [y/N]");
 
