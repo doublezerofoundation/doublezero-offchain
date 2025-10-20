@@ -36,27 +36,21 @@ pub struct DiscountParameters {
     pub coefficient: u64,
     pub max_discount: u64,
     pub min_discount: u64,
-    pub last_slot: u64,
-    pub current_slot: u64,
 }
 
 impl DiscountParameters {
     /// 8-decimal precision discount.
     ///
     /// discount = min(γ * (S_now - S_last) + Dmin, Dmax).
-    pub fn checked_compute(&self) -> Option<u64> {
+    pub fn checked_compute(&self, slot_difference: u64) -> Option<u64> {
         const DISCOUNT_SCALING_FACTOR: u64 = RATE_PRECISION / MAX_DISCOUNT;
 
         if self.coefficient > RATE_PRECISION
             || self.max_discount > MAX_DISCOUNT
             || self.min_discount > self.max_discount
-            || self.last_slot > self.current_slot
         {
             return None;
         }
-
-        // Current slot must be greater than last slot.
-        let slot_diff = self.current_slot - self.last_slot;
 
         // Maximum rate value is 10_000.
         // Multiplied by 100_000_000 / 10_000 = 10_000.
@@ -65,7 +59,7 @@ impl DiscountParameters {
         let min_discount_rate_scaled = self.min_discount * DISCOUNT_SCALING_FACTOR;
         let max_discount_rate_scaled = self.max_discount * DISCOUNT_SCALING_FACTOR;
 
-        let discount_rate = self.coefficient * slot_diff + min_discount_rate_scaled;
+        let discount_rate = self.coefficient * slot_difference + min_discount_rate_scaled;
 
         Some(discount_rate.min(max_discount_rate_scaled))
     }
@@ -84,10 +78,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 100,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(0).unwrap();
         assert_eq!(discount, 0);
         assert_eq!(
             OraclePriceData {
@@ -104,10 +96,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 300,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(200).unwrap();
         assert_eq!(discount, 10_000_000);
         assert_eq!(
             OraclePriceData {
@@ -124,10 +114,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 600,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(500).unwrap();
         assert_eq!(discount, 25_000_000);
         assert_eq!(
             OraclePriceData {
@@ -144,10 +132,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 1_100,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(1_000).unwrap();
         assert_eq!(discount, 50_000_000);
         assert_eq!(
             OraclePriceData {
@@ -164,10 +150,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 1_600,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(1_500).unwrap();
         assert_eq!(discount, 75_000_000);
         assert_eq!(
             OraclePriceData {
@@ -184,10 +168,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 2_100,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(2_000).unwrap();
         assert_eq!(discount, 100_000_000);
         assert_eq!(
             OraclePriceData {
@@ -204,10 +186,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 10_000,
             min_discount: 0,
-            last_slot: 100,
-            current_slot: 3_000,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(2_900).unwrap();
         assert_eq!(discount, 100_000_000);
         assert_eq!(
             OraclePriceData {
@@ -227,10 +207,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 100,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(0).unwrap();
         assert_eq!(discount, 10_000_000);
         assert_eq!(
             OraclePriceData {
@@ -247,10 +225,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 200,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(100).unwrap();
         assert_eq!(discount, 15_000_000);
         assert_eq!(
             OraclePriceData {
@@ -267,10 +243,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 300,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(200).unwrap();
         assert_eq!(discount, 20_000_000);
         assert_eq!(
             OraclePriceData {
@@ -287,10 +261,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 400,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(300).unwrap();
         assert_eq!(discount, 25_000_000);
         assert_eq!(
             OraclePriceData {
@@ -307,10 +279,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 500,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(400).unwrap();
         assert_eq!(discount, 30_000_000);
         assert_eq!(
             OraclePriceData {
@@ -327,10 +297,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 600,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(500).unwrap();
         assert_eq!(discount, 35_000_000);
         assert_eq!(
             OraclePriceData {
@@ -347,10 +315,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 700,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(600).unwrap();
         assert_eq!(discount, 40_000_000);
         assert_eq!(
             OraclePriceData {
@@ -367,10 +333,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 800,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(700).unwrap();
         assert_eq!(discount, 45_000_000);
         assert_eq!(
             OraclePriceData {
@@ -387,10 +351,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 900,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(800).unwrap();
         assert_eq!(discount, 50_000_000);
         assert_eq!(
             OraclePriceData {
@@ -407,10 +369,8 @@ mod tests {
             coefficient: 50_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 1_000,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(900).unwrap();
         assert_eq!(discount, 50_000_000);
         assert_eq!(
             OraclePriceData {
@@ -430,10 +390,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 100,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(0).unwrap();
         assert_eq!(discount, 10_000_000);
         assert_eq!(
             OraclePriceData {
@@ -450,10 +408,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 101,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(1).unwrap();
         assert_eq!(discount, 10_004_500);
         assert_eq!(
             OraclePriceData {
@@ -470,10 +426,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 150,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(50).unwrap();
         assert_eq!(discount, 10_225_000);
         assert_eq!(
             OraclePriceData {
@@ -490,10 +444,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 200,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(100).unwrap();
         assert_eq!(discount, 10_450_000);
         assert_eq!(
             OraclePriceData {
@@ -510,10 +462,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 8_988,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(8_888).unwrap();
         assert_eq!(discount, 49_996_000);
         assert_eq!(
             OraclePriceData {
@@ -530,10 +480,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 8_989,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(8_889).unwrap();
         assert_eq!(discount, 50_000_000);
         assert_eq!(
             OraclePriceData {
@@ -550,10 +498,8 @@ mod tests {
             coefficient: 4500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 10_000,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(9_900).unwrap();
         assert_eq!(discount, 50_000_000);
         assert_eq!(
             OraclePriceData {
@@ -572,10 +518,8 @@ mod tests {
             coefficient: 0,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 200,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(100).unwrap();
         assert_eq!(discount, 10_000_000);
         assert_eq!(
             OraclePriceData {
@@ -592,10 +536,8 @@ mod tests {
             coefficient: 100_000_000,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 200,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(100).unwrap();
         assert_eq!(discount, 50_000_000);
         assert_eq!(
             OraclePriceData {
@@ -612,10 +554,8 @@ mod tests {
             coefficient: 4_500,
             max_discount: 5_000,
             min_discount: 1_000,
-            last_slot: 100,
-            current_slot: 200,
         };
-        let discount = discount_params.checked_compute().unwrap();
+        let discount = discount_params.checked_compute(100).unwrap();
         assert_eq!(discount, 10_450_000);
         assert_eq!(
             OraclePriceData::default()

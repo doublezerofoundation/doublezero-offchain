@@ -40,11 +40,9 @@ impl SolConversionCommand {
             coefficient: configuration_registry.coefficient,
             max_discount: configuration_registry.max_discount_rate,
             min_discount: configuration_registry.min_discount_rate,
-            last_slot,
-            current_slot,
         };
         let discount = discount_parameters
-            .checked_compute()
+            .checked_compute(current_slot - last_slot)
             .context("Failed to calculate discount")?;
 
         let oracle_price_data = try_request_oracle_conversion_price().await?;
