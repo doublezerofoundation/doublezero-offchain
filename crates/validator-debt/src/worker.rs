@@ -21,12 +21,7 @@ use slack_notifier;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{clock::Clock, pubkey::Pubkey, sysvar::clock};
-use std::{
-    collections::HashMap,
-    env,
-    fs::File,
-    str::FromStr,
-};
+use std::{collections::HashMap, env, fs::File, str::FromStr};
 use tabled::{Table, Tabled, settings::Style};
 
 #[derive(Debug, Default, Serialize, Tabled)]
@@ -69,7 +64,12 @@ pub async fn finalize_distribution<T: ValidatorRewards>(
 
     if let Some(finalized_sig) = transaction_signature {
         println!("finalized distribution tx: {finalized_sig:?}");
-        slack_notifier::validator_debt::post_finalized_distribution_to_slack(finalized_sig, dz_epoch, transaction.dry_run).await?;
+        slack_notifier::validator_debt::post_finalized_distribution_to_slack(
+            finalized_sig,
+            dz_epoch,
+            transaction.dry_run,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -370,8 +370,6 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
             // total_debt: debt_map[&vr.validator_id], // this should panic if not found
         })
         .collect();
-
-
 
     slack_notifier::validator_debt::post_distribution_to_slack(
         dz_epoch,

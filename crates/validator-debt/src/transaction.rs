@@ -1,5 +1,5 @@
 use crate::{ledger, validator_debt::ComputedSolanaValidatorDebts};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use borsh::BorshDeserialize;
 use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
 use doublezero_revenue_distribution::{
@@ -213,7 +213,6 @@ impl Transaction {
         dz_epoch: u64,
         recent_blockhash: Hash,
     ) -> Result<()> {
-
         let dz_epoch_bytes = dz_epoch.to_le_bytes();
         let seed: &[&[u8]] = &[SOLANA_SEED_PREFIX, &dz_epoch_bytes];
         let key = pubkey::create_record_key(&self.pubkey(), seed);
@@ -230,7 +229,6 @@ impl Transaction {
         let tx = &self
             .send_or_simulate_transaction(ledger_rpc_client, &verified_transaction)
             .await?;
-
 
         println!("{:#?}", tx);
 
