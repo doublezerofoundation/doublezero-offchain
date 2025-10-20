@@ -121,7 +121,7 @@ $CLI_BIN revenue-distribution fetch validator-deposits -ul --node-id $DUMMY_KEY
 echo
 
 echo "doublezero-solana revenue-distribution fetch validator-deposits -ul --node-id $DUMMY_KEY --balance-only"
-$CLI_BIN revenue-distribution fetch validator-deposits -ul --node-id $DUMMY_KEY
+$CLI_BIN revenue-distribution fetch validator-deposits -ul --node-id $DUMMY_KEY --balance-only
 echo
 
 echo "doublezero-solana revenue-distribution fetch validator-deposits -ul"
