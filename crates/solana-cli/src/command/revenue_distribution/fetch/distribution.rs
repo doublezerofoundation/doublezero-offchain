@@ -62,12 +62,12 @@ impl DistributionCommand {
                 note: "Epoch of DoubleZero Ledger Network".to_string(),
             },
             DistributionTableRow {
-                field: "PDA Key",
+                field: "PDA key",
                 value: distribution_key.to_string(),
                 note: Default::default(),
             },
             DistributionTableRow {
-                field: "Community Burn Rate",
+                field: "Community burn rate",
                 value: format!(
                     "{:.7}%",
                     u32::from(account.community_burn_rate) as f64 / 10_000_000.0
@@ -80,7 +80,7 @@ impl DistributionCommand {
 
         if fee_parameters.base_block_rewards_pct != Default::default() {
             value_rows.push(DistributionTableRow {
-                field: "Base Block Rewards Fee",
+                field: "Base block rewards fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(fee_parameters.base_block_rewards_pct) as f64 / 100.0
@@ -90,7 +90,7 @@ impl DistributionCommand {
         }
         if fee_parameters.priority_block_rewards_pct != Default::default() {
             value_rows.push(DistributionTableRow {
-                field: "Priority Block Rewards Fee",
+                field: "Priority block rewards fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(fee_parameters.priority_block_rewards_pct) as f64 / 100.0
@@ -100,7 +100,7 @@ impl DistributionCommand {
         }
         if fee_parameters.inflation_rewards_pct != Default::default() {
             value_rows.push(DistributionTableRow {
-                field: "Inflation Rewards Fee",
+                field: "Inflation rewards fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(fee_parameters.inflation_rewards_pct) as f64 / 100.0
@@ -110,7 +110,7 @@ impl DistributionCommand {
         }
         if fee_parameters.jito_tips_pct != Default::default() {
             value_rows.push(DistributionTableRow {
-                field: "Jito Tips Fee",
+                field: "Jito tips fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(fee_parameters.jito_tips_pct) as f64 / 100.0
@@ -120,7 +120,7 @@ impl DistributionCommand {
         }
         if fee_parameters.fixed_sol_amount != 0 {
             value_rows.push(DistributionTableRow {
-                field: "Fixed SOL Fee",
+                field: "Fixed SOL fee",
                 value: format!("{:.9} SOL", fee_parameters.fixed_sol_amount as f64 * 1e-9),
                 note: "Fixed SOL amount charged to Solana validators".to_string(),
             });

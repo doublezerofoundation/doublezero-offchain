@@ -53,19 +53,19 @@ impl SolConversionCommand {
 
         let value_rows = vec![
             SolConversionTableRow {
-                field: "Swap Rate",
+                field: "Swap rate",
                 description: "2Z amount for 1 SOL",
                 value: format!("{:.8}", oracle_price_data.swap_rate as f64 * 1e-8),
                 note: Default::default(),
             },
             SolConversionTableRow {
-                field: "Swap Rate",
+                field: "Swap rate",
                 description: "2Z amount for 1 SOL",
                 value: format!("{:.8}", discounted_swap_rate as f64 * 1e-8),
                 note: format!("Includes {:.8}% discount", discount as f64 * 1e-6),
             },
             SolConversionTableRow {
-                field: "Journal Balance",
+                field: "Journal balance",
                 description: "SOL available for conversion",
                 value: format!("{:.9}", journal.total_sol_balance as f64 * 1e-9),
                 note: Default::default(),

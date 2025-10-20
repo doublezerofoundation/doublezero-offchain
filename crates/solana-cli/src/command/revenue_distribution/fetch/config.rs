@@ -37,7 +37,7 @@ impl ConfigCommand {
 
         let mut value_rows = vec![
             ConfigTableRow {
-                field: "PDA Key",
+                field: "PDA key",
                 value: program_config_key.to_string(),
                 note: Default::default(),
             },
@@ -47,22 +47,22 @@ impl ConfigCommand {
                 note: Default::default(),
             },
             ConfigTableRow {
-                field: "Debt Accountant",
+                field: "Debt accountant",
                 value: program_config.debt_accountant_key.to_string(),
                 note: Default::default(),
             },
             ConfigTableRow {
-                field: "Rewards Accountant",
+                field: "Rewards accountant",
                 value: program_config.rewards_accountant_key.to_string(),
                 note: Default::default(),
             },
             ConfigTableRow {
-                field: "Contributor Manager",
+                field: "Contributor manager",
                 value: program_config.contributor_manager_key.to_string(),
                 note: Default::default(),
             },
             ConfigTableRow {
-                field: "SOL Conversion Program",
+                field: "SOL Conversion program",
                 value: program_config.sol_2z_swap_program_id.to_string(),
                 note: Default::default(),
             },
@@ -81,7 +81,7 @@ impl ConfigCommand {
                 note: Default::default(),
             },
             ConfigTableRow {
-                field: "Duration to Finalize Rewards",
+                field: "Duration to finalize rewards",
                 value: program_config
                     .distribution_parameters
                     .minimum_epoch_duration_to_finalize_rewards
@@ -89,7 +89,7 @@ impl ConfigCommand {
                 note: "Minimum number of epochs".to_string(),
             },
             ConfigTableRow {
-                field: "Next Community Burn Rate",
+                field: "Next community burn rate",
                 value: format!(
                     "{:.7}% ({})",
                     u32::from(community_burn_rate_params.next_burn_rate().unwrap()) as f64
@@ -99,7 +99,7 @@ impl ConfigCommand {
                 note: "Determines the next distribution's burn rate".to_string(),
             },
             ConfigTableRow {
-                field: "Community Burn Rate Limit",
+                field: "Community burn rate limit",
                 value: format!(
                     "{:.7}%",
                     u32::from(community_burn_rate_params.limit) as f64 / 10_000_000.0
@@ -111,7 +111,7 @@ impl ConfigCommand {
         match community_burn_rate_mode {
             CommunityBurnRateMode::Static => {
                 value_rows.push(ConfigTableRow {
-                    field: "Community Burn Rate Increases After",
+                    field: "Community burn rate increases after",
                     value: format!(
                         "{} epoch{}",
                         community_burn_rate_params.dz_epochs_to_increasing,
@@ -124,7 +124,7 @@ impl ConfigCommand {
                     note: "Determines the epoch when the community burn rate increases".to_string(),
                 });
                 value_rows.push(ConfigTableRow {
-                    field: "Community Burn Rate Limit Reached After",
+                    field: "Community burn rate limit reached after",
                     value: format!(
                         "{} epoch{}",
                         community_burn_rate_params.dz_epochs_to_limit,
@@ -140,7 +140,7 @@ impl ConfigCommand {
             }
             CommunityBurnRateMode::Increasing => {
                 value_rows.push(ConfigTableRow {
-                    field: "Community Burn Rate Limit Reached After",
+                    field: "Community burn rate limit reached after",
                     value: format!(
                         "{} epoch{}",
                         community_burn_rate_params.dz_epochs_to_limit,
@@ -159,7 +159,7 @@ impl ConfigCommand {
 
         let validator_fee_rows = vec![
             ConfigTableRow {
-                field: "Solana Validator Base Block Rewards Fee",
+                field: "Solana validator base block rewards fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(validator_fee_params.base_block_rewards_pct) as f64 / 100.0
@@ -167,7 +167,7 @@ impl ConfigCommand {
                 note: "Amount charged to Solana validators for base block rewards".to_string(),
             },
             ConfigTableRow {
-                field: "Solana Validator Priority Block Rewards Fee",
+                field: "Solana validator priority block rewards fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(validator_fee_params.priority_block_rewards_pct) as f64 / 100.0
@@ -175,7 +175,7 @@ impl ConfigCommand {
                 note: "Amount charged to Solana validators for priority block rewards".to_string(),
             },
             ConfigTableRow {
-                field: "Solana Validator Inflation Rewards Fee",
+                field: "Solana validator inflation rewards fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(validator_fee_params.inflation_rewards_pct) as f64 / 100.0
@@ -183,7 +183,7 @@ impl ConfigCommand {
                 note: "Amount charged to Solana validators for inflation rewards".to_string(),
             },
             ConfigTableRow {
-                field: "Solana Validator Jito Tips Fee",
+                field: "Solana validator Jito tips fee",
                 value: format!(
                     "{:.2}%",
                     u16::from(validator_fee_params.jito_tips_pct) as f64 / 100.0
@@ -191,7 +191,7 @@ impl ConfigCommand {
                 note: "Amount charged to Solana validators for Jito tips".to_string(),
             },
             ConfigTableRow {
-                field: "Solana Validator Fixed SOL Fee",
+                field: "Solana validator fixed SOL fee",
                 value: format!(
                     "{:.9} SOL",
                     validator_fee_params.fixed_sol_amount as f64 * 1e-9
@@ -224,7 +224,7 @@ impl ValidatorFeesCommand {
         if let Some(fee_params) = program_config.checked_solana_validator_fee_parameters() {
             if fee_params.base_block_rewards_pct != Default::default() {
                 value_rows.push(ConfigTableRow {
-                    field: "Base Block Rewards Fee",
+                    field: "Base block rewards fee",
                     value: format!(
                         "{:.2}%",
                         u16::from(fee_params.base_block_rewards_pct) as f64 / 100.0
@@ -234,7 +234,7 @@ impl ValidatorFeesCommand {
             }
             if fee_params.priority_block_rewards_pct != Default::default() {
                 value_rows.push(ConfigTableRow {
-                    field: "Priority Block Rewards Fee",
+                    field: "Priority block rewards fee",
                     value: format!(
                         "{:.2}%",
                         u16::from(fee_params.priority_block_rewards_pct) as f64 / 100.0
@@ -245,7 +245,7 @@ impl ValidatorFeesCommand {
             }
             if fee_params.inflation_rewards_pct != Default::default() {
                 value_rows.push(ConfigTableRow {
-                    field: "Inflation Rewards Fee",
+                    field: "Inflation rewards fee",
                     value: format!(
                         "{:.2}%",
                         u16::from(fee_params.inflation_rewards_pct) as f64 / 100.0
@@ -255,14 +255,14 @@ impl ValidatorFeesCommand {
             }
             if fee_params.jito_tips_pct != Default::default() {
                 value_rows.push(ConfigTableRow {
-                    field: "Jito Tips Fee",
+                    field: "Jito tips fee",
                     value: format!("{:.2}%", u16::from(fee_params.jito_tips_pct) as f64 / 100.0),
                     note: "Amount charged to Solana validators for Jito tips".to_string(),
                 });
             }
             if fee_params.fixed_sol_amount != 0 {
                 value_rows.push(ConfigTableRow {
-                    field: "Fixed SOL Fee",
+                    field: "Fixed SOL fee",
                     value: format!("{:.9} SOL", fee_params.fixed_sol_amount as f64 * 1e-9),
                     note: "Fixed SOL amount charged to Solana validators".to_string(),
                 });
