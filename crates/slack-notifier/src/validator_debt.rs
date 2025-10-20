@@ -30,15 +30,15 @@ pub async fn post_distribution_to_slack(
         solana_epoch.to_string(),
         dz_epoch.to_string(),
         total_validators.to_string(),
-        total_amount.to_string(),
         transaction.unwrap_or("No transaction details".to_string()),
+        total_amount.to_string(),
     ];
 
     let msg = build_table(header.to_string(), table_header, table_values)?;
 
     let payload = serde_json::to_string(&msg)?;
     let body = Body::from(payload);
-    let request = build_message_request(&client, body);
+    let request = build_message_request(&client, body)?;
     let _resp = request.send().await?;
 
     Ok(())
@@ -64,7 +64,7 @@ pub async fn post_finalized_distribution_to_slack(
 
     let payload = serde_json::to_string(&msg)?;
     let body = Body::from(payload);
-    let request = build_message_request(&client, body);
+    let request = build_message_request(&client, body)?;
     let _resp = request.send().await?;
 
     Ok(())
@@ -93,7 +93,7 @@ pub async fn post_debt_collection_to_slack(
 
     let payload = serde_json::to_string(&msg)?;
     let body = Body::from(payload);
-    let request = build_message_request(&client, body);
+    let request = build_message_request(&client, body)?;
     let _resp = request.send().await?;
 
     Ok(())
@@ -155,12 +155,13 @@ fn build_table(
     Ok(slack_message)
 }
 
-fn build_message_request(client: &Client, body: Body) -> RequestBuilder {
-    let slack_webhook = slack_webhook().unwrap();
-    client
+fn build_message_request(client: &Client, body: Body) -> Result<RequestBuilder> {
+    let slack_webhook = slack_webhook()?;
+    let msg_request = client
         .post(slack_webhook)
         .header(ACCEPT, "application/json")
-        .body(body)
+        .body(body);
+    Ok(msg_request)
 }
 
 fn slack_webhook() -> Result<String> {
