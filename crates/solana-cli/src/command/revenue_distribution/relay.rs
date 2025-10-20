@@ -1,7 +1,7 @@
 use anyhow::Result;
 use borsh::de::BorshDeserialize;
 use chrono::Utc;
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, Wallet},
     rpc::DoubleZeroLedgerConnectionOptions,
@@ -11,11 +11,9 @@ use doublezero_solana_validator_debt::{
     transaction::{SOLANA_SEED_PREFIX, Transaction},
     validator_debt::ComputedSolanaValidatorDebts,
 };
-use slack_notifier::slack;
-use slack_notifier::slack;
+use slack_notifier::validator_debt;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
-use std::fs;
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum ExportFormat {
@@ -98,6 +96,13 @@ pub async fn execute_pay_solana_validator_debt(
         .pay_solana_validator_debt(&wallet.connection.rpc_client, deserialized, epoch)
         .await?;
 
+    validator_debt::post_debt_collection_to_slack(
+        tx_results.len(),
+        epoch,
+        wallet.dry_run,
+    )
+    .await?;
+
     if let Some(ExportFormat::Csv) = export {
         let now = Utc::now();
         let timestamp_milliseconds: i64 = now.timestamp_millis();
@@ -112,10 +117,6 @@ pub async fn execute_pay_solana_validator_debt(
             writer.serialize(tx_result)?;
         }
 
-        let created_csv = fs::metadata(filename.clone())?;
-        let file_size = created_csv.len();
-
-        slack::upload_file(filename, file_size).await?;
         writer.flush()?;
     };
 

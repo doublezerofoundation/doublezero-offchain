@@ -7,7 +7,6 @@ use crate::{
 };
 
 use anyhow::{Result, bail};
-use chrono::Utc;
 use doublezero_revenue_distribution::{
     instruction::RevenueDistributionInstructionData::ConfigureDistributionDebt,
     types::SolanaValidatorDebt,
@@ -18,14 +17,14 @@ use doublezero_serviceability::state::{
 use doublezero_solana_client_tools::{log_info, log_warn};
 use leaky_bucket::RateLimiter;
 use serde::Serialize;
-use slack_notifier::slack;
+use slack_notifier;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{clock::Clock, pubkey::Pubkey, sysvar::clock};
 use std::{
     collections::HashMap,
     env,
-    fs::{self, File},
+    fs::File,
     str::FromStr,
 };
 use tabled::{Table, Tabled, settings::Style};
@@ -70,6 +69,7 @@ pub async fn finalize_distribution<T: ValidatorRewards>(
 
     if let Some(finalized_sig) = transaction_signature {
         println!("finalized distribution tx: {finalized_sig:?}");
+        slack_notifier::validator_debt::post_finalized_distribution_to_slack(finalized_sig, dz_epoch, transaction.dry_run).await?;
     }
     Ok(())
 }
@@ -322,7 +322,6 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         debts: computed_solana_validator_debt_vec.clone(),
     };
 
-<<<<<<< HEAD
     if transaction.dry_run {
         println!("posting to ledger is not supported with `--dry-run`");
     } else {
@@ -335,17 +334,6 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         )
         .await?;
     }
-=======
-    // read record
-    // create_or_validate_ledger_record(
-    //     solana_debt_calculator,
-    //     &transaction,
-    //     computed_solana_validator_debts.clone(),
-    //     seed,
-    //     recent_blockhash,
-    // )
-    // .await?;
->>>>>>> a35db37 (000)
 
     if post_to_ledger_only {
         bail!("Debt posted only to DoubleZero Ledger and process exited")
@@ -383,26 +371,12 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         })
         .collect();
 
-    let now = Utc::now();
-    let timestamp_milliseconds: i64 = now.timestamp_millis();
-    let filename = if transaction.dry_run {
-        format!("DRY_RUN_dz_epoch_{dz_epoch}_{timestamp_milliseconds}.csv")
-    } else {
-        format!("dz_epoch_{dz_epoch}_{timestamp_milliseconds}.csv")
-    };
-    // let mut writer = csv::Writer::from_path(filename.clone())?;
-    // for w in write_summaries.iter().clone() {
-    //     writer.serialize(w)?;
-    // }
 
-    // let created_csv = fs::metadata(filename.clone())?;
-    // let file_size = created_csv.len();
 
-    // slack::upload_file(filename, file_size).await?;
-
-    slack::calculate_distribution_message(
+    slack_notifier::validator_debt::post_distribution_to_slack(
         dz_epoch,
         solana_epoch,
+        transaction.dry_run,
         computed_solana_validator_debts.debts.len() as u64,
         computed_solana_validator_debts
             .debts
@@ -412,7 +386,6 @@ pub async fn calculate_validator_debt<T: ValidatorRewards>(
         submitted_tx,
     )
     .await?;
-    // writer.flush()?;
 
     println!(
         "Validator rewards for solana epoch {} and validator debt for DoubleZero epoch {dz_epoch}:\n{}",
