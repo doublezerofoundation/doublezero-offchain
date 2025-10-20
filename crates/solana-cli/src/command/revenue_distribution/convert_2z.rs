@@ -17,7 +17,7 @@ use crate::command::{
 };
 
 #[derive(Debug, Args, Clone)]
-pub struct ConvertSolCommand {
+pub struct Convert2zCommand {
     /// Limit price defaults to the current SOL/2Z oracle price.
     #[arg(long, value_name = "DECIMAL")]
     limit_price: Option<String>,
@@ -36,7 +36,7 @@ pub struct ConvertSolCommand {
     solana_payer_options: SolanaPayerOptions,
 }
 
-impl ConvertSolCommand {
+impl Convert2zCommand {
     pub const BUY_SOL_COMPUTE_UNIT_LIMIT: u32 = 80_000;
 
     pub async fn try_build_buy_sol_instruction(

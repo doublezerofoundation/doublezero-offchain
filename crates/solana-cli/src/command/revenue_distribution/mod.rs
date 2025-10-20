@@ -1,5 +1,5 @@
 mod contributor_rewards;
-mod convert_sol;
+mod convert_2z;
 mod fetch;
 mod relay;
 mod validator_deposit;
@@ -40,8 +40,11 @@ pub enum RevenueDistributionSubcommand {
     /// Contributor rewards account management.
     ContributorRewards(contributor_rewards::ContributorRewardsCommand),
 
-    /// Convert SOL to 2Z tokens.
-    ConvertSol(convert_sol::ConvertSolCommand),
+    /// Using the Revenue Distribution program's SOL liquidity, convert 2Z
+    /// tokens to SOL. If there is not enough SOL liquidity for the
+    /// fixed-quantity conversion, the command will fail.
+    #[command(name = "convert-2z")]
+    Convert2z(convert_2z::Convert2zCommand),
 
     /// Manage a Solana validator deposit account. Funding can be directly with
     /// SOL or with 2Z limited by specified conversion rate for 2Z -> SOL.
@@ -56,7 +59,7 @@ impl RevenueDistributionSubcommand {
         match self {
             Self::Fetch(command) => command.try_into_execute().await,
             Self::ContributorRewards(command) => command.try_into_execute().await,
-            Self::ConvertSol(command) => command.try_into_execute().await,
+            Self::Convert2z(command) => command.try_into_execute().await,
             Self::ValidatorDeposit(command) => command.try_into_execute().await,
             Self::Relay(command) => command.inner.try_into_execute().await,
         }

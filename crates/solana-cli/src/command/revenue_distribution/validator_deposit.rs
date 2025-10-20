@@ -12,7 +12,7 @@ use doublezero_solana_client_tools::payer::{SolanaPayerOptions, Wallet};
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 
 use crate::command::{
-    revenue_distribution::convert_sol::ConvertSolCommand, try_prompt_proceed_confirmation,
+    revenue_distribution::convert_2z::Convert2zCommand, try_prompt_proceed_confirmation,
 };
 
 #[derive(Debug, Args)]
@@ -106,7 +106,7 @@ impl ValidatorDepositCommand {
                 "Aborting command with --convert-2z-limit-price".to_string(),
             )?;
 
-            let buy_sol_ix = ConvertSolCommand::try_build_buy_sol_instruction(
+            let buy_sol_ix = Convert2zCommand::try_build_buy_sol_instruction(
                 &wallet,
                 Some(limit_price_str),
                 source_2z_account_key,
@@ -115,7 +115,7 @@ impl ValidatorDepositCommand {
             .await?;
 
             instructions.push(buy_sol_ix);
-            compute_unit_limit += ConvertSolCommand::BUY_SOL_COMPUTE_UNIT_LIMIT;
+            compute_unit_limit += Convert2zCommand::BUY_SOL_COMPUTE_UNIT_LIMIT;
         }
 
         if fund_lamports != 0 {
