@@ -63,10 +63,12 @@ fn test_settings() -> settings::Settings {
             snapshot_dir: "/tmp/snapshots".to_string(),
             max_consecutive_failures: 10,
             enable_dry_run: false,
+            storage_backend: settings::aws::StorageBackend::LocalFile,
         },
         metrics: Some(settings::MetricsSettings {
             addr: "127.0.0.1:9090".parse().unwrap(),
         }),
+        aws: settings::aws::AwsSettings::default(),
     }
 }
 

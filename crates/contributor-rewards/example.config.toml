@@ -107,11 +107,42 @@ interval_seconds = 300
 # Path to worker state file for tracking processed epochs
 state_file = "/var/lib/doublezero-contributor-rewards/scheduler.state"
 
+# Directory to store epoch snapshots (only used if storage_backend = "local-file")
+snapshot_dir = "/var/lib/doublezero-contributor-rewards/snapshots"
+
 # Maximum consecutive failures before halting
 max_consecutive_failures = 10
 
-# Enable dry run mode (no on-chain writes)
+# Enable dry run mode (no on-chain writes, but snapshots still upload to S3)
 enable_dry_run = false
+
+# Storage backend for snapshots
+# Options: s3, local-file
+storage_backend = "s3"
+
+# ========== AWS S3 Configuration (Required if storage_backend = "s3") ==========
+[aws]
+# AWS region
+region = "us-east-1"
+
+# Testnet configuration
+[aws.testnet]
+bucket = "doublezero-contributor-rewards-testnet-snapshots"
+# Credentials: Use env in prod (recommended)
+# DZ__AWS__TESTNET__ACCESS_KEY_ID=AKIA...
+# DZ__AWS__TESTNET__SECRET_ACCESS_KEY=...
+#
+# For local development (with minio), specify credentials and endpoint:
+# access_key_id = "minioadmin"
+# secret_access_key = "minioadmin"
+# endpoint = "http://localhost:9000"
+
+# Mainnet-beta configuration
+[aws.mainnet-beta]
+bucket = "doublezero-contributor-rewards-mn-beta-snapshots"
+# Credentials: Use env in prod (recommended)
+# DZ__AWS__MN_BETA__ACCESS_KEY_ID=AKIA...
+# DZ__AWS__MN_BETA__SECRET_ACCESS_KEY=...
 
 # ========== Metrics Configuration (Optional) ==========
 [metrics]
