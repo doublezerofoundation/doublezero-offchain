@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 # Template for the changelog body
 body = """
 {% if version %}\
-## [{{ version | trim_start_matches(pat="v") }}](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+## [{{ version | split(pat="/") | last | trim_start_matches(pat="v") }}](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
 {% else %}\
 ## [Unreleased]
 {% endif %}\
