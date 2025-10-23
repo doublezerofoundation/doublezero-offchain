@@ -28,7 +28,7 @@ jobs:
       - name: Validate version format
         run: |
           if ! echo "${{ github.event.inputs.version }}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'; then
-            echo "[ERROR] Invalid version format. Expected: X.Y.Z or X.Y.Z-rcN"
+            echo "[ERROR] Invalid version format. Expected: X.Y.Z or X.Y.Z-rcN (where N is a number)"
             exit 1
           fi
 
