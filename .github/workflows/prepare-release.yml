@@ -1,0 +1,146 @@
+name: Prepare Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: 'Crate to release'
+        required: true
+        type: choice
+        options:
+          - sentinel
+          - contributor-rewards
+          - doublezero-solana
+          - solana-validator-debt
+      version:
+        description: 'Version (e.g., 0.2.1 or 0.2.0-rc1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        run: |
+          if ! echo "${{ github.event.inputs.version }}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$'; then
+            echo "[ERROR] Invalid version format. Expected: X.Y.Z or X.Y.Z-rcN"
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install git-cliff
+        uses: taiki-e/install-action@git-cliff
+
+      - name: Set up crate metadata
+        id: crate_meta
+        run: |
+          case "${{ github.event.inputs.crate }}" in
+            sentinel)
+              echo "crate_path=crates/sentinel" >> $GITHUB_OUTPUT
+              echo "tag_prefix=sentinel" >> $GITHUB_OUTPUT
+              echo "crate_name=sentinel" >> $GITHUB_OUTPUT
+              ;;
+            contributor-rewards)
+              echo "crate_path=crates/contributor-rewards" >> $GITHUB_OUTPUT
+              echo "tag_prefix=contributor-rewards" >> $GITHUB_OUTPUT
+              echo "crate_name=contributor-rewards" >> $GITHUB_OUTPUT
+              ;;
+            doublezero-solana)
+              echo "crate_path=crates/solana-cli" >> $GITHUB_OUTPUT
+              echo "tag_prefix=doublezero-solana" >> $GITHUB_OUTPUT
+              echo "crate_name=doublezero-solana" >> $GITHUB_OUTPUT
+              ;;
+            solana-validator-debt)
+              echo "crate_path=crates/validator-debt" >> $GITHUB_OUTPUT
+              echo "tag_prefix=solana-validator-debt" >> $GITHUB_OUTPUT
+              echo "crate_name=solana-validator-debt" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "[ERROR] Unknown crate: ${{ github.event.inputs.crate }}"
+              exit 1
+              ;;
+          esac
+
+      - name: Find previous tag
+        id: prev_tag
+        run: |
+          TAG_PREFIX="${{ steps.crate_meta.outputs.tag_prefix }}"
+          PREV_TAG=$(git tag --list "${TAG_PREFIX}/v*" --sort=-v:refname | head -n 1)
+
+          if [ -z "$PREV_TAG" ]; then
+            echo "[WARN] No previous tag found for ${TAG_PREFIX}, using first commit"
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+          echo "[OK] Previous tag: ${PREV_TAG}"
+
+      - name: Generate changelog
+        run: |
+          TAG_PREFIX="${{ steps.crate_meta.outputs.tag_prefix }}"
+          VERSION="${{ github.event.inputs.version }}"
+          PREV_TAG="${{ steps.prev_tag.outputs.prev_tag }}"
+          CHANGELOG_PATH="${{ steps.crate_meta.outputs.crate_path }}/CHANGELOG.md"
+
+          echo "[OK] Generating changelog for ${TAG_PREFIX}/v${VERSION}"
+          echo "[OK] Range: ${PREV_TAG}..HEAD"
+
+          # Generate new changelog entry
+          git cliff \
+            --config cliff.toml \
+            --tag-pattern "${TAG_PREFIX}/v[0-9]*" \
+            --tag "${TAG_PREFIX}/v${VERSION}" \
+            --unreleased \
+            --prepend "${CHANGELOG_PATH}" \
+            "${PREV_TAG}..HEAD"
+
+          echo "[OK] Changelog updated at ${CHANGELOG_PATH}"
+
+          # Show diff for verification
+          git diff "${CHANGELOG_PATH}"
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            chore(${{ steps.crate_meta.outputs.crate_name }}): prepare v${{ github.event.inputs.version }} release
+
+            Update CHANGELOG.md for ${{ steps.crate_meta.outputs.crate_name }} v${{ github.event.inputs.version }}
+          branch: release/${{ steps.crate_meta.outputs.crate_name }}-v${{ github.event.inputs.version }}
+          delete-branch: true
+          title: "chore(${{ steps.crate_meta.outputs.crate_name }}): prepare v${{ github.event.inputs.version }} release"
+          body: |
+            ## Release Preparation for ${{ steps.crate_meta.outputs.crate_name }} v${{ github.event.inputs.version }}
+
+            This PR updates the CHANGELOG.md for the upcoming release.
+
+            ### Next Steps
+            1. Review the changelog updates
+            2. Merge this PR to main
+            3. Create and push the release tag:
+               ```bash
+               git tag ${{ steps.crate_meta.outputs.tag_prefix }}/v${{ github.event.inputs.version }}
+               git push origin ${{ steps.crate_meta.outputs.tag_prefix }}/v${{ github.event.inputs.version }}
+               ```
+            4. The existing goreleaser workflow will automatically build and publish the release
+
+            ### Changes
+            - Updated `${{ steps.crate_meta.outputs.crate_path }}/CHANGELOG.md`
+
+            ---
+            *This PR was automatically generated by the [Prepare Release workflow](.github/workflows/prepare-release.yml)*
+          labels: |
+            release
+            changelog
+          assignees: ${{ github.actor }}
