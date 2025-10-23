@@ -43,7 +43,7 @@ protect_breaking_commits = false
 # Filter commits by matching regex
 filter_commits = false
 
-# Tag pattern for matching tags (will be overridden in workflow for specific crates)
+# Tag pattern for matching tags
 tag_pattern = "v[0-9]*"
 
 # Skip tags matching this pattern
