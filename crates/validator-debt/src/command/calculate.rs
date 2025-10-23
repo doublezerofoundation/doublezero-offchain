@@ -23,6 +23,7 @@ use crate::{
 #[derive(Debug, Clone, ValueEnum)]
 pub enum ExportFormat {
     Csv,
+    Slack,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -46,7 +47,7 @@ pub struct CalculateValidatorDebtCommand {
     #[arg(long)]
     post_to_ledger_only: bool,
 
-    /// export results: csv
+    /// export results: csv, slack
     #[arg(long, value_enum)]
     export: Option<ExportFormat>,
 }
@@ -105,7 +106,9 @@ impl Schedulable for CalculateValidatorDebtCommand {
             *post_to_ledger_only,
         )
         .await?;
+
         let mut filename: Option<String> = None;
+
         if let Some(ExportFormat::Csv) = export {
             let now = Utc::now();
             let timestamp_milliseconds: i64 = now.timestamp_millis();
@@ -128,16 +131,18 @@ impl Schedulable for CalculateValidatorDebtCommand {
             writer.flush()?;
         };
 
-        slack_notifier::validator_debt::post_distribution_to_slack(
-            filename,
-            write_summary.solana_epoch,
-            write_summary.dz_epoch,
-            dry_run,
-            write_summary.total_debt,
-            write_summary.total_validators,
-            write_summary.transaction_id,
-        )
-        .await?;
+        if let Some(ExportFormat::Slack) = export {
+            slack_notifier::validator_debt::post_distribution_to_slack(
+                filename,
+                write_summary.solana_epoch,
+                write_summary.dz_epoch,
+                dry_run,
+                write_summary.total_debt,
+                write_summary.total_validators,
+                write_summary.transaction_id,
+            )
+            .await?;
+        }
 
         println!(
             "Validator rewards for solana epoch {} and validator debt for DoubleZero epoch {}:\n{}",

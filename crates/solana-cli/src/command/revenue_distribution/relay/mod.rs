@@ -33,6 +33,7 @@ use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 #[derive(Debug, Clone, ValueEnum)]
 pub enum ExportFormat {
     Csv,
+    Slack,
 }
 
 #[derive(Debug, Args)]
@@ -48,7 +49,7 @@ pub enum RevenueDistributionRelaySubcommand {
         #[arg(long)]
         dz_epoch: u64,
 
-        /// export results: csv
+        /// export results: csv, slack
         #[arg(long, value_enum)]
         export: Option<ExportFormat>,
 
@@ -135,17 +136,18 @@ async fn execute_pay_solana_validator_debt(
         filename = Some(string_filename);
         writer.flush()?;
     };
-
-    validator_debt::post_debt_collection_to_slack(
-        tx_results.total_transactions_attempted,
-        tx_results.successful_transactions,
-        tx_results.insufficient_funds,
-        tx_results.already_paid,
-        epoch,
-        filename,
-        wallet.dry_run,
-    )
-    .await?;
+    if let Some(ExportFormat::Slack) = export {
+        validator_debt::post_debt_collection_to_slack(
+            tx_results.total_transactions_attempted,
+            tx_results.successful_transactions,
+            tx_results.insufficient_funds,
+            tx_results.already_paid,
+            epoch,
+            filename,
+            wallet.dry_run,
+        )
+        .await?;
+    }
 
     Ok(())
 }
