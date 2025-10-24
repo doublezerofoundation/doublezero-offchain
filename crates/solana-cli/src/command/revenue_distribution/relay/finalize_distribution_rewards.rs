@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use clap::Args;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_revenue_distribution::{
@@ -10,12 +10,12 @@ use doublezero_revenue_distribution::{
 };
 use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_solana_client_tools::{
-    log_info,
+    log_info, log_warn,
     payer::{SolanaPayerOptions, Wallet},
 };
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, instruction::Instruction};
 
-use crate::command::revenue_distribution::try_fetch_program_config;
+use crate::command::revenue_distribution::{try_fetch_distribution, try_fetch_program_config};
 
 #[derive(Debug, Args, Clone)]
 pub struct FinalizeDistributionRewards {
@@ -67,6 +67,18 @@ impl Schedulable for FinalizeDistributionRewards {
             }
         };
 
+        let (_, distribution) = try_fetch_distribution(&wallet.connection, dz_epoch).await?;
+
+        if distribution.is_rewards_calculation_finalized() {
+            if schedule.is_scheduled() {
+                log_warn!("Rewards calculation already finalized for epoch {dz_epoch}");
+
+                return Ok(());
+            } else {
+                bail!("Rewards calculation already finalized for epoch {dz_epoch}");
+            }
+        }
+
         let finalize_distribution_tokens_context =
             FinalizeDistributionRewardsContext::try_prepare(&wallet, dz_epoch)?;
 
@@ -85,7 +97,7 @@ impl Schedulable for FinalizeDistributionRewards {
         let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
         if let Some(tx_sig) = tx_sig {
-            log_info!("Finalize distribution rewards: {tx_sig}");
+            log_info!("Finalize distribution rewards for epoch {dz_epoch}: {tx_sig}");
 
             wallet.print_verbose_output(&[tx_sig]).await?;
         }

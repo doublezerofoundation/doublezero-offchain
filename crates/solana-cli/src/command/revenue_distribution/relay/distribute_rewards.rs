@@ -117,7 +117,7 @@ impl Schedulable for DistributeRewards {
 
         for (leaf_index, reward_share) in shapley_output.rewards.iter().enumerate() {
             log_info!(
-                "Processing merkle leaf index {leaf_index}, contributor: {}, share: {:.9}",
+                "Processing epoch {dz_epoch} merkle leaf index {leaf_index}, contributor: {}, share: {:.9}",
                 reward_share.contributor_key,
                 reward_share.unit_share as f64 / u32::from(UnitShare32::MAX) as f64
             );
@@ -190,7 +190,7 @@ async fn try_prepare_distribution_rewards(
     };
 
     if instructions.is_empty() {
-        log_info!("No instructions to prepare distribution rewards");
+        log_info!("No instructions to prepare distribution rewards for epoch {dz_epoch}");
 
         return Ok(distribution);
     }
@@ -207,7 +207,7 @@ async fn try_prepare_distribution_rewards(
     let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
     if let Some(tx_sig) = tx_sig {
-        log_info!("Prepare distribution rewards: {tx_sig}");
+        log_info!("Prepare distribution rewards for epoch {dz_epoch}: {tx_sig}");
 
         wallet.print_verbose_output(&[tx_sig]).await?;
     }
@@ -356,7 +356,10 @@ async fn try_distribute_contributor_rewards(
     let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
     if let Some(tx_sig) = tx_sig {
-        log_info!("Distribute rewards: {tx_sig}");
+        log_info!(
+            "Distribute rewards for epoch {}: {tx_sig}",
+            distribution.dz_epoch
+        );
 
         wallet.print_verbose_output(&[tx_sig]).await?;
     }

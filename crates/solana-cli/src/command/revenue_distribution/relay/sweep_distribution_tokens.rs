@@ -5,6 +5,7 @@ use doublezero_revenue_distribution::{
     ID,
     instruction::{RevenueDistributionInstructionData, account::SweepDistributionTokensAccounts},
     state::{Distribution, ProgramConfig},
+    types::DoubleZeroEpoch,
 };
 use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_sol_conversion_interface::state::MAX_FILLS_QUEUE_SIZE;
@@ -71,10 +72,28 @@ impl Schedulable for SweepDistributionTokens {
         }
 
         let transaction = wallet.new_transaction(&instructions).await?;
-        let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
+
+        // TODO: We should fetch the distribution and journal to check whether
+        // there are enough 2Z tokens to sweep instead of warning on an RPC
+        // error.
+        let tx_sig = match wallet.send_or_simulate_transaction(&transaction).await {
+            Ok(tx_sig) => tx_sig,
+            Err(e) => {
+                if schedule.is_scheduled() {
+                    log_warn!("{e}");
+
+                    return Ok(());
+                } else {
+                    bail!(e);
+                }
+            }
+        };
 
         if let Some(tx_sig) = tx_sig {
-            log_info!("Sweep distribution tokens: {tx_sig}");
+            log_info!(
+                "Sweep distribution tokens for epoch {}: {tx_sig}",
+                sweep_distribution_tokens_context.dz_epoch
+            );
 
             wallet.print_verbose_output(&[tx_sig]).await?;
         }
@@ -86,6 +105,7 @@ impl Schedulable for SweepDistributionTokens {
 pub struct SweepDistributionTokensContext {
     pub instruction: Instruction,
     pub compute_unit_limit: u32,
+    pub dz_epoch: DoubleZeroEpoch,
 }
 
 impl SweepDistributionTokensContext {
@@ -134,11 +154,12 @@ impl SweepDistributionTokensContext {
             ),
             &RevenueDistributionInstructionData::SweepDistributionTokens,
         )?;
-        let compute_unit_limit = 30_000 + 80 * expected_fill_count as u32;
+        let compute_unit_limit = 35_000 + 80 * expected_fill_count as u32;
 
         Ok(Self {
             instruction: sweep_distribution_tokens_ix,
             compute_unit_limit,
+            dz_epoch: expected_dz_epoch,
         })
     }
 }

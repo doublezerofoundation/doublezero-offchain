@@ -162,13 +162,13 @@ impl SolConversionState {
         let program_state_data = Box::<_>::deserialize(&mut &account_datas[0][8..])?;
         let configuration_registry_data = Box::<_>::deserialize(&mut &account_datas[1][8..])?;
 
-        let journal = ZeroCopyAccountOwnedData::new(&account_datas[2])
+        let journal_data = ZeroCopyAccountOwnedData::new(&account_datas[2])
             .context("Revenue Distribution program not initialized")?;
 
         Ok(Self {
             program_state: (program_state_key, program_state_data),
             configuration_registry: (configuration_registry_key, configuration_registry_data),
-            journal: (journal_key, journal),
+            journal: (journal_key, journal_data),
         })
     }
 }
