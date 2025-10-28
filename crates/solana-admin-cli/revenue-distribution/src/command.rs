@@ -190,9 +190,9 @@ pub async fn execute_initialize_program(solana_payer_options: SolanaPayerOptions
     let mut wallet = Wallet::try_from(solana_payer_options)?;
     let wallet_key = wallet.pubkey();
 
-    wallet.connection.cache_if_mainnet().await?;
+    let is_mainnet = wallet.connection.try_is_mainnet().await?;
 
-    let dz_mint_key = if wallet.connection.is_mainnet {
+    let dz_mint_key = if is_mainnet {
         doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
     } else {
         doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY

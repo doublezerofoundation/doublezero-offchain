@@ -1,217 +1,440 @@
-use anyhow::Result;
-use clap::Args;
-use doublezero_revenue_distribution::{DOUBLEZERO_MINT_DECIMALS, types::DoubleZeroEpoch};
+use anyhow::{Context, Result, ensure};
+use clap::{Args, ValueEnum};
+use doublezero_revenue_distribution::{
+    DOUBLEZERO_MINT_DECIMALS,
+    state::Distribution,
+    types::{DoubleZeroEpoch, UnitShare32},
+};
 use doublezero_solana_client_tools::{
-    rpc::{SolanaConnection, SolanaConnectionOptions},
+    rpc::{
+        DoubleZeroLedgerConnection, PossibleDoubleZeroLedgerConnectionOptions, SolanaConnection,
+        SolanaConnectionOptions,
+    },
     zero_copy::ZeroCopyAccountOwnedData,
 };
+use solana_client::{
+    rpc_config::RpcProgramAccountsConfig,
+    rpc_filter::{Memcmp, RpcFilterType},
+};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
+use tabled::Tabled;
 
-use crate::command::revenue_distribution::{try_fetch_distribution, try_fetch_program_config};
+use crate::command::revenue_distribution::{
+    fetch::{TableOptions, print_table},
+    try_distribution_rewards_iter, try_fetch_distribution, try_fetch_program_config,
+    try_fetch_shapley_record,
+};
+
+#[derive(Debug, Clone, ValueEnum)]
+pub enum DistributionViewMode {
+    Summary,
+    Debt,
+    Rewards,
+}
 
 #[derive(Debug, Args)]
 pub struct DistributionCommand {
     #[arg(long, short = 'e')]
     dz_epoch: Option<u64>,
 
+    #[arg(long, value_enum, default_value = "summary")]
+    view: DistributionViewMode,
+
     #[command(flatten)]
-    connection_options: SolanaConnectionOptions,
+    solana_connection_options: SolanaConnectionOptions,
+
+    #[command(flatten)]
+    dz_ledger_connection_options: PossibleDoubleZeroLedgerConnectionOptions,
+
+    #[arg(hide = true, long, value_name = "PUBKEY")]
+    rewards_accountant: Option<Pubkey>,
 }
 
-#[derive(Debug, tabled::Tabled)]
-struct DistributionTableRow {
+#[derive(Debug, Tabled)]
+struct DistributionSummaryTableRow {
     field: &'static str,
     value: String,
     note: String,
+}
+
+#[derive(Debug, Tabled)]
+struct DistributionRewardsTableRow {
+    index: usize,
+    contributor: String,
+    proportion: String,
+    reward: String,
+    distributed: &'static str,
 }
 
 impl DistributionCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let Self {
             dz_epoch,
-            connection_options,
+            view: view_mode,
+            solana_connection_options,
+            dz_ledger_connection_options,
+            rewards_accountant: rewards_accountant_key,
         } = self;
 
-        let connection = SolanaConnection::try_from(connection_options)?;
+        let connection = SolanaConnection::try_from(solana_connection_options)?;
+
+        let (_, config) = try_fetch_program_config(&connection).await?;
 
         let epoch = match dz_epoch {
             Some(epoch) => DoubleZeroEpoch::new(epoch),
-            None => {
-                let (_, config) = try_fetch_program_config(&connection).await?;
-
-                DoubleZeroEpoch::new(config.next_completed_dz_epoch.value().saturating_sub(1))
-            }
+            None => DoubleZeroEpoch::new(config.next_completed_dz_epoch.value().saturating_sub(1)),
         };
 
-        let (
-            distribution_key,
-            ZeroCopyAccountOwnedData {
-                mucked_data: distribution,
-                remaining_data: _,
-            },
-        ) = try_fetch_distribution(&connection, epoch).await?;
+        let (distribution_key, distribution) = try_fetch_distribution(&connection, epoch).await?;
 
-        let mut value_rows = vec![
-            DistributionTableRow {
-                field: "Distribution",
-                value: epoch.to_string(),
-                note: "Epoch of DoubleZero Ledger Network".to_string(),
+        match view_mode {
+            DistributionViewMode::Summary => {
+                try_print_distribution_summary_table(&distribution_key, &distribution).await
+            }
+            DistributionViewMode::Debt => {
+                ensure!(
+                    distribution.is_debt_calculation_finalized(),
+                    "Debt calculation is not finalized yet"
+                );
+
+                let dz_connection = dz_ledger_connection_options
+                    .into_connection()
+                    .context("DoubleZero Ledger URL required for --display debt")?;
+
+                try_print_distribution_debt_table(
+                    &dz_connection,
+                    &config.debt_accountant_key,
+                    &distribution,
+                )
+                .await
+            }
+            DistributionViewMode::Rewards => {
+                ensure!(
+                    distribution.is_rewards_calculation_finalized(),
+                    "Rewards calculation is not finalized yet"
+                );
+
+                let dz_connection = dz_ledger_connection_options
+                    .into_connection()
+                    .context("DoubleZero Ledger URL required for --display rewards")?;
+
+                try_print_distribution_rewards_table(
+                    &dz_connection,
+                    &rewards_accountant_key.unwrap_or(config.rewards_accountant_key),
+                    &distribution,
+                )
+                .await
+            }
+        }
+    }
+}
+
+//
+
+async fn try_print_distribution_summary_table(
+    distribution_key: &Pubkey,
+    distribution: &Distribution,
+) -> Result<()> {
+    let mut value_rows = vec![
+        DistributionSummaryTableRow {
+            field: "Distribution",
+            value: distribution.dz_epoch.to_string(),
+            note: "Epoch of DoubleZero Ledger Network".to_string(),
+        },
+        DistributionSummaryTableRow {
+            field: "PDA key",
+            value: distribution_key.to_string(),
+            note: Default::default(),
+        },
+        DistributionSummaryTableRow {
+            field: "Community burn rate",
+            value: format!(
+                "{:.7}%",
+                u32::from(distribution.community_burn_rate) as f64 / 10_000_000.0
+            ),
+            note: "Lower-bound proportion of rewards burned".to_string(),
+        },
+    ];
+
+    let fee_parameters = distribution.solana_validator_fee_parameters;
+
+    if fee_parameters.base_block_rewards_pct != Default::default() {
+        value_rows.push(DistributionSummaryTableRow {
+            field: "Solana validator base block rewards fee",
+            value: format!(
+                "{:.2}%",
+                u16::from(fee_parameters.base_block_rewards_pct) as f64 / 100.0
+            ),
+            note: "Proportion of base block rewards charged".to_string(),
+        });
+    }
+    if fee_parameters.priority_block_rewards_pct != Default::default() {
+        value_rows.push(DistributionSummaryTableRow {
+            field: "Solana validator priority block rewards fee",
+            value: format!(
+                "{:.2}%",
+                u16::from(fee_parameters.priority_block_rewards_pct) as f64 / 100.0
+            ),
+            note: "Proportion of priority block rewards charged".to_string(),
+        });
+    }
+    if fee_parameters.inflation_rewards_pct != Default::default() {
+        value_rows.push(DistributionSummaryTableRow {
+            field: "Solana validator inflation rewards fee",
+            value: format!(
+                "{:.2}%",
+                u16::from(fee_parameters.inflation_rewards_pct) as f64 / 100.0
+            ),
+            note: "Proportion of inflation rewards charged".to_string(),
+        });
+    }
+    if fee_parameters.jito_tips_pct != Default::default() {
+        value_rows.push(DistributionSummaryTableRow {
+            field: "Solana validator Jito tips fee",
+            value: format!(
+                "{:.2}%",
+                u16::from(fee_parameters.jito_tips_pct) as f64 / 100.0
+            ),
+            note: "Proportion of Jito tips charged".to_string(),
+        });
+    }
+    if fee_parameters.fixed_sol_amount != 0 {
+        value_rows.push(DistributionSummaryTableRow {
+            field: "Fixed SOL fee",
+            value: format!("{:.9} SOL", fee_parameters.fixed_sol_amount as f64 * 1e-9),
+            note: "Fixed SOL amount charged".to_string(),
+        });
+    }
+
+    // Add rows for Solana validator debt if the root has been posted.
+    let solana_validator_debt_merkle_root = distribution.solana_validator_debt_merkle_root;
+    let has_solana_validator_debt = solana_validator_debt_merkle_root != Default::default();
+
+    if has_solana_validator_debt {
+        let unpaid_solana_validators_count =
+            distribution.total_solana_validators - distribution.solana_validator_payments_count;
+
+        let more_rows = vec![
+            DistributionSummaryTableRow {
+                field: "Solana validator debt merkle root",
+                value: solana_validator_debt_merkle_root.to_string(),
+                note: if distribution.is_debt_calculation_finalized() {
+                    "Final".to_string()
+                } else {
+                    "Staged".to_string()
+                },
             },
-            DistributionTableRow {
-                field: "PDA key",
-                value: distribution_key.to_string(),
+            DistributionSummaryTableRow {
+                field: "Solana validators paid",
+                value: format!(
+                    "{} / {}",
+                    distribution.solana_validator_payments_count,
+                    distribution.total_solana_validators,
+                ),
+                note: format!(
+                    "{} {} not paid",
+                    unpaid_solana_validators_count,
+                    if unpaid_solana_validators_count == 1 {
+                        "has"
+                    } else {
+                        "have"
+                    }
+                ),
+            },
+            DistributionSummaryTableRow {
+                field: "Solana validator payments",
+                value: format!(
+                    "{:.9} SOL",
+                    distribution.collected_solana_validator_payments as f64
+                        / LAMPORTS_PER_SOL as f64,
+                ),
+                note: format!(
+                    "{:.3}% collected",
+                    distribution.collected_solana_validator_payments as f64 * 100.0
+                        / distribution.total_solana_validator_debt as f64
+                ),
+            },
+            DistributionSummaryTableRow {
+                field: "Uncollected Solana validator debt",
+                value: format!(
+                    "{:.9} SOL",
+                    (distribution.total_solana_validator_debt
+                        - distribution.collected_solana_validator_payments)
+                        as f64
+                        / LAMPORTS_PER_SOL as f64,
+                ),
                 note: Default::default(),
             },
-            DistributionTableRow {
-                field: "Community burn rate",
+        ];
+        value_rows.extend(more_rows);
+    } else {
+        value_rows.push(DistributionSummaryTableRow {
+            field: "Solana validator debt merkle root",
+            value: solana_validator_debt_merkle_root.to_string(),
+            note: if distribution.is_debt_calculation_finalized() {
+                "Final".to_string()
+            } else {
+                "Not posted".to_string()
+            },
+        });
+    }
+
+    // Add rows for rewards if the root has been posted.
+    let rewards_merkle_root = distribution.rewards_merkle_root;
+    let has_rewards = rewards_merkle_root != Default::default();
+
+    if has_rewards {
+        let more_rows = vec![
+            DistributionSummaryTableRow {
+                field: "Rewards merkle root",
+                value: rewards_merkle_root.to_string(),
+                note: if distribution.is_rewards_calculation_finalized() {
+                    "Final".to_string()
+                } else {
+                    "Staged".to_string()
+                },
+            },
+            DistributionSummaryTableRow {
+                field: "Contributors rewarded",
                 value: format!(
-                    "{:.7}%",
-                    u32::from(distribution.community_burn_rate) as f64 / 10_000_000.0
+                    "{} / {}",
+                    distribution.distributed_rewards_count, distribution.total_contributors
                 ),
-                note: "Lower-bound proportion of rewards burned".to_string(),
+                note: format!(
+                    "{} remaining",
+                    distribution.total_contributors - distribution.distributed_rewards_count
+                ),
+            },
+            DistributionSummaryTableRow {
+                field: "Distributed rewards",
+                value: format!(
+                    "{:.1} 2Z",
+                    distribution.distributed_2z_amount as f64
+                        / f64::powi(10.0, DOUBLEZERO_MINT_DECIMALS as i32),
+                ),
+                note: Default::default(),
+            },
+            DistributionSummaryTableRow {
+                field: "Burned rewards",
+                value: format!(
+                    "{:.1} 2Z",
+                    distribution.burned_2z_amount as f64
+                        / f64::powi(10.0, DOUBLEZERO_MINT_DECIMALS as i32),
+                ),
+                note: Default::default(),
+            },
+            DistributionSummaryTableRow {
+                field: "Remaining 2Z rewards",
+                value: format!(
+                    "{:.1} 2Z",
+                    (distribution.total_collected_2z_tokens()
+                        - distribution.distributed_2z_amount
+                        - distribution.burned_2z_amount) as f64
+                        / f64::powi(10.0, DOUBLEZERO_MINT_DECIMALS as i32),
+                ),
+                note: Default::default(),
             },
         ];
-
-        let fee_parameters = distribution.solana_validator_fee_parameters;
-
-        if fee_parameters.base_block_rewards_pct != Default::default() {
-            value_rows.push(DistributionTableRow {
-                field: "Base block rewards fee",
-                value: format!(
-                    "{:.2}%",
-                    u16::from(fee_parameters.base_block_rewards_pct) as f64 / 100.0
-                ),
-                note: "Amount charged to Solana validators for base block rewards".to_string(),
-            });
-        }
-        if fee_parameters.priority_block_rewards_pct != Default::default() {
-            value_rows.push(DistributionTableRow {
-                field: "Priority block rewards fee",
-                value: format!(
-                    "{:.2}%",
-                    u16::from(fee_parameters.priority_block_rewards_pct) as f64 / 100.0
-                ),
-                note: "Amount charged to Solana validators for priority block rewards".to_string(),
-            });
-        }
-        if fee_parameters.inflation_rewards_pct != Default::default() {
-            value_rows.push(DistributionTableRow {
-                field: "Inflation rewards fee",
-                value: format!(
-                    "{:.2}%",
-                    u16::from(fee_parameters.inflation_rewards_pct) as f64 / 100.0
-                ),
-                note: "Amount charged to Solana validators for inflation rewards".to_string(),
-            });
-        }
-        if fee_parameters.jito_tips_pct != Default::default() {
-            value_rows.push(DistributionTableRow {
-                field: "Jito tips fee",
-                value: format!(
-                    "{:.2}%",
-                    u16::from(fee_parameters.jito_tips_pct) as f64 / 100.0
-                ),
-                note: "Amount charged to Solana validators for Jito tips".to_string(),
-            });
-        }
-        if fee_parameters.fixed_sol_amount != 0 {
-            value_rows.push(DistributionTableRow {
-                field: "Fixed SOL fee",
-                value: format!("{:.9} SOL", fee_parameters.fixed_sol_amount as f64 * 1e-9),
-                note: "Fixed SOL amount charged to Solana validators".to_string(),
-            });
-        }
-
-        value_rows.push(DistributionTableRow {
-            field: "Solana validator debt merkle root",
-            value: distribution.solana_validator_debt_merkle_root.to_string(),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
-            field: "Total Solana validators",
-            value: distribution.total_solana_validators.to_string(),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
-            field: "Solana validator payments count",
-            value: distribution.solana_validator_payments_count.to_string(),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
-            field: "Total Solana validator debt",
-            value: format!(
-                "{:.9} SOL",
-                distribution.total_solana_validator_debt as f64 * 1e-9
-            ),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
-            field: "Collected Solana validator payments",
-            value: format!(
-                "{:.9} SOL",
-                distribution.collected_solana_validator_payments as f64 * 1e-9
-            ),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
+        value_rows.extend(more_rows);
+    } else {
+        value_rows.push(DistributionSummaryTableRow {
             field: "Rewards merkle root",
-            value: distribution.rewards_merkle_root.to_string(),
-            note: Default::default(),
+            value: rewards_merkle_root.to_string(),
+            note: if distribution.is_rewards_calculation_finalized() {
+                "Final".to_string()
+            } else {
+                "Not posted".to_string()
+            },
         });
-
-        value_rows.push(DistributionTableRow {
-            field: "Total contributors",
-            value: distribution.total_contributors.to_string(),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
-            field: "Distributed rewards count",
-            value: distribution.distributed_rewards_count.to_string(),
-            note: Default::default(),
-        });
-
-        value_rows.push(DistributionTableRow {
-            field: "Distributed 2Z amount",
-            value: format!(
-                "{:.prec$} 2Z",
-                distribution.distributed_2z_amount as f64
-                    / 10f64.powi(DOUBLEZERO_MINT_DECIMALS as i32),
-                prec = DOUBLEZERO_MINT_DECIMALS as usize
-            ),
-            note: Default::default(),
-        });
-        value_rows.push(DistributionTableRow {
-            field: "Burned 2Z amount",
-            value: format!(
-                "{:.prec$} 2Z",
-                distribution.burned_2z_amount as f64 / 10f64.powi(DOUBLEZERO_MINT_DECIMALS as i32),
-                prec = DOUBLEZERO_MINT_DECIMALS as usize
-            ),
-            note: Default::default(),
-        });
-        value_rows.push(DistributionTableRow {
-            field: "Is debt calculation finalized",
-            value: distribution.is_debt_calculation_finalized().to_string(),
-            note: Default::default(),
-        });
-        value_rows.push(DistributionTableRow {
-            field: "Is rewards calculation finalized",
-            value: distribution.is_rewards_calculation_finalized().to_string(),
-            note: Default::default(),
-        });
-        value_rows.push(DistributionTableRow {
-            field: "Has swept 2Z tokens",
-            value: distribution.has_swept_2z_tokens().to_string(),
-            note: Default::default(),
-        });
-
-        super::print_table(value_rows);
-
-        Ok(())
     }
+
+    print_table(
+        value_rows,
+        TableOptions {
+            columns_aligned_right: Some(&[1]),
+        },
+    );
+
+    Ok(())
+}
+
+async fn try_print_distribution_debt_table(
+    dz_connection: &DoubleZeroLedgerConnection,
+    debt_accountant_key: &Pubkey,
+    distribution: &ZeroCopyAccountOwnedData<Distribution>,
+) -> Result<()> {
+    todo!()
+}
+
+async fn try_print_distribution_rewards_table(
+    dz_connection: &DoubleZeroLedgerConnection,
+    rewards_accountant_key: &Pubkey,
+    distribution: &ZeroCopyAccountOwnedData<Distribution>,
+) -> Result<()> {
+    // Grab all existing contributors.
+    //
+    // TODO: Support testnet?
+    let mut contributor_label_mapping = dz_connection
+        .get_program_accounts_with_config(
+            &doublezero_sdk::mainnet::program_id::ID,
+            RpcProgramAccountsConfig {
+                filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                    0,
+                    borsh::to_vec(&doublezero_sdk::AccountType::Contributor)?,
+                ))]),
+                ..Default::default()
+            },
+        )
+        .await?
+        .into_iter()
+        .map(|(key, account_info)| {
+            let contributor = doublezero_sdk::Contributor::try_from(&account_info.data[..])
+                .with_context(|| format!("Failed to deserialize contributor account {key}"))?;
+            Ok((contributor.owner, contributor.code))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>>>()?;
+
+    let shapley_record =
+        try_fetch_shapley_record(dz_connection, rewards_accountant_key, distribution.dz_epoch)
+            .await?;
+
+    // TODO: Revisit when economic burn rate is introduced.
+    let collected_rewards = distribution.total_collected_2z_tokens();
+    let burnable_rewards = distribution
+        .community_burn_rate
+        .mul_scalar(collected_rewards);
+    let distributable_rewards = collected_rewards - burnable_rewards;
+
+    let mut rewards_rows = Vec::with_capacity(distribution.total_contributors as usize);
+
+    for (leaf_index, reward_share, is_processed_leaf) in
+        try_distribution_rewards_iter(distribution, &shapley_record)?
+    {
+        let proportion = reward_share.unit_share as f64 / u32::from(UnitShare32::MAX) as f64;
+
+        let unit_share = reward_share.checked_unit_share().unwrap();
+        let reward = unit_share.mul_scalar(distributable_rewards) as f64
+            / f64::powi(10.0, DOUBLEZERO_MINT_DECIMALS as i32);
+
+        let contributor_label = contributor_label_mapping
+            .remove(&reward_share.contributor_key)
+            .unwrap_or(reward_share.contributor_key.to_string());
+
+        rewards_rows.push(DistributionRewardsTableRow {
+            index: leaf_index,
+            contributor: contributor_label,
+            proportion: format!("{:.2}%", 100.0 * proportion),
+            reward: format!("{:.1} 2Z", reward),
+            distributed: if is_processed_leaf { "yes" } else { "no" },
+        });
+    }
+
+    print_table(
+        rewards_rows,
+        TableOptions {
+            columns_aligned_right: Some(&[0, 2, 3, 4]),
+        },
+    );
+
+    Ok(())
 }
