@@ -1,8 +1,10 @@
+use std::collections::HashMap;
+
 use anyhow::{Context, Result, ensure};
 use clap::{Args, ValueEnum};
 use doublezero_revenue_distribution::{
     DOUBLEZERO_MINT_DECIMALS,
-    state::Distribution,
+    state::{Distribution, SolanaValidatorDeposit},
     types::{DoubleZeroEpoch, UnitShare32},
 };
 use doublezero_solana_client_tools::{
@@ -21,14 +23,15 @@ use tabled::Tabled;
 
 use crate::command::revenue_distribution::{
     fetch::{TableOptions, print_table},
-    try_distribution_rewards_iter, try_fetch_distribution, try_fetch_program_config,
-    try_fetch_shapley_record,
+    try_distribution_rewards_iter, try_distribution_solana_validator_debt_iter,
+    try_fetch_distribution, try_fetch_program_config, try_fetch_shapley_record,
 };
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, PartialEq, Eq, ValueEnum)]
 pub enum DistributionViewMode {
     Summary,
-    Debt,
+    ValidatorDebt,
+    UnprocessedValidatorDebt,
     Rewards,
 }
 
@@ -58,7 +61,19 @@ struct DistributionSummaryTableRow {
 }
 
 #[derive(Debug, Tabled)]
+struct DistributionSolanaValidatorDebtTableRow {
+    dz_epoch: u64,
+    index: usize,
+    node_id: String,
+    amount: String,
+    deposit_balance: String,
+    processed: &'static str,
+    note: String,
+}
+
+#[derive(Debug, Tabled)]
 struct DistributionRewardsTableRow {
+    dz_epoch: u64,
     index: usize,
     contributor: String,
     proportion: String,
@@ -76,22 +91,24 @@ impl DistributionCommand {
             rewards_accountant: rewards_accountant_key,
         } = self;
 
-        let connection = SolanaConnection::try_from(solana_connection_options)?;
+        let solana_connection = SolanaConnection::try_from(solana_connection_options)?;
 
-        let (_, config) = try_fetch_program_config(&connection).await?;
+        let (_, config) = try_fetch_program_config(&solana_connection).await?;
 
         let epoch = match dz_epoch {
             Some(epoch) => DoubleZeroEpoch::new(epoch),
             None => DoubleZeroEpoch::new(config.next_completed_dz_epoch.value().saturating_sub(1)),
         };
 
-        let (distribution_key, distribution) = try_fetch_distribution(&connection, epoch).await?;
+        let (distribution_key, distribution) =
+            try_fetch_distribution(&solana_connection, epoch).await?;
 
         match view_mode {
             DistributionViewMode::Summary => {
                 try_print_distribution_summary_table(&distribution_key, &distribution).await
             }
-            DistributionViewMode::Debt => {
+            DistributionViewMode::ValidatorDebt
+            | DistributionViewMode::UnprocessedValidatorDebt => {
                 ensure!(
                     distribution.is_debt_calculation_finalized(),
                     "Debt calculation is not finalized yet"
@@ -102,9 +119,11 @@ impl DistributionCommand {
                     .context("DoubleZero Ledger URL required for --display debt")?;
 
                 try_print_distribution_debt_table(
+                    &solana_connection,
                     &dz_connection,
                     &config.debt_accountant_key,
                     &distribution,
+                    view_mode == DistributionViewMode::UnprocessedValidatorDebt,
                 )
                 .await
             }
@@ -359,11 +378,107 @@ async fn try_print_distribution_summary_table(
 }
 
 async fn try_print_distribution_debt_table(
+    solana_connection: &SolanaConnection,
     dz_connection: &DoubleZeroLedgerConnection,
     debt_accountant_key: &Pubkey,
     distribution: &ZeroCopyAccountOwnedData<Distribution>,
+    show_unprocessed_only: bool,
 ) -> Result<()> {
-    todo!()
+    let dz_epoch = distribution.dz_epoch.value();
+
+    let (_, computed_debt) = doublezero_solana_validator_debt::ledger::try_fetch_debt_record(
+        dz_connection,
+        debt_accountant_key,
+        dz_epoch,
+        dz_connection.commitment(),
+    )
+    .await?;
+
+    if computed_debt.debts.is_empty() {
+        println!("No debts found for DZ epoch {dz_epoch}");
+        return Ok(());
+    }
+
+    let mut debt_rows = Vec::with_capacity(distribution.total_solana_validators as usize);
+
+    let rent = solana_connection
+        .get_sysvar::<solana_sdk::rent::Rent>()
+        .await?;
+
+    let mut deposit_keys = Vec::with_capacity(computed_debt.debts.len());
+    let mut cached_debt_amounts = Vec::with_capacity(computed_debt.debts.len());
+
+    for (leaf_index, debt, is_processed_leaf) in
+        try_distribution_solana_validator_debt_iter(distribution, &computed_debt)?
+    {
+        if show_unprocessed_only && is_processed_leaf {
+            continue;
+        }
+
+        debt_rows.push(DistributionSolanaValidatorDebtTableRow {
+            dz_epoch,
+            index: leaf_index,
+            node_id: debt.node_id.to_string(),
+            amount: format!("{:.9} SOL", debt.amount as f64 / LAMPORTS_PER_SOL as f64),
+            deposit_balance: Default::default(),
+            processed: if is_processed_leaf { "yes" } else { "no" },
+            note: Default::default(),
+        });
+
+        deposit_keys.push(SolanaValidatorDeposit::find_address(&debt.node_id).0);
+        cached_debt_amounts.push(debt.amount);
+    }
+
+    let mut deposit_balances = Vec::with_capacity(debt_rows.len());
+
+    for deposit_keys_chunk in deposit_keys.chunks(100) {
+        let balances = solana_connection
+            .get_multiple_accounts(deposit_keys_chunk)
+            .await?
+            .into_iter()
+            .flatten()
+            .map(|account_info| {
+                account_info
+                    .lamports
+                    .saturating_sub(rent.minimum_balance(account_info.data.len()))
+            });
+        deposit_balances.extend(balances);
+    }
+
+    for ((value_row, debt_amount), deposit_balance) in debt_rows
+        .iter_mut()
+        .zip(cached_debt_amounts)
+        .zip(deposit_balances)
+    {
+        value_row.deposit_balance = format!(
+            "{:.9} SOL",
+            deposit_balance as f64 / LAMPORTS_PER_SOL as f64
+        );
+
+        if value_row.processed == "yes" {
+            continue;
+        }
+
+        if deposit_balance < debt_amount {
+            if deposit_balance == 0 {
+                value_row.note = "Not funded".to_string()
+            } else {
+                value_row.note = format!(
+                    "{:.9} SOL needed",
+                    (debt_amount - deposit_balance) as f64 / LAMPORTS_PER_SOL as f64
+                );
+            }
+        }
+    }
+
+    print_table(
+        debt_rows,
+        TableOptions {
+            columns_aligned_right: Some(&[0, 1, 3, 4, 5]),
+        },
+    );
+
+    Ok(())
 }
 
 async fn try_print_distribution_rewards_table(
@@ -371,6 +486,8 @@ async fn try_print_distribution_rewards_table(
     rewards_accountant_key: &Pubkey,
     distribution: &ZeroCopyAccountOwnedData<Distribution>,
 ) -> Result<()> {
+    let dz_epoch = distribution.dz_epoch;
+
     // Grab all existing contributors.
     //
     // TODO: Support testnet?
@@ -392,11 +509,10 @@ async fn try_print_distribution_rewards_table(
                 .with_context(|| format!("Failed to deserialize contributor account {key}"))?;
             Ok((contributor.owner, contributor.code))
         })
-        .collect::<Result<std::collections::HashMap<_, _>>>()?;
+        .collect::<Result<HashMap<_, _>>>()?;
 
     let shapley_record =
-        try_fetch_shapley_record(dz_connection, rewards_accountant_key, distribution.dz_epoch)
-            .await?;
+        try_fetch_shapley_record(dz_connection, rewards_accountant_key, dz_epoch).await?;
 
     // TODO: Revisit when economic burn rate is introduced.
     let collected_rewards = distribution.total_collected_2z_tokens();
@@ -421,6 +537,7 @@ async fn try_print_distribution_rewards_table(
             .unwrap_or(reward_share.contributor_key.to_string());
 
         rewards_rows.push(DistributionRewardsTableRow {
+            dz_epoch: dz_epoch.value(),
             index: leaf_index,
             contributor: contributor_label,
             proportion: format!("{:.2}%", 100.0 * proportion),
@@ -432,7 +549,7 @@ async fn try_print_distribution_rewards_table(
     print_table(
         rewards_rows,
         TableOptions {
-            columns_aligned_right: Some(&[0, 2, 3, 4]),
+            columns_aligned_right: Some(&[0, 1, 3, 4, 5]),
         },
     );
 

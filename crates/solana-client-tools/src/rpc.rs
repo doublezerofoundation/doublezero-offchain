@@ -6,7 +6,7 @@ use clap::Args;
 use doublezero_sdk::record::{pubkey::create_record_key, state::RecordData};
 use solana_client::nonblocking::{pubsub_client::PubsubClient, rpc_client::RpcClient};
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{pubkey::Pubkey, sysvar::Sysvar};
 use url::Url;
 
 #[derive(Debug, Args, Clone)]
@@ -88,6 +88,12 @@ impl SolanaConnection {
         PubsubClient::new(self.ws_url.as_ref())
             .await
             .context("Failed to create Solana websocket client")
+    }
+
+    pub async fn get_sysvar<T: Sysvar>(&self) -> Result<T> {
+        let sysvar_account_info = self.rpc_client.get_account(&T::id()).await?;
+        solana_sdk::account::from_account(&sysvar_account_info)
+            .context("Failed to deserialize sysvar")
     }
 }
 

@@ -68,6 +68,7 @@ solana-pubkey = { version = "2", features = ["borsh", "bytemuck"] }
 solana-sanitize = "2"
 solana-sdk = "2"
 solana-system-interface = "1"
+solana-sysvar = "2"
 solana-transaction-status-client-types = "2"
 spl-associated-token-account-interface = "1"
 spl-token = { version = "8", features = ["no-entrypoint"] }

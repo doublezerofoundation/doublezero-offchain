@@ -26,6 +26,9 @@ use doublezero_solana_client_tools::{
     rpc::{DoubleZeroLedgerConnection, SolanaConnection},
     zero_copy::{ZeroCopyAccountOwned, ZeroCopyAccountOwnedData},
 };
+use doublezero_solana_validator_debt::validator_debt::{
+    ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts,
+};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 
@@ -255,4 +258,27 @@ fn try_distribution_rewards_iter<'a>(
             let is_processed = try_is_processed_leaf(processed_leaf_data, index).unwrap();
             (index, reward_share, is_processed)
         }))
+}
+
+fn try_distribution_solana_validator_debt_iter<'a>(
+    distribution: &ZeroCopyAccountOwnedData<Distribution>,
+    computed_debt: &'a ComputedSolanaValidatorDebts,
+) -> Result<impl Iterator<Item = (usize, &'a ComputedSolanaValidatorDebt, bool)>> {
+    let start_index = distribution.processed_solana_validator_debt_start_index as usize;
+    let end_index = distribution.processed_solana_validator_debt_end_index as usize;
+    let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
+
+    let num_debts = computed_debt.debts.len();
+    let max_supported_debts = processed_leaf_data.len() * 8;
+
+    ensure!(
+        max_supported_debts >= num_debts,
+        "Insufficient processed leaf data for epoch {}: can support {max_supported_debts} debts, but got {num_debts}",
+        distribution.dz_epoch
+    );
+
+    Ok(computed_debt.debts.iter().enumerate().map(|(index, debt)| {
+        let is_processed = try_is_processed_leaf(processed_leaf_data, index).unwrap();
+        (index, debt, is_processed)
+    }))
 }

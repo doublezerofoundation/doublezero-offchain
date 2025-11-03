@@ -1,6 +1,6 @@
 use std::{fmt, fs, mem::size_of, path::PathBuf, time::Duration};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
 use doublezero_program_tools::zero_copy;
 use doublezero_record::{instruction as record_ix, state::RecordData};
