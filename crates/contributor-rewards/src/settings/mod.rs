@@ -34,9 +34,8 @@ pub struct Settings {
     pub scheduler: SchedulerSettings,
     /// Metrics settings
     pub metrics: Option<MetricsSettings>,
-    /// AWS S3 configuration for snapshot storage
-    #[serde(default)]
-    pub aws: AwsSettings,
+    /// AWS S3 configuration for snapshot storage (required when storage_backend = S3)
+    pub aws: Option<AwsSettings>,
 }
 
 /// Shapley value calculation parameters for reward distribution

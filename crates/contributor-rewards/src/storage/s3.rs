@@ -1,6 +1,6 @@
 use crate::{
     cli::snapshot::CompleteSnapshot,
-    settings::{aws::AwsNetworkConfig, network::Network},
+    settings::aws::AwsSettings,
     storage::{SnapshotStorage, credentials::CredentialLoader},
 };
 use anyhow::{Context, Result, anyhow};
@@ -15,17 +15,14 @@ pub struct S3Storage {
 }
 
 impl S3Storage {
-    pub async fn new(network: Network, config: AwsNetworkConfig, region: String) -> Result<Self> {
+    pub async fn new(config: AwsSettings) -> Result<Self> {
         let bucket = config.bucket.clone();
 
-        let loader = CredentialLoader::new(network, config, region);
+        let loader = CredentialLoader::new(config);
         let aws_config = loader.load_config().await?;
         let client = S3Client::from_conf(aws_config);
 
-        info!(
-            "S3 storage initialized for network {:?}, bucket: {}",
-            network, bucket
-        );
+        info!("S3 storage initialized, bucket: {}", bucket);
 
         Ok(Self { client, bucket })
     }

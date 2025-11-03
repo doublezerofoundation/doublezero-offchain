@@ -142,7 +142,13 @@ fn test_settings() -> settings::Settings {
         metrics: Some(settings::MetricsSettings {
             addr: "127.0.0.1:9090".parse().unwrap(),
         }),
-        aws: settings::aws::AwsSettings::default(),
+        aws: Some(settings::aws::AwsSettings {
+            region: "us-east-1".to_string(),
+            bucket: "dummy-bucket".to_string(),
+            access_key_id: "dummy-key".to_string(),
+            secret_access_key: "dummy-secret".to_string(),
+            endpoint: None,
+        }),
     }
 }
 

@@ -212,7 +212,13 @@ mod tests {
             metrics: Some(MetricsSettings {
                 addr: SocketAddr::from_str("127.0.0.1:9090").unwrap(),
             }),
-            aws: AwsSettings::default(),
+            aws: Some(AwsSettings {
+                region: "us-east-1".to_string(),
+                bucket: "dummy-bucket".to_string(),
+                access_key_id: "dummy-key".to_string(),
+                secret_access_key: "dummy-secret".to_string(),
+                endpoint: None,
+            }),
         }
     }
 

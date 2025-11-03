@@ -4,7 +4,7 @@ pub mod s3;
 
 use crate::{
     cli::snapshot::CompleteSnapshot,
-    settings::{Settings, aws::StorageBackend, network::Network},
+    settings::{Settings, aws::StorageBackend},
 };
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
@@ -31,24 +31,10 @@ pub async fn create_storage(settings: &Settings) -> Result<Box<dyn SnapshotStora
     match settings.scheduler.storage_backend {
         StorageBackend::S3 => {
             // Create S3 storage
-            let network = settings.network;
-            let network_config = match network {
-                Network::MainnetBeta | Network::Mainnet => settings
-                    .aws
-                    .mainnet_beta
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("AWS mainnet-beta configuration not found"))?,
-                Network::Testnet | Network::Devnet => settings
-                    .aws
-                    .testnet
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("AWS testnet configuration not found"))?,
-            };
-
-            let storage =
-                s3::S3Storage::new(network, network_config.clone(), settings.aws.region.clone())
-                    .await?;
-
+            let aws_config = settings.aws.as_ref().ok_or_else(|| {
+                anyhow!("AWS configuration is required when storage_backend = S3")
+            })?;
+            let storage = s3::S3Storage::new(aws_config.clone()).await?;
             Ok(Box::new(storage))
         }
         StorageBackend::LocalFile => {

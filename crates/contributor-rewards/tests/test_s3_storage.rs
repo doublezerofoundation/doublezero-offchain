@@ -6,17 +6,28 @@ use doublezero_contributor_rewards::{
     ingestor::types::FetchData,
     settings::{
         Settings,
-        aws::{AwsNetworkConfig, AwsSettings, StorageBackend},
+        aws::{AwsSettings, StorageBackend},
         network::Network,
     },
     storage::create_storage,
 };
 
+/// Helper function to create dummy AWS settings for tests that don't use S3
+fn create_dummy_aws_settings() -> Option<AwsSettings> {
+    Some(AwsSettings {
+        region: "us-east-1".to_string(),
+        bucket: "dummy-bucket".to_string(),
+        access_key_id: "dummy-key".to_string(),
+        secret_access_key: "dummy-secret".to_string(),
+        endpoint: None,
+    })
+}
+
 /// Helper function to create test settings with configurable storage backend
 fn create_test_settings(
     storage_backend: StorageBackend,
     snapshot_dir: String,
-    aws: AwsSettings,
+    aws: Option<AwsSettings>,
 ) -> Settings {
     Settings {
         log_level: "info".to_string(),
@@ -72,16 +83,13 @@ fn create_test_settings(
 #[ignore] // Ignored by default, run with: cargo test --test test_s3_storage -- --ignored --include-ignored
 async fn test_s3_upload_to_minio() {
     // Create minimal test settings for S3 storage with minio
-    let aws_config = AwsSettings {
+    let aws_config = Some(AwsSettings {
         region: "us-east-1".to_string(),
-        testnet: Some(AwsNetworkConfig {
-            bucket: "doublezero-contributor-rewards-testnet-snapshots".to_string(),
-            access_key_id: Some("minioadmin".to_string()),
-            secret_access_key: Some("minioadmin".to_string()),
-            endpoint: Some("http://localhost:9000".to_string()),
-        }),
-        mainnet_beta: None,
-    };
+        bucket: "doublezero-contributor-rewards-testnet-snapshots".to_string(),
+        access_key_id: "minioadmin".to_string(),
+        secret_access_key: "minioadmin".to_string(),
+        endpoint: Some("http://localhost:9000".to_string()),
+    });
 
     let settings =
         create_test_settings(StorageBackend::S3, "/tmp/snapshots".to_string(), aws_config);
@@ -149,7 +157,7 @@ async fn test_local_file_storage() {
     let settings = create_test_settings(
         StorageBackend::LocalFile,
         temp_dir.path().to_string_lossy().to_string(),
-        AwsSettings::default(),
+        create_dummy_aws_settings(),
     );
 
     let storage = create_storage(&settings)

@@ -121,28 +121,37 @@ enable_dry_run = false
 storage_backend = "s3"
 
 # ========== AWS S3 Configuration (Required if storage_backend = "s3") ==========
+# All fields can be overridden via environment variables:
+#   DZ__AWS__REGION
+#   DZ__AWS__BUCKET
+#   DZ__AWS__ACCESS_KEY_ID
+#   DZ__AWS__SECRET_ACCESS_KEY
+#   DZ__AWS__ENDPOINT
 [aws]
-# AWS region
+# AWS region (e.g., us-east-1)
+# Environment variable: DZ__AWS__REGION
 region = "us-east-1"
 
-# Testnet configuration
-[aws.testnet]
+# S3 bucket name
+# Environment variable: DZ__AWS__BUCKET
+# Testnet example: doublezero-contributor-rewards-testnet-snapshots
+# Mainnet example: doublezero-contributor-rewards-mn-beta-snapshots
 bucket = "doublezero-contributor-rewards-testnet-snapshots"
-# Credentials: Use env in prod (recommended)
-# DZ__AWS__TESTNET__ACCESS_KEY_ID=AKIA...
-# DZ__AWS__TESTNET__SECRET_ACCESS_KEY=...
-#
-# For local development (with minio), specify credentials and endpoint:
-# access_key_id = "minioadmin"
-# secret_access_key = "minioadmin"
-# endpoint = "http://localhost:9000"
 
-# Mainnet-beta configuration
-[aws.mainnet-beta]
-bucket = "doublezero-contributor-rewards-mn-beta-snapshots"
-# Credentials: Use env in prod (recommended)
-# DZ__AWS__MN_BETA__ACCESS_KEY_ID=AKIA...
-# DZ__AWS__MN_BETA__SECRET_ACCESS_KEY=...
+# AWS access key ID
+# Environment variable: DZ__AWS__ACCESS_KEY_ID
+access_key_id = "${DZ__AWS__ACCESS_KEY_ID}"
+
+# AWS secret access key
+# Environment variable: DZ__AWS__SECRET_ACCESS_KEY
+secret_access_key = "${DZ__AWS__SECRET_ACCESS_KEY}"
+
+# Custom S3 endpoint (optional)
+# Environment variable: DZ__AWS__ENDPOINT
+# For MinIO or other S3-compatible services
+# Example for local development: "http://localhost:9000"
+# Leave commented out for AWS S3
+# endpoint = "http://localhost:9000"
 
 # ========== Metrics Configuration (Optional) ==========
 [metrics]
