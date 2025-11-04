@@ -98,7 +98,12 @@ fn retryable_client_error(err: &ClientError) -> bool {
             if reqwest_err.is_timeout() || reqwest_err.is_connect() {
                 return true;
             }
-            if reqwest_err.is_request() && reqwest_err.to_string().contains("Connection reset") {
+            if reqwest_err.is_request()
+                && reqwest_err
+                    .to_string()
+                    .to_lowercase()
+                    .contains("Connection reset")
+            {
                 return true;
             }
             retryable_status(reqwest_err.status())
