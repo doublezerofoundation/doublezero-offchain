@@ -102,7 +102,7 @@ fn retryable_client_error(err: &ClientError) -> bool {
                 && reqwest_err
                     .to_string()
                     .to_lowercase()
-                    .contains("Connection reset")
+                    .contains("connection reset")
             {
                 return true;
             }
