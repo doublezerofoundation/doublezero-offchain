@@ -70,9 +70,8 @@ impl Harvest2zCommand {
         .await?;
         let buy_sol_ix = take_instruction(&mut convert_2z_context.instruction);
 
-        let current_lamports = wallet.connection.get_balance(&wallet_key).await?;
         ensure!(
-            current_lamports >= fixed_fill_quantity,
+            lamports_balance_before >= fixed_fill_quantity,
             "Not enough SOL to cover conversion. Need at least {:0.9} SOL",
             fixed_fill_quantity as f64 * 1e-9,
         );
