@@ -11,7 +11,7 @@ use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_sol_conversion_interface::state::MAX_FILLS_QUEUE_SIZE;
 use doublezero_solana_client_tools::{
     log_info, log_warn,
-    payer::{SolanaPayerOptions, Wallet},
+    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
 };
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, instruction::Instruction};
 
@@ -89,7 +89,7 @@ impl Schedulable for SweepDistributionTokens {
             }
         };
 
-        if let Some(tx_sig) = tx_sig {
+        if let TransactionOutcome::Executed(tx_sig) = tx_sig {
             log_info!(
                 "Sweep distribution tokens for epoch {}: {tx_sig}",
                 sweep_distribution_tokens_context.dz_epoch

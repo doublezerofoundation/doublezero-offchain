@@ -9,10 +9,14 @@ use doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY;
 use doublezero_sol_conversion_interface::oracle;
 use doublezero_solana_client_tools::{
     instruction::take_instruction,
-    payer::{SolanaPayerOptions, Wallet},
+    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
+};
+use solana_client::rpc_config::{
+    RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
 };
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
+    compute_budget::ComputeBudgetInstruction, native_token::LAMPORTS_PER_SOL, program_pack::Pack,
+    pubkey::Pubkey,
 };
 
 use crate::command::revenue_distribution::{SolConversionState, convert_2z::Convert2zContext};
@@ -44,6 +48,7 @@ impl Harvest2zCommand {
 
         let wallet_key = wallet.pubkey();
         let current_slot = wallet.connection.get_slot().await?;
+        let lamports_balance_before = wallet.connection.get_balance(&wallet_key).await?;
 
         let sol_conversion_state = SolConversionState::try_fetch(&wallet.connection).await?;
 
@@ -143,19 +148,72 @@ impl Harvest2zCommand {
                 &address_lookup_table_keys,
             )
             .await?;
-        let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
+        let tx_outcome = wallet
+            .send_or_simulate_transaction_with_configs(
+                &transaction,
+                wallet.default_send_transaction_config(),
+                RpcSimulateTransactionConfig {
+                    accounts: Some(RpcSimulateTransactionAccountsConfig {
+                        encoding: Default::default(),
+                        addresses: vec![
+                            wallet_key.to_string(),
+                            convert_2z_context.user_token_account_key.to_string(),
+                        ],
+                    }),
+                    ..wallet.default_simulate_transaction_config()
+                },
+            )
+            .await?;
 
-        if let Some(tx_sig) = tx_sig {
-            let token_balance_after = convert_2z_context
-                .try_token_balance(&wallet.connection)
-                .await?;
-            println!(
-                "Harvested {:.8} 2Z tokens with {:.9} SOL",
-                (token_balance_before - token_balance_after) as f64 * 1e-8,
-                (fixed_fill_quantity as f64 * 1e-9)
-            );
+        match tx_outcome {
+            TransactionOutcome::Executed(tx_sig) => {
+                println!("Harvested 2Z tokens: {tx_sig}");
 
-            wallet.print_verbose_output(&[tx_sig]).await?;
+                let token_balance_after = convert_2z_context
+                    .try_token_balance(&wallet.connection)
+                    .await?;
+                println!(
+                    "Harvested {:.8} 2Z tokens with {:.9} SOL",
+                    (token_balance_after - token_balance_before) as f64 * 1e-8,
+                    (fixed_fill_quantity as f64 * 1e-9)
+                );
+
+                wallet.print_verbose_output(&[tx_sig]).await?;
+            }
+            TransactionOutcome::Simulated(simulation_response) => {
+                let mut post_simulation_account_infos = simulation_response
+                    .accounts
+                    .unwrap()
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>();
+                ensure!(
+                    post_simulation_account_infos.len() == 2,
+                    "Expected 2 accounts after simulation, got {}",
+                    post_simulation_account_infos.len()
+                );
+
+                let ata_account_data = post_simulation_account_infos
+                    .pop()
+                    .unwrap()
+                    .data
+                    .decode()
+                    .context("Failed to decode ATA account info")?;
+                let token_balance_after = spl_token::state::Account::unpack(&ata_account_data)
+                    .unwrap()
+                    .amount;
+                println!(
+                    "Simulated harvesting {:.8} 2Z tokens with {:.9} SOL",
+                    (token_balance_after - token_balance_before) as f64 * 1e-8,
+                    (fixed_fill_quantity as f64 * 1e-9)
+                );
+
+                let lamports_balance_after = post_simulation_account_infos.pop().unwrap().lamports;
+                ensure!(
+                    lamports_balance_after == lamports_balance_before,
+                    "SOL balance changed after simulation"
+                );
+            }
         }
 
         Ok(())

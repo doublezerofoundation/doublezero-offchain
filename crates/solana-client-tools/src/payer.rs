@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
-use solana_client::rpc_config::RpcTransactionConfig;
+use solana_client::{
+    rpc_config::{RpcSendTransactionConfig, RpcSimulateTransactionConfig, RpcTransactionConfig},
+    rpc_response::RpcSimulateTransactionResult,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     address_lookup_table::state::AddressLookupTable,
@@ -53,6 +56,12 @@ pub struct SolanaSignerOptions {
     /// Simulate transaction only.
     #[arg(long, value_name = "DRY_RUN")]
     pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransactionOutcome {
+    Simulated(RpcSimulateTransactionResult),
+    Executed(Signature),
 }
 
 pub struct Wallet {
@@ -199,15 +208,29 @@ impl Wallet {
     pub async fn send_or_simulate_transaction(
         &self,
         transaction: &VersionedTransaction,
-    ) -> Result<Option<Signature>> {
+    ) -> Result<TransactionOutcome> {
+        self.send_or_simulate_transaction_with_configs(
+            transaction,
+            self.default_send_transaction_config(),
+            self.default_simulate_transaction_config(),
+        )
+        .await
+    }
+
+    pub async fn send_or_simulate_transaction_with_configs(
+        &self,
+        transaction: &VersionedTransaction,
+        send_config: RpcSendTransactionConfig,
+        simulate_config: RpcSimulateTransactionConfig,
+    ) -> Result<TransactionOutcome> {
         if self.dry_run {
             let simulation_response = self
                 .connection
-                .simulate_transaction(transaction)
+                .simulate_transaction_with_config(transaction, simulate_config)
                 .await?
                 .value;
 
-            let has_instruction_error = match simulation_response.err {
+            let has_instruction_error = match &simulation_response.err {
                 Some(tx_err) => {
                     ensure!(
                         matches!(tx_err, TransactionError::InstructionError(_, _)),
@@ -218,32 +241,55 @@ impl Wallet {
                 None => false,
             };
 
-            if let Some(units_consumed) = simulation_response.units_consumed {
+            if let Some(units_consumed) = &simulation_response.units_consumed {
                 log_info!("Compute units consumed: {}", units_consumed);
             }
 
             log_info!("Simulated program logs:");
-            simulation_response.logs.unwrap().iter().for_each(|log| {
-                log_info!("  {log}");
-            });
+            simulation_response
+                .logs
+                .as_ref()
+                .unwrap()
+                .iter()
+                .for_each(|log| {
+                    log_info!("  {log}");
+                });
 
             if has_instruction_error {
                 bail!("Simulation failed");
             }
 
-            Ok(None)
+            Ok(TransactionOutcome::Simulated(simulation_response))
         } else {
             let tx_sig = self
                 .connection
-                .send_and_confirm_transaction_with_spinner(transaction)
+                .send_and_confirm_transaction_with_spinner_and_config(
+                    transaction,
+                    self.connection.commitment(),
+                    send_config,
+                )
                 .await?;
 
-            Ok(Some(tx_sig))
+            Ok(TransactionOutcome::Executed(tx_sig))
         }
     }
 
     pub fn compute_units_for_bump_seed(bump: u8) -> u32 {
         1_500 * u32::from(255 - bump)
+    }
+
+    pub fn default_send_transaction_config(&self) -> RpcSendTransactionConfig {
+        RpcSendTransactionConfig {
+            preflight_commitment: Some(self.connection.commitment().commitment),
+            ..Default::default()
+        }
+    }
+
+    pub fn default_simulate_transaction_config(&self) -> RpcSimulateTransactionConfig {
+        RpcSimulateTransactionConfig {
+            commitment: Some(self.connection.commitment()),
+            ..Default::default()
+        }
     }
 }
 

@@ -10,7 +10,7 @@ use doublezero_revenue_distribution::{
 };
 use doublezero_solana_client_tools::{
     instruction::take_instruction,
-    payer::{SolanaPayerOptions, Wallet},
+    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
 };
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 
@@ -176,7 +176,8 @@ impl ValidatorDepositCommand {
         let transaction = wallet.new_transaction(&instructions).await?;
         let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
-        if let Some(tx_sig) = tx_sig {
+        // TODO: Add simulation result handling with state changes.
+        if let TransactionOutcome::Executed(tx_sig) = tx_sig {
             println!("Solana validator deposit: {deposit_key}");
             println!("Funded{and_initialized_str}: {tx_sig}");
             println!("Node ID: {node_id}");

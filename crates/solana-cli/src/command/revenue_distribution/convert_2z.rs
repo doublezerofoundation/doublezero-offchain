@@ -8,7 +8,7 @@ use doublezero_sol_conversion_interface::{
 };
 use doublezero_solana_client_tools::{
     instruction::take_instruction,
-    payer::{SolanaPayerOptions, Wallet},
+    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
     rpc::SolanaConnection,
 };
 use solana_sdk::{
@@ -102,7 +102,7 @@ impl Convert2zCommand {
         let transaction = wallet.new_transaction(&instructions).await?;
         let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
-        if let Some(tx_sig) = tx_sig {
+        if let TransactionOutcome::Executed(tx_sig) = tx_sig {
             println!("Converted 2Z to SOL: {tx_sig}");
 
             let balance_after = convert_2z_context
