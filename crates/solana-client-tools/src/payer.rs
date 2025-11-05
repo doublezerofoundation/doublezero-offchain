@@ -5,8 +5,10 @@ use clap::Args;
 use solana_client::rpc_config::RpcTransactionConfig;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
+    address_lookup_table::state::AddressLookupTable,
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
+    message::AddressLookupTableAccount,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -67,10 +69,11 @@ impl Wallet {
         self.signer.pubkey()
     }
 
-    pub async fn new_transaction_with_additional_signers(
+    pub async fn new_transaction_with_additional_signers_and_lookup_tables(
         &self,
         instructions: &[Instruction],
         additional_signers: &[&Keypair],
+        address_lookup_table_keys: &[Pubkey],
     ) -> Result<VersionedTransaction> {
         let recent_blockhash = self.connection.get_latest_blockhash().await?;
 
@@ -91,14 +94,54 @@ impl Wallet {
 
         signers.extend_from_slice(additional_signers);
 
-        new_transaction(instructions, &signers, recent_blockhash)
+        if address_lookup_table_keys.is_empty() {
+            return new_transaction(instructions, &signers, &[], recent_blockhash);
+        }
+
+        let lut_account_infos = self
+            .connection
+            .get_multiple_accounts(address_lookup_table_keys)
+            .await
+            .context("Failed to get address lookup table accounts")?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        ensure!(
+            lut_account_infos.len() == address_lookup_table_keys.len(),
+            "Expected {} address lookup table accounts, got {}",
+            address_lookup_table_keys.len(),
+            lut_account_infos.len()
+        );
+
+        let address_lookup_table_accounts = lut_account_infos
+            .into_iter()
+            .zip(address_lookup_table_keys)
+            .map(|(account_info, key)| {
+                let lut =
+                    AddressLookupTable::deserialize(&account_info.data).with_context(|| {
+                        format!("Failed to deserialize {key} as address lookup table")
+                    })?;
+
+                Ok(AddressLookupTableAccount {
+                    key: *key,
+                    addresses: lut.addresses.into_owned(),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        new_transaction(
+            instructions,
+            &signers,
+            &address_lookup_table_accounts,
+            recent_blockhash,
+        )
     }
 
     pub async fn new_transaction(
         &self,
         instructions: &[Instruction],
     ) -> Result<VersionedTransaction> {
-        self.new_transaction_with_additional_signers(instructions, &[])
+        self.new_transaction_with_additional_signers_and_lookup_tables(instructions, &[], &[])
             .await
     }
 
@@ -158,24 +201,35 @@ impl Wallet {
         transaction: &VersionedTransaction,
     ) -> Result<Option<Signature>> {
         if self.dry_run {
-            let simulation_response = self.connection.simulate_transaction(transaction).await?;
+            let simulation_response = self
+                .connection
+                .simulate_transaction(transaction)
+                .await?
+                .value;
 
-            if let Some(tx_err) = simulation_response.value.err {
-                ensure!(
-                    matches!(tx_err, TransactionError::InstructionError(_, _)),
-                    "Simulation failed: {tx_err}"
-                );
+            let has_instruction_error = match simulation_response.err {
+                Some(tx_err) => {
+                    ensure!(
+                        matches!(tx_err, TransactionError::InstructionError(_, _)),
+                        "Simulation failed: {tx_err}"
+                    );
+                    true
+                }
+                None => false,
+            };
+
+            if let Some(units_consumed) = simulation_response.units_consumed {
+                log_info!("Compute units consumed: {}", units_consumed);
             }
 
             log_info!("Simulated program logs:");
-            simulation_response
-                .value
-                .logs
-                .unwrap()
-                .iter()
-                .for_each(|log| {
-                    log_info!("  {log}");
-                });
+            simulation_response.logs.unwrap().iter().for_each(|log| {
+                log_info!("  {log}");
+            });
+
+            if has_instruction_error {
+                bail!("Simulation failed");
+            }
 
             Ok(None)
         } else {

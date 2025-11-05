@@ -140,7 +140,7 @@ async fn execute_initialize(
     )?;
 
     let transaction = wallet
-        .new_transaction_with_additional_signers(
+        .new_transaction_with_additional_signers_and_lookup_tables(
             &[
                 create_account_ix,
                 initialize_system_ix,
@@ -148,6 +148,7 @@ async fn execute_initialize(
                 toggle_system_state_ix,
             ],
             &[&fills_registry_signer],
+            &[],
         )
         .await?;
     let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
@@ -317,7 +318,7 @@ impl ConfigureCommand {
         }
 
         let transaction = wallet
-            .new_transaction_with_additional_signers(&instructions, &[])
+            .new_transaction_with_additional_signers_and_lookup_tables(&instructions, &[], &[])
             .await?;
         let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 

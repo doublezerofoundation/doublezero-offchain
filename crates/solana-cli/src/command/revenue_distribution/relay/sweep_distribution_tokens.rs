@@ -116,8 +116,9 @@ impl SweepDistributionTokensContext {
     ) -> Result<Self> {
         let SolConversionState {
             program_state: (_, sol_conversion_program_state),
-            configuration_registry: (_, configuration_registry),
+            configuration_registry: _,
             journal: (_, journal),
+            fixed_fill_quantity,
         } = SolConversionState::try_fetch(&wallet.connection).await?;
 
         let expected_dz_epoch = journal.next_dz_epoch_to_sweep_tokens;
@@ -137,9 +138,8 @@ impl SweepDistributionTokensContext {
             }
         };
 
-        let expected_fill_count = distribution.checked_total_sol_debt().unwrap()
-            / configuration_registry.fixed_fill_quantity
-            + 1;
+        let expected_fill_count =
+            distribution.checked_total_sol_debt().unwrap() / fixed_fill_quantity + 1;
         ensure!(
             expected_fill_count <= MAX_FILLS_QUEUE_SIZE as u64,
             "Expected fill count is too large"
