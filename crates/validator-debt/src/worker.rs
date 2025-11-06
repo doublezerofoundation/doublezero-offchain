@@ -1,10 +1,4 @@
-use crate::{
-    ledger, rewards,
-    rpc::JoinedSolanaEpochs,
-    solana_debt_calculator::ValidatorRewards,
-    transaction::{SOLANA_SEED_PREFIX, Transaction},
-    validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
-};
+use std::{collections::HashMap, env, fs::File, str::FromStr};
 
 use anyhow::{Result, bail};
 use doublezero_revenue_distribution::{
@@ -21,8 +15,15 @@ use slack_notifier;
 
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{clock::Clock, pubkey::Pubkey, sysvar::clock};
-use std::{collections::HashMap, env, fs::File, str::FromStr};
 use tabled::Tabled;
+
+use crate::{
+    ledger, rewards,
+    rpc::JoinedSolanaEpochs,
+    solana_debt_calculator::ValidatorRewards,
+    transaction::{SOLANA_SEED_PREFIX, Transaction},
+    validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
+};
 
 #[derive(Debug, Default, Serialize)]
 pub struct WriteSummary {
