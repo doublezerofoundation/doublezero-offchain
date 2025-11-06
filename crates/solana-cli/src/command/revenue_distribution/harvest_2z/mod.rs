@@ -52,11 +52,13 @@ impl Harvest2zCommand {
 
         let sol_conversion_state = SolConversionState::try_fetch(&wallet.connection).await?;
 
-        let discount = oracle::DiscountParameters::from_configuration_registry(
+        let discount_params = oracle::DiscountParameters::from_configuration_registry(
             &sol_conversion_state.configuration_registry.1,
-        )
-        .checked_compute(current_slot - sol_conversion_state.program_state.1.last_trade_slot)
-        .context("Failed to calculate discount")?;
+        );
+
+        let discount = discount_params
+            .checked_compute(current_slot - sol_conversion_state.program_state.1.last_trade_slot)
+            .context("Failed to calculate discount")?;
 
         let fixed_fill_quantity = sol_conversion_state.fixed_fill_quantity;
 
@@ -89,7 +91,8 @@ impl Harvest2zCommand {
             }
         };
 
-        let mut quote_response = try_quote_sol_to_2z(input_sol_amount).await?;
+        let mut quote_response =
+            try_quote_sol_to_2z(input_sol_amount, discount_params.max_discount).await?;
 
         let discounted_swap_rate =
             oracle::checked_discounted_swap_rate(convert_2z_context.oracle_swap_rate, discount)
@@ -219,9 +222,15 @@ impl Harvest2zCommand {
     }
 }
 
-async fn try_quote_sol_to_2z(amount: u64) -> Result<JupiterLegacyQuoteResponse> {
+async fn try_quote_sol_to_2z(
+    amount: u64,
+    max_discount_rate: u64,
+) -> Result<JupiterLegacyQuoteResponse> {
+    let slippage_bps = u16::try_from(max_discount_rate)
+        .context("Overflow when calculating slippage bps with max discount rate")?;
+
     let quote_request = jupiter::quote::JupiterLegacyQuoteRequest {
-        slippage_bps: 0,
+        slippage_bps,
         restrict_intermediate_tokens: Some(true),
         amount,
         output_mint: DOUBLEZERO_MINT_KEY.to_string(),
@@ -236,7 +245,7 @@ async fn try_quote_sol_to_2z(amount: u64) -> Result<JupiterLegacyQuoteResponse> 
 
         // Any route plans that involve more intermediate steps will not fit in
         // the transaction.
-        if response.route_plan.len() == 2 {
+        if response.route_plan.len() <= 2 {
             return Ok(response);
         }
 
