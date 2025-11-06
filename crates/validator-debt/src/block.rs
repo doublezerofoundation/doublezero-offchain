@@ -148,10 +148,11 @@ pub async fn get_block_rewards<T: ValidatorRewards>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::solana_debt_calculator::MockValidatorRewards;
     use solana_sdk::epoch_info::EpochInfo;
     use solana_transaction_status_client_types::{Reward, UiConfirmedBlock};
+
+    use super::*;
+    use crate::solana_debt_calculator::MockValidatorRewards;
 
     #[tokio::test]
     async fn test_get_block_rewards() {

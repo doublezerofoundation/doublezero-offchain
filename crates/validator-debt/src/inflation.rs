@@ -71,11 +71,12 @@ pub async fn get_inflation_rewards<T: ValidatorRewards + ?Sized>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::solana_debt_calculator::MockValidatorRewards;
     use solana_client::rpc_response::{
         RpcInflationReward, RpcVoteAccountInfo, RpcVoteAccountStatus,
     };
+
+    use super::*;
+    use crate::solana_debt_calculator::MockValidatorRewards;
 
     #[tokio::test]
     async fn test_get_inflation_rewards() {

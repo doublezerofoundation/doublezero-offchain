@@ -12,7 +12,6 @@ use doublezero_solana_client_tools::{log_info, log_warn};
 use leaky_bucket::RateLimiter;
 use serde::Serialize;
 use slack_notifier;
-
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{clock::Clock, pubkey::Pubkey, sysvar::clock};
 use tabled::Tabled;
@@ -538,15 +537,8 @@ async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<St
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{
-        block,
-        jito::{JitoReward, JitoRewards},
-        solana_debt_calculator::{
-            MockValidatorRewards, SolanaDebtCalculator, ledger_rpc, solana_rpc,
-        },
-        transaction,
-    };
+    use std::{collections::HashMap, path::PathBuf};
+
     use solana_client::{
         nonblocking::rpc_client::RpcClient,
         rpc_config::{RpcBlockConfig, RpcGetVoteAccountsConfig},
@@ -559,7 +551,16 @@ mod tests {
     use solana_transaction_status_client_types::{
         TransactionDetails, UiConfirmedBlock, UiTransactionEncoding,
     };
-    use std::{collections::HashMap, path::PathBuf};
+
+    use super::*;
+    use crate::{
+        block,
+        jito::{JitoReward, JitoRewards},
+        solana_debt_calculator::{
+            MockValidatorRewards, SolanaDebtCalculator, ledger_rpc, solana_rpc,
+        },
+        transaction,
+    };
 
     /// Taken from a Solana cookbook to load a keypair from a user's Solana config
     /// location.
