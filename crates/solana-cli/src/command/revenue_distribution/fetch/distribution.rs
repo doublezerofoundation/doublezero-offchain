@@ -244,7 +244,7 @@ async fn try_print_distribution_summary_table(
                 },
             },
             DistributionSummaryTableRow {
-                field: "Solana validators paid",
+                field: "Solana validators processed debt count",
                 value: format!(
                     "{} / {}",
                     distribution.solana_validator_payments_count,
@@ -261,7 +261,7 @@ async fn try_print_distribution_summary_table(
                 ),
             },
             DistributionSummaryTableRow {
-                field: "Solana validator payments",
+                field: "Total Solana validator payments",
                 value: format!(
                     "{:.9} SOL",
                     distribution.collected_solana_validator_payments as f64
@@ -314,7 +314,7 @@ async fn try_print_distribution_summary_table(
                 },
             },
             DistributionSummaryTableRow {
-                field: "Contributors rewarded",
+                field: "Contributors distributed rewards count",
                 value: format!(
                     "{} / {}",
                     distribution.distributed_rewards_count, distribution.total_contributors
@@ -325,7 +325,7 @@ async fn try_print_distribution_summary_table(
                 ),
             },
             DistributionSummaryTableRow {
-                field: "Distributed rewards",
+                field: "Total distributed rewards",
                 value: format!(
                     "{:.1} 2Z",
                     distribution.distributed_2z_amount as f64
@@ -334,7 +334,7 @@ async fn try_print_distribution_summary_table(
                 note: Default::default(),
             },
             DistributionSummaryTableRow {
-                field: "Burned rewards",
+                field: "Total burned rewards",
                 value: format!(
                     "{:.1} 2Z",
                     distribution.burned_2z_amount as f64
@@ -343,7 +343,7 @@ async fn try_print_distribution_summary_table(
                 note: Default::default(),
             },
             DistributionSummaryTableRow {
-                field: "Remaining 2Z rewards",
+                field: "Total remaining 2Z rewards",
                 value: format!(
                     "{:.1} 2Z",
                     (distribution.total_collected_2z_tokens()
