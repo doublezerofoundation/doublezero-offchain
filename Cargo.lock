@@ -2257,7 +2257,7 @@ dependencies = [
  "doublezero_sdk",
  "governor",
  "indexmap",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "md5",
  "metrics",
  "metrics-exporter-prometheus",

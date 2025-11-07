@@ -45,7 +45,7 @@ futures = "0"
 futures-util = "0"
 governor = "0"
 indexmap = { version = "2", features = ["serde"] }
-itertools = "0"
+itertools = "0.14"
 leaky-bucket = "1"
 metrics = "0"
 metrics-exporter-prometheus = "0"
