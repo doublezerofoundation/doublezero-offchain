@@ -1,0 +1,21 @@
+[package]
+name = "scheduler_doublezero"
+version = "0.1.0"
+authors = []
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+doublezero-solana-client-tools = {path = "../../../crates/solana-client-tools"}
+doublezero-solana-validator-debt = {path = "../../../crates/validator-debt"}
+rustler = "0.37.0"
+slack-notifier = {path = "../../../crates/slack-notifier"}
+serde_json = "1"
+solana-client = "2"
+solana-commitment-config = "2"
+solana-sdk = "2"
+solana-transaction-status-client-types = "2"
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "signal"] }

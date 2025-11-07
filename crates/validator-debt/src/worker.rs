@@ -20,7 +20,7 @@ use crate::{
     ledger, rewards,
     rpc::JoinedSolanaEpochs,
     solana_debt_calculator::ValidatorRewards,
-    transaction::Transaction,
+    transaction::{DebtCollectionResults, Transaction},
     validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
 };
 
@@ -374,6 +374,29 @@ pub async fn calculate_validator_debt(
     };
 
     Ok(write_summary)
+}
+
+pub async fn pay_solana_validator_debt<T: ValidatorRewards>(
+    solana_debt_calculator: &T,
+    transaction: Transaction,
+    dz_epoch: u64,
+) -> Result<DebtCollectionResults> {
+    let (_, computed_debt) = ledger::try_fetch_debt_record(
+        solana_debt_calculator.ledger_rpc_client(),
+        &transaction.pubkey(),
+        dz_epoch,
+        solana_debt_calculator.ledger_commitment_config(),
+    )
+    .await?;
+
+    let tx_results = transaction
+        .pay_solana_validator_debt(
+            solana_debt_calculator.solana_rpc_client(),
+            computed_debt,
+            dz_epoch,
+        )
+        .await?;
+    Ok(tx_results)
 }
 
 async fn write_transaction(
