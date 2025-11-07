@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
         solana_connection_options,
     } = Args::parse();
 
-    let mut connection = SolanaConnection::try_from(solana_connection_options)?;
+    let connection = SolanaConnection::try_from(solana_connection_options)?;
     let is_mainnet = connection.try_is_mainnet().await?;
 
     // Get upgrade authority from argument or default keypair.

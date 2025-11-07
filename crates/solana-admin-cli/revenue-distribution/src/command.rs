@@ -187,7 +187,7 @@ pub struct ConfigureRevenueDistributionOptions {
 //
 
 pub async fn execute_initialize_program(solana_payer_options: SolanaPayerOptions) -> Result<()> {
-    let mut wallet = Wallet::try_from(solana_payer_options)?;
+    let wallet = Wallet::try_from(solana_payer_options)?;
     let wallet_key = wallet.pubkey();
 
     let is_mainnet = wallet.connection.try_is_mainnet().await?;

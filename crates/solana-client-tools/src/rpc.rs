@@ -79,7 +79,7 @@ impl SolanaConnection {
     const SOLANA_MAINNET_GENESIS_HASH: Pubkey =
         solana_sdk::pubkey!("5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d");
 
-    pub async fn try_is_mainnet(&mut self) -> Result<bool> {
+    pub async fn try_is_mainnet(&self) -> Result<bool> {
         let genesis_hash = self.get_genesis_hash().await?;
         Ok(genesis_hash.to_bytes() == Self::SOLANA_MAINNET_GENESIS_HASH.to_bytes())
     }

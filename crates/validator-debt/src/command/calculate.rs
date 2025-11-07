@@ -206,8 +206,7 @@ impl Schedulable for FindSolanaEpochCommand {
             .interval(std::time::Duration::from_secs(1))
             .build();
 
-        let mut solana_connection = SolanaConnection::try_from(solana_connection_options.clone())?;
-        solana_connection.try_is_mainnet().await?;
+        let solana_connection = SolanaConnection::try_from(solana_connection_options.clone())?;
 
         let dz_ledger_rpc_client = RpcClient::new_with_commitment(
             dz_ledger_connection_options.dz_ledger_url.clone(),
@@ -240,7 +239,7 @@ async fn latest_distribution_epoch(
     solana_connection_options: &SolanaConnectionOptions,
     dz_ledger_connection_options: &DoubleZeroLedgerConnectionOptions,
 ) -> Result<u64> {
-    let mut solana_connection = SolanaConnection::try_from(solana_connection_options.clone())?;
+    let solana_connection = SolanaConnection::try_from(solana_connection_options.clone())?;
     let is_mainnet = solana_connection.try_is_mainnet().await?;
 
     let dz_ledger_rpc_client = RpcClient::new_with_commitment(

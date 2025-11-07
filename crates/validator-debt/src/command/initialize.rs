@@ -39,7 +39,7 @@ impl Schedulable for InitializeDistributionCommand {
     async fn execute_once(&self) -> Result<()> {
         self.schedule_or_force.ensure_safe_execution()?;
 
-        let mut wallet = Wallet::try_from(self.solana_payer_options.clone())?;
+        let wallet = Wallet::try_from(self.solana_payer_options.clone())?;
         let is_mainnet = wallet.connection.try_is_mainnet().await?;
 
         let program_config_info = ZeroCopyAccountOwned::<ProgramConfig>::try_from_rpc_client(
