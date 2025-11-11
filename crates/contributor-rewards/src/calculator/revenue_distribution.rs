@@ -1,7 +1,5 @@
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-
 use anyhow::{Result, anyhow, bail};
-use doublezero_program_tools::{instruction::try_build_instruction, zero_copy};
+use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_revenue_distribution::{
     ID as REVENUE_DISTRIBUTION_PROGRAM_ID,
     instruction::{
@@ -10,20 +8,26 @@ use doublezero_revenue_distribution::{
     state::Distribution,
     types::DoubleZeroEpoch,
 };
+use doublezero_solana_client_tools::zero_copy::ZeroCopyAccountOwned;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     message::{VersionedMessage, v0::Message},
     signature::{Keypair, Signer},
     transaction::VersionedTransaction,
 };
+use std::time::{Duration, Instant};
 use svm_hash::sha2::Hash;
 use tokio::time::sleep;
 use tracing::{info, warn};
 
-/// Check if calculation is allowed for a given distribution based on current timestamp
-fn check_calculation_allowed(distribution: &Distribution) -> Result<bool> {
-    let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+/// Check if calculation is allowed for a given distribution based on current block timestamp
+async fn check_calculation_allowed(
+    rpc_client: &RpcClient,
+    distribution: &Distribution,
+) -> Result<bool> {
+    // Get current slot and its block time from Solana
+    let current_slot = rpc_client.get_slot().await?;
+    let current_timestamp = rpc_client.get_block_time(current_slot).await?;
 
     let is_allowed = distribution
         .checked_calculation_allowed_timestamp()
@@ -48,25 +52,18 @@ async fn wait_for_grace_period(
     );
 
     // Fetch Distribution account
-    let distribution_account = rpc_client
-        .get_account_with_commitment(&distribution_pubkey, CommitmentConfig::confirmed())
-        .await?
-        .value
-        .ok_or_else(|| {
-            anyhow!(
-                "Distribution account for epoch {} does not exist at {}. \
-                It should be initialized by validator-debt crate first.",
-                epoch,
-                distribution_pubkey
-            )
-        })?;
+    let distribution_account =
+        ZeroCopyAccountOwned::<Distribution>::try_from_rpc_client(rpc_client, &distribution_pubkey)
+            .await?;
 
-    // Deserialize Distribution
-    let distribution = zero_copy::checked_from_bytes_with_discriminator::<Distribution>(
-        &distribution_account.data,
-    )
-    .ok_or_else(|| anyhow!("Failed to deserialize Distribution for epoch {}", epoch))?
-    .0;
+    let distribution = distribution_account.data.as_ref().ok_or_else(|| {
+        anyhow!(
+            "Distribution account for epoch {} does not exist at {}. \
+                It needs to be initialized by validator-debt crate first.",
+            epoch,
+            distribution_pubkey
+        )
+    })?;
 
     // Poll until grace period is satisfied
     let max_wait = Duration::from_secs(max_wait_seconds);
@@ -74,13 +71,13 @@ async fn wait_for_grace_period(
     let start = Instant::now();
 
     loop {
-        if check_calculation_allowed(distribution)? {
+        if check_calculation_allowed(rpc_client, distribution).await? {
             info!(
                 "Grace period satisfied for epoch {} after waiting {:?}",
                 epoch,
                 start.elapsed()
             );
-            return Ok(*distribution);
+            return Ok(**distribution);
         }
 
         if start.elapsed() >= max_wait {
@@ -92,7 +89,9 @@ async fn wait_for_grace_period(
         }
 
         if let Some(allowed_timestamp) = distribution.checked_calculation_allowed_timestamp() {
-            let current_timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+            // Get current Solana block time
+            let current_slot = rpc_client.get_slot().await?;
+            let current_timestamp = rpc_client.get_block_time(current_slot).await?;
             let wait_seconds = allowed_timestamp - current_timestamp;
 
             warn!(
