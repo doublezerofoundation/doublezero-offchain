@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use anyhow::{Result, anyhow, bail};
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_revenue_distribution::{
@@ -15,7 +17,6 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::VersionedTransaction,
 };
-use std::time::{Duration, Instant};
 use svm_hash::sha2::Hash;
 use tokio::time::sleep;
 use tracing::{info, warn};
