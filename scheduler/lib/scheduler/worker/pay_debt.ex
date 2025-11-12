@@ -3,7 +3,7 @@ defmodule Scheduler.Worker.PayDebt do
 
   require Logger
 
-  def start_link(_) do
+  def start_link(_var \\ []) do
     state = %{genesis_epoch: genesis_epoch(), current_epoch: genesis_epoch()}
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
   end

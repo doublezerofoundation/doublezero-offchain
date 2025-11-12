@@ -29,7 +29,46 @@ def deps do
 end
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/scheduler>.
+To add additional supervised processes, there are two required changes:
 
+The first is updating `config.exs` with the cron-like syntax of how often the process will be run and then the Module, Function, Arity (MFA) format. Since the workers are almost certainly GenServers, they will follow this format -
+`{"some interval", {WorkerModuleName, :start_link, []}}`. The Module is `WorkerModuleName`, the function is `start_link` and the arity is an empty list `[]`.
+
+The second is creating a worker in the `worker` subdirectory. Using the GenServer behaviour (interface), it's trivial to fill out the details:
+
+```elixir
+defmodule Scheduler.Worker.PayDebt do
+  use GenServer
+
+  require Logger
+
+  def start_link(_var \\ []) do
+    # state = %{} whatever startup state
+    GenServer.start_link(__MODULE__, state, name: __MODULE__) # this calls the `init/1` callback
+  end
+
+  def init(state) do
+    # most likely you will want to have the GenServer automatically continue the loop with {:continue, _} as this example shows
+    {:ok, state, {:continue, :your_callback_name}}
+  end
+
+  def handle_info(:info_name, state) do
+  # logic here
+  # here you can either do nothing with {:noreply, state} or continue the loop with `{:noreply, state, {:continue, :your_callback_name}}
+  {:noreply, state}
+  end
+
+  ## this is a catch-all for unexpected messages and is standard practice
+  def handle_info(msg, state) do
+    Logger.warning("Received unexpected msg: #{msg}")
+    {:noreply, state}
+  end
+
+  ## handle_continue/2 callbacks are called automatically triggered by the {:continue, _} tuple
+  def handle_continue(:your_callback_name, state) do
+    # logic goes here
+    # can call this in a loop or at some interval with Process.send_after/4 - `handle_info/2 receives the message from send_after
+    {:noreply, state}
+  end
+end
+```
