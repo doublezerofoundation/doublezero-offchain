@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.2](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/doublezero-solana/v0.2.2) - 2025-11-12
 
+- solana-cli: uptick to 0.2.2 ([#191](https://github.com/doublezerofoundation/doublezero-offchain/pull/191))
 - fix(solana-cli): correct default limit price for `convert-2z` and `harvest-2z` ([#190](https://github.com/doublezerofoundation/doublezero-offchain/pull/190))
 - feat(solana-cli): add `--specific-dex` option for `harvest-2z` ([#189](https://github.com/doublezerofoundation/doublezero-offchain/pull/189))
 
