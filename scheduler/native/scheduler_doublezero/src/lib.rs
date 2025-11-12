@@ -25,36 +25,25 @@ pub fn pay_debt(dz_epoch: u64, ledger_rpc: String, solana_rpc: String) -> Result
     Ok(())
 }
 
+#[rustler::nif]
+pub fn calculate_distribution(
+    dz_epoch: u64,
+    ledger_rpc: String,
+    solana_rpc: String,
+) -> Result<(), NifError> {
+    let rt = tokio::runtime::Runtime::new().map_err(|e| NifError::Term(Box::new(e.to_string())))?;
+
+    // Block the current thread and wait for the async operation to complete.
+    rt.block_on(async { async_calculate_distribution(dz_epoch, ledger_rpc, solana_rpc).await })
+        .map_err(|e| NifError::Term(Box::new(e.to_string())))?;
+
+    Ok(())
+}
+
 async fn async_pay_debt(dz_epoch: u64, ledger_rpc: String, solana_rpc: String) -> Result<()> {
-    let ledger_rpc_client =
-        RpcClient::new_with_commitment(ledger_rpc, CommitmentConfig::confirmed());
-
-    let solana_rpc_client =
-        RpcClient::new_with_commitment(solana_rpc, CommitmentConfig::confirmed());
-
     let signer = try_load_keypair(None)?;
 
-    let rpc_block_config = RpcBlockConfig {
-        encoding: Some(UiTransactionEncoding::Base58),
-        transaction_details: Some(TransactionDetails::Signatures),
-        rewards: Some(true),
-        commitment: None,
-        max_supported_transaction_version: Some(0),
-    };
-
-    let vote_accounts_config = RpcGetVoteAccountsConfig {
-        vote_pubkey: None,
-        commitment: CommitmentConfig::confirmed().into(),
-        keep_unstaked_delinquents: None,
-        delinquent_slot_distance: None,
-    };
-
-    let sdc = SolanaDebtCalculator::new(
-        DoubleZeroLedgerConnection(ledger_rpc_client),
-        solana_rpc_client,
-        rpc_block_config,
-        vote_accounts_config,
-    );
+    let sdc = initialize_solana_debt_calculator(ledger_rpc, solana_rpc);
 
     let transaction = transaction::Transaction::new(signer, false, false);
     let tx_results = worker::pay_solana_validator_debt(&sdc, transaction, dz_epoch).await?;
@@ -73,6 +62,65 @@ async fn async_pay_debt(dz_epoch: u64, ledger_rpc: String, solana_rpc: String) -
     Ok(())
 }
 
+async fn async_calculate_distribution(
+    dz_epoch: u64,
+    ledger_rpc: String,
+    solana_rpc: String,
+) -> Result<()> {
+    let signer = try_load_keypair(None)?;
+
+    let sdc = initialize_solana_debt_calculator(ledger_rpc, solana_rpc);
+
+    let transaction = transaction::Transaction::new(signer, false, false);
+    let write_summary =
+        worker::calculate_validator_debt(&sdc, transaction, dz_epoch, None, false).await?;
+
+    slack_notifier::validator_debt::post_distribution_to_slack(
+        None,
+        write_summary.solana_epoch,
+        write_summary.dz_epoch,
+        false,
+        write_summary.total_debt,
+        write_summary.total_validators,
+        write_summary.transaction_id,
+    )
+    .await?;
+
+    Ok(())
+}
+
+fn initialize_solana_debt_calculator(
+    ledger_rpc: String,
+    solana_rpc: String,
+) -> SolanaDebtCalculator {
+    let ledger_rpc_client =
+        RpcClient::new_with_commitment(ledger_rpc, CommitmentConfig::confirmed());
+
+    let solana_rpc_client =
+        RpcClient::new_with_commitment(solana_rpc, CommitmentConfig::confirmed());
+
+    let rpc_block_config = RpcBlockConfig {
+        encoding: Some(UiTransactionEncoding::Base58),
+        transaction_details: Some(TransactionDetails::Signatures),
+        rewards: Some(true),
+        commitment: None,
+        max_supported_transaction_version: Some(0),
+    };
+
+    let vote_accounts_config = RpcGetVoteAccountsConfig {
+        vote_pubkey: None,
+        commitment: CommitmentConfig::confirmed().into(),
+        keep_unstaked_delinquents: None,
+        delinquent_slot_distance: None,
+    };
+
+    SolanaDebtCalculator::new(
+        DoubleZeroLedgerConnection(ledger_rpc_client),
+        solana_rpc_client,
+        rpc_block_config,
+        vote_accounts_config,
+    )
+}
 fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
     let home_path = std::env::var_os("HOME").unwrap();
     let default_keypair_path = ".config/solana/id.json";

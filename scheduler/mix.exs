@@ -22,6 +22,7 @@ defmodule Scheduler.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:credo, "~> 1.7"},
       {:quantum, "~> 3.5"},
       {:rustler, "~> 0.37.1"}
     ]

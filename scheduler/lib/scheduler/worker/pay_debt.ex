@@ -1,4 +1,7 @@
 defmodule Scheduler.Worker.PayDebt do
+  @moduledoc """
+    GenServer that runs at a configured interval (config.exs) to pay validator debt for a DZ epoch
+  """
   use GenServer
 
   require Logger
@@ -8,10 +11,12 @@ defmodule Scheduler.Worker.PayDebt do
     GenServer.start_link(__MODULE__, state, name: __MODULE__)
   end
 
+  @impl GenServer
   def init(state) do
     {:ok, state, {:continue, :queue_debt_payment}}
   end
 
+  @impl GenServer
   def handle_info(:pay_debt, state) do
     case Scheduler.DoubleZero.pay_debt(state.current_epoch, ledger_rpc(), solana_rpc()) do
       {:error, error} ->
@@ -32,11 +37,13 @@ defmodule Scheduler.Worker.PayDebt do
     end
   end
 
+  @impl GenServer
   def handle_info(msg, state) do
     Logger.warning("Received unexpected msg: #{msg}")
     {:noreply, state}
   end
 
+  @impl GenServer
   def handle_continue(:queue_debt_payment, state) do
     Process.send_after(self(), :pay_debt, 10)
     {:noreply, state}
