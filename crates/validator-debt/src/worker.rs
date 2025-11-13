@@ -16,8 +16,8 @@ use doublezero_serviceability::state::{
 };
 use doublezero_solana_client_tools::{
     log_info, log_warn,
-    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
-    rpc::DoubleZeroLedgerConnectionOptions,
+    payer::{TransactionOutcome, Wallet},
+    rpc::DoubleZeroLedgerConnection,
     zero_copy::ZeroCopyAccountOwned,
 };
 use leaky_bucket::RateLimiter;
@@ -25,7 +25,7 @@ use serde::Serialize;
 use slack_notifier;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    clock::Clock, commitment_config::CommitmentConfig, compute_budget::ComputeBudgetInstruction,
+    clock::Clock, compute_budget::ComputeBudgetInstruction,
     pubkey::Pubkey, signer::Signer, sysvar::clock,
 };
 use tabled::Tabled;
@@ -130,9 +130,8 @@ pub async fn verify_validator_debt(
 
 pub async fn initialize_distribution(
     wallet: Wallet,
-    dz_ledger_connection_options: DoubleZeroLedgerConnectionOptions,
+    dz_ledger_connection: DoubleZeroLedgerConnection,
 ) -> Result<()> {
-    // let wallet = Wallet::try_from(self.solana_payer_options.clone())?;
     let is_mainnet = wallet.connection.try_is_mainnet().await?;
 
     let program_config_info = ZeroCopyAccountOwned::<ProgramConfig>::try_from_rpc_client(
@@ -153,16 +152,11 @@ pub async fn initialize_distribution(
         "Signer does not match expected debt accountant"
     );
 
-    let dz_ledger_rpc_client = RpcClient::new_with_commitment(
-        dz_ledger_connection_options.dz_ledger_url.clone(),
-        CommitmentConfig::confirmed(),
-    );
-
-    ledger::ensure_same_network_environment(&dz_ledger_rpc_client, is_mainnet).await?;
+    ledger::ensure_same_network_environment(&dz_ledger_connection.0, is_mainnet).await?;
 
     // We want to make sure the next DZ epoch is in sync with the last
     // completed DZ epoch.
-    let expected_completed_dz_epoch = dz_ledger_rpc_client.get_epoch_info().await?.epoch - 1;
+    let expected_completed_dz_epoch = dz_ledger_connection.0.get_epoch_info().await?.epoch - 1;
 
     // Ensure that the epoch from the DoubleZero Ledger network equals the next
     // one known by the Revenue Distribution program. If it does not, this

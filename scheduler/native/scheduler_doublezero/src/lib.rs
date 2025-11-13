@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
-use doublezero_solana_client_tools::rpc::DoubleZeroLedgerConnection;
+use doublezero_solana_client_tools::{
+    payer::Wallet,
+    rpc::{DoubleZeroLedgerConnection, SolanaConnection},
+};
 use doublezero_solana_validator_debt::{
     solana_debt_calculator::SolanaDebtCalculator, transaction, worker,
 };
@@ -20,6 +23,17 @@ pub fn pay_debt(dz_epoch: u64, ledger_rpc: String, solana_rpc: String) -> Result
 
     // Block the current thread and wait for the async operation to complete.
     rt.block_on(async { async_pay_debt(dz_epoch, ledger_rpc, solana_rpc).await })
+        .map_err(|e| NifError::Term(Box::new(e.to_string())))?;
+
+    Ok(())
+}
+
+#[rustler::nif]
+pub fn initialize_distribution(ledger_rpc: String, solana_rpc: String) -> Result<(), NifError> {
+    let rt = tokio::runtime::Runtime::new().map_err(|e| NifError::Term(Box::new(e.to_string())))?;
+
+    // Block the current thread and wait for the async operation to complete.
+    rt.block_on(async { async_initialize_distribution(ledger_rpc, solana_rpc).await })
         .map_err(|e| NifError::Term(Box::new(e.to_string())))?;
 
     Ok(())
@@ -70,6 +84,25 @@ async fn async_pay_debt(dz_epoch: u64, ledger_rpc: String, solana_rpc: String) -
     )
     .await?;
 
+    Ok(())
+}
+
+async fn async_initialize_distribution(ledger_rpc: String, solana_rpc: String) -> Result<()> {
+    let sc =
+        SolanaConnection::try_new_with_commitment(solana_rpc, CommitmentConfig::confirmed(), None)?;
+
+    let ledger_rpc_client = DoubleZeroLedgerConnection::new(ledger_rpc);
+
+    let wallet = Wallet {
+        connection: sc,
+        signer: try_load_keypair(None)?,
+        compute_unit_price_ix: None,
+        verbose: false,
+        fee_payer: None,
+        dry_run: false,
+    };
+
+    worker::initialize_distribution(wallet, ledger_rpc_client).await?;
     Ok(())
 }
 
