@@ -14,6 +14,11 @@ defmodule Scheduler.Worker.PayDebt do
 
   def handle_info(:pay_debt, state) do
     case Scheduler.DoubleZero.pay_debt(state.current_epoch, ledger_rpc(), solana_rpc()) do
+      ## Retry if we get this error because solana timed out
+      {:error,
+       "Unhandled Solana RPC error: unable to confirm transaction. This can happen in situations such as transaction expiration and insufficient fee-payer funds"} ->
+        {:noreply, state, {:continue, :queue_debt_payment}}
+
       {:error, error} ->
         if String.contains?(error, "Record account not found at address") do
           {:stop, "scheduler completed sweep at epoch #{state.current_epoch}", state}
