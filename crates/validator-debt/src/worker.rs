@@ -6,7 +6,7 @@ use doublezero_revenue_distribution::{
     ID,
     instruction::{
         RevenueDistributionInstructionData::{self, ConfigureDistributionDebt},
-        account::{InitializeSolanaValidatorDepositAccounts, InitializeDistributionAccounts}
+        account::{InitializeDistributionAccounts, InitializeSolanaValidatorDepositAccounts},
     },
     state::{self, Distribution, ProgramConfig, SolanaValidatorDeposit},
     types::SolanaValidatorDebt,
@@ -458,7 +458,6 @@ async fn write_transaction(
     }
 }
 
-
 pub async fn initialize_distribution(
     wallet: Wallet,
     dz_ledger_connection: DoubleZeroLedgerConnection,
@@ -553,7 +552,6 @@ pub async fn initialize_distribution(
 
     Ok(())
 }
-
 
 async fn create_or_validate_ledger_record(
     solana_debt_calculator: &impl ValidatorRewards,
