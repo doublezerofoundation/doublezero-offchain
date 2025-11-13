@@ -1,21 +1,33 @@
 [package]
 name = "scheduler_doublezero"
-version = "0.1.0"
-authors = []
-edition = "2021"
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1"
-doublezero-solana-client-tools = {path = "../../../crates/solana-client-tools"}
-doublezero-solana-validator-debt = {path = "../../../crates/validator-debt"}
+anyhow.workspace = true
+doublezero-solana-client-tools.workspace = true
+doublezero-solana-validator-debt.workspace = true
 rustler = "0.37.0"
-slack-notifier = {path = "../../../crates/slack-notifier"}
-serde_json = "1"
-solana-client = "2"
-solana-commitment-config = "2"
-solana-sdk = "2"
-solana-transaction-status-client-types = "2"
-tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "signal"] }
+serde_json.workspace = true
+solana-client.workspace = true
+solana-commitment-config.workspace = true
+solana-sdk.workspace = true
+slack-notifier.workspace = true
+solana-transaction-status-client-types.workspace = true
+tokio.workspace = true
+# anyhow = "1"
+# doublezero-solana-client-tools = {path = "../../../crates/solana-client-tools"}
+# doublezero-solana-validator-debt = {path = "../../../crates/validator-debt"}
+# rustler = "0.37.0"
+# slack-notifier = {path = "../../../crates/slack-notifier"}
+# serde_json = "1"
+# solana-client = "2"
+# solana-commitment-config = "2"
+# solana-sdk = "2"
+# solana-transaction-status-client-types = "2"
+# tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "signal"] }
