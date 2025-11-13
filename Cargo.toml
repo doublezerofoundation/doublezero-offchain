@@ -51,6 +51,7 @@ leaky-bucket = "1"
 metrics = "0"
 metrics-exporter-prometheus = "0"
 mockall = "0.13"
+polars = { version = "0.51", features = ["lazy", "parquet"] }
 rand = "0"
 rayon = "1"
 reqwest = { version = "0", features = ["json"] }

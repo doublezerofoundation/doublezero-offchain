@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, fs::File, str::FromStr};
+use std::{collections::HashMap, fs::File, str::FromStr};
 
 use anyhow::{Context, Result, bail, ensure};
 use doublezero_program_tools::instruction::try_build_instruction;
@@ -10,9 +10,6 @@ use doublezero_revenue_distribution::{
     },
     state::{ProgramConfig, SolanaValidatorDeposit},
     types::SolanaValidatorDebt,
-};
-use doublezero_serviceability::state::{
-    accesspass::AccessPassType, accountdata::AccountData, accounttype::AccountType,
 };
 use doublezero_solana_client_tools::{
     log_info, log_warn,
@@ -33,6 +30,7 @@ use tabled::Tabled;
 use crate::{
     ledger, rewards,
     rpc::JoinedSolanaEpochs,
+    s3_fetcher,
     solana_debt_calculator::ValidatorRewards,
     transaction::{DebtCollectionResults, Transaction},
     validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
@@ -53,13 +51,6 @@ pub struct WriteSummary {
 pub struct ValidatorSummary {
     pub validator_pubkey: String,
     pub total_debt: u64,
-}
-
-fn serviceability_pubkey() -> Result<Pubkey> {
-    match env::var("SERVICEABILITY_PUBKEY") {
-        Ok(pubkey) => Ok(Pubkey::from_str(&pubkey)?),
-        Err(_) => bail!("SERVICEABILITY_PUBKEY env var not set"),
-    }
 }
 
 pub async fn finalize_distribution(
@@ -256,9 +247,33 @@ pub async fn calculate_validator_debt(
         solana_epoch_from_last_dz_epoch_block
     };
 
-    let mut computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = Vec::new();
+    // Fetch validator pubkeys from S3 using the canonical approach
+    println!(
+        "Fetching validator pubkeys from S3 for epoch {}",
+        solana_epoch
+    );
+    let s3_validator_keys = s3_fetcher::fetch_validator_pubkeys(
+        solana_epoch,
+        solana_debt_calculator.solana_rpc_client(),
+        s3_fetcher::Network::MainnetBeta,
+    )
+    .await?;
+
+    println!(
+        "[OK] Found {} validators from S3 (after 12-hour rule)",
+        s3_validator_keys.len()
+    );
+
+    // Convert to validator pubkey strings for rewards calculation
+    let validator_pubkeys: Vec<String> = s3_validator_keys
+        .iter()
+        .map(|vk| vk.pubkey.clone())
+        .collect();
+
+    // If CSV path provided, validate S3 results against CSV
     if let Some(csv_path) = csv_path {
-        // brittle but temporary until access pass is sorted
+        println!("Validating S3 results against CSV: {}", csv_path);
+
         let solana_epoch_csv = csv_path
             .rsplit_once('.')
             .and_then(|(l, _)| l.rsplit_once('_'))
@@ -266,59 +281,89 @@ pub async fn calculate_validator_debt(
             .unwrap();
 
         if solana_epoch_csv != solana_epoch {
-            bail!("CSV file epoch {solana_epoch_csv} must match dz epoch {solana_epoch}");
+            bail!("CSV file epoch {solana_epoch_csv} must match solana epoch {solana_epoch}");
         }
+
+        // Read CSV pubkeys
         let file = File::open(csv_path)?;
         let mut rdr = csv::Reader::from_reader(file);
+        let mut csv_pubkeys: Vec<String> = Vec::new();
         for result in rdr.records() {
-            let record = result?; // Handle potential errors in reading a record
-            computed_solana_validator_debt_vec.push(ComputedSolanaValidatorDebt {
-                node_id: Pubkey::from_str_const(record.get(0).unwrap()),
-                amount: record.get(2).unwrap().parse::<u64>()?,
-            });
+            let record = result?;
+            csv_pubkeys.push(record.get(0).unwrap().to_string());
         }
-    } else {
-        bail!("Not permitted to fetch from access pass");
-        #[allow(unreachable_code)]
-        let validator_pubkeys =
-            fetch_validator_pubkeys(solana_debt_calculator.ledger_rpc_client()).await?;
 
-        let validator_rewards = rewards::get_total_rewards(
-            solana_debt_calculator,
-            validator_pubkeys.as_slice(),
-            solana_epoch,
-        )
-        .await?;
+        // ---------------------------------------------------------------------
+        // TODO: Remove this block once done testing
+        // Compare S3 vs CSV pubkeys
+        let s3_set: std::collections::HashSet<_> = validator_pubkeys.iter().collect();
+        let csv_set: std::collections::HashSet<_> = csv_pubkeys.iter().collect();
 
-        // gather rewards into debts for all validators
-        println!("Computing solana validator debt");
-        computed_solana_validator_debt_vec = validator_rewards
-            .rewards
-            .iter()
-            .map(|reward| ComputedSolanaValidatorDebt {
-                node_id: Pubkey::from_str(&reward.validator_id).unwrap(),
-                amount: distribution
+        let in_s3_not_csv: Vec<_> = s3_set.difference(&csv_set).collect();
+        let in_csv_not_s3: Vec<_> = csv_set.difference(&s3_set).collect();
+
+        if !in_s3_not_csv.is_empty() || !in_csv_not_s3.is_empty() {
+            println!("[ERROR] Validator pubkey mismatch between S3 and CSV!");
+            println!("  S3 count: {}, CSV count: {}", s3_set.len(), csv_set.len());
+            println!("  In S3 but not CSV: {}", in_s3_not_csv.len());
+            println!("  In CSV but not S3: {}", in_csv_not_s3.len());
+
+            if !in_s3_not_csv.is_empty() {
+                println!("  In S3 but not CSV:");
+                for pubkey in in_s3_not_csv.iter() {
+                    println!("    {}", pubkey);
+                }
+            }
+            if !in_csv_not_s3.is_empty() {
+                println!("  In CSV but not S3:");
+                for pubkey in in_csv_not_s3.iter() {
+                    println!("    {}", pubkey);
+                }
+            }
+
+            bail!("S3 and CSV validator lists do not match - investigation required");
+        }
+
+        println!(
+            "[OK] S3 and CSV validator lists match perfectly ({} validators)",
+            s3_set.len()
+        );
+        // ---------------------------------------------------------------------
+    }
+
+    // Use S3-fetched validators and calculate rewards
+    let validator_rewards =
+        rewards::get_total_rewards(solana_debt_calculator, &validator_pubkeys, solana_epoch)
+            .await?;
+
+    // gather rewards into debts for all validators
+    println!("Computing solana validator debt");
+    let computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = validator_rewards
+        .rewards
+        .iter()
+        .map(|reward| ComputedSolanaValidatorDebt {
+            node_id: Pubkey::from_str(&reward.validator_id).unwrap(),
+            amount: distribution
+                .solana_validator_fee_parameters
+                .base_block_rewards_pct
+                .mul_scalar(reward.block_base)
+                + distribution
                     .solana_validator_fee_parameters
-                    .base_block_rewards_pct
-                    .mul_scalar(reward.block_base)
-                    + distribution
-                        .solana_validator_fee_parameters
-                        .priority_block_rewards_pct
-                        .mul_scalar(reward.block_priority)
-                    + distribution
-                        .solana_validator_fee_parameters
-                        .jito_tips_pct
-                        .mul_scalar(reward.jito)
-                    + distribution
-                        .solana_validator_fee_parameters
-                        .inflation_rewards_pct
-                        .mul_scalar(reward.inflation)
-                    + distribution
-                        .solana_validator_fee_parameters
-                        .fixed_sol_amount as u64,
-            })
-            .collect();
-    };
+                    .priority_block_rewards_pct
+                    .mul_scalar(reward.block_priority)
+                + distribution
+                    .solana_validator_fee_parameters
+                    .jito_tips_pct
+                    .mul_scalar(reward.jito)
+                + distribution
+                    .solana_validator_fee_parameters
+                    .inflation_rewards_pct
+                    .mul_scalar(reward.inflation)
+                + distribution
+                    .solana_validator_fee_parameters
+                    .fixed_sol_amount as u64,
+        })
+        .collect();
 
     let computed_solana_validator_debt_vec = computed_solana_validator_debt_vec
         .into_iter()
@@ -528,44 +573,6 @@ async fn create_or_validate_ledger_record(
             bail!("new record created; shutting down until the next check")
         }
     }
-}
-
-async fn fetch_validator_pubkeys(ledger_rpc_client: &RpcClient) -> Result<Vec<String>> {
-    let account_type = AccountType::AccessPass as u8;
-    let filters = vec![solana_client::rpc_filter::RpcFilterType::Memcmp(
-        solana_client::rpc_filter::Memcmp::new(
-            0,
-            solana_client::rpc_filter::MemcmpEncodedBytes::Bytes(vec![account_type]),
-        ),
-    )];
-
-    let config = solana_client::rpc_config::RpcProgramAccountsConfig {
-        filters: Some(filters),
-        account_config: solana_client::rpc_config::RpcAccountInfoConfig {
-            encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
-            data_slice: None,
-            commitment: Some(solana_sdk::commitment_config::CommitmentConfig::confirmed()),
-            min_context_slot: None,
-        },
-        with_context: None,
-        sort_results: None,
-    };
-
-    let accounts = ledger_rpc_client
-        .get_program_accounts_with_config(&serviceability_pubkey()?, config)
-        .await?;
-
-    let mut pubkeys: Vec<String> = Vec::new();
-
-    for (_pubkey, account) in accounts {
-        let account_data = AccountData::try_from(&account.data[..])?;
-        let access_pass = account_data.get_accesspass()?;
-        if let AccessPassType::SolanaValidator(pubkey) = access_pass.accesspass_type {
-            pubkeys.push(pubkey.to_string())
-        }
-    }
-
-    Ok(pubkeys)
 }
 
 async fn try_initialize_missing_deposit_accounts(
