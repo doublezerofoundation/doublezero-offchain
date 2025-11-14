@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::File, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 
 use anyhow::{Context, Result, bail, ensure};
 use doublezero_program_tools::instruction::try_build_instruction;
@@ -123,7 +123,6 @@ pub async fn calculate_validator_debt(
     solana_debt_calculator: &impl ValidatorRewards,
     transaction: Transaction,
     dz_epoch: u64,
-    csv_path: Option<String>,
     post_to_ledger_only: bool,
 ) -> Result<WriteSummary> {
     let fetched_dz_epoch_info = solana_debt_calculator
@@ -248,10 +247,7 @@ pub async fn calculate_validator_debt(
     };
 
     // Fetch validator pubkeys from S3 using the canonical approach
-    println!(
-        "Fetching validator pubkeys from S3 for epoch {}",
-        solana_epoch
-    );
+    log_info!("Fetching validator pubkeys from S3 for epoch {solana_epoch}");
     let s3_validator_keys = s3_fetcher::fetch_validator_pubkeys(
         solana_epoch,
         solana_debt_calculator.solana_rpc_client(),
@@ -259,8 +255,8 @@ pub async fn calculate_validator_debt(
     )
     .await?;
 
-    println!(
-        "[OK] Found {} validators from S3 (after 12-hour rule)",
+    log_info!(
+        "Found {} validators from S3 (after 12-hour rule)",
         s3_validator_keys.len()
     );
 
@@ -269,67 +265,6 @@ pub async fn calculate_validator_debt(
         .iter()
         .map(|vk| vk.pubkey.clone())
         .collect();
-
-    // If CSV path provided, validate S3 results against CSV
-    if let Some(csv_path) = csv_path {
-        println!("Validating S3 results against CSV: {}", csv_path);
-
-        let solana_epoch_csv = csv_path
-            .rsplit_once('.')
-            .and_then(|(l, _)| l.rsplit_once('_'))
-            .and_then(|(_, num)| num.parse::<u64>().ok())
-            .unwrap();
-
-        if solana_epoch_csv != solana_epoch {
-            bail!("CSV file epoch {solana_epoch_csv} must match solana epoch {solana_epoch}");
-        }
-
-        // Read CSV pubkeys
-        let file = File::open(csv_path)?;
-        let mut rdr = csv::Reader::from_reader(file);
-        let mut csv_pubkeys: Vec<String> = Vec::new();
-        for result in rdr.records() {
-            let record = result?;
-            csv_pubkeys.push(record.get(0).unwrap().to_string());
-        }
-
-        // ---------------------------------------------------------------------
-        // TODO: Remove this block once done testing
-        // Compare S3 vs CSV pubkeys
-        let s3_set: std::collections::HashSet<_> = validator_pubkeys.iter().collect();
-        let csv_set: std::collections::HashSet<_> = csv_pubkeys.iter().collect();
-
-        let in_s3_not_csv: Vec<_> = s3_set.difference(&csv_set).collect();
-        let in_csv_not_s3: Vec<_> = csv_set.difference(&s3_set).collect();
-
-        if !in_s3_not_csv.is_empty() || !in_csv_not_s3.is_empty() {
-            println!("[ERROR] Validator pubkey mismatch between S3 and CSV!");
-            println!("  S3 count: {}, CSV count: {}", s3_set.len(), csv_set.len());
-            println!("  In S3 but not CSV: {}", in_s3_not_csv.len());
-            println!("  In CSV but not S3: {}", in_csv_not_s3.len());
-
-            if !in_s3_not_csv.is_empty() {
-                println!("  In S3 but not CSV:");
-                for pubkey in in_s3_not_csv.iter() {
-                    println!("    {}", pubkey);
-                }
-            }
-            if !in_csv_not_s3.is_empty() {
-                println!("  In CSV but not S3:");
-                for pubkey in in_csv_not_s3.iter() {
-                    println!("    {}", pubkey);
-                }
-            }
-
-            bail!("S3 and CSV validator lists do not match - investigation required");
-        }
-
-        println!(
-            "[OK] S3 and CSV validator lists match perfectly ({} validators)",
-            s3_set.len()
-        );
-        // ---------------------------------------------------------------------
-    }
 
     // Use S3-fetched validators and calculate rewards
     let validator_rewards =
