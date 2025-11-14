@@ -38,11 +38,14 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::Serialize;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use tempfile::NamedTempFile;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::{fs::File, io::AsyncWriteExt, sync::Semaphore, task::JoinSet};
 use tracing::{debug, info, warn};
 
 /// Mainnet threshold date (same as python)
 const MAINNET_THRESHOLD: &str = "2025-09-12T21:00:00Z";
+
+/// Maximum number of concurrent S3 downloads
+const MAX_CONCURRENT_DOWNLOADS: usize = 10;
 
 /// Validator identity pubkey
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
@@ -67,6 +70,7 @@ impl Network {
 }
 
 /// S3 configuration
+#[derive(Clone)]
 struct S3Config {
     client: S3Client,
     bucket: String,
@@ -169,52 +173,81 @@ pub async fn fetch_validator_pubkeys(
     let mainnet_threshold: DateTime<Utc> = MAINNET_THRESHOLD.parse()?;
     let include_mainnet = network == Network::MainnetBeta && end_time >= mainnet_threshold;
 
-    // Fetch and process hourly data
+    // Fetch and process hourly data in parallel
+    let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_DOWNLOADS));
+    let mut tasks = JoinSet::new();
+
+    // Spawn tasks for all hourly snapshots
+    for timestamp in hourly_timestamps {
+        let s3_config_clone = s3_config.clone();
+        let sem_clone = sem.clone();
+
+        tasks.spawn(async move {
+            // Acquire permit to limit concurrent downloads
+            let _permit = sem_clone.acquire().await.unwrap();
+
+            let result =
+                process_hourly_data(&s3_config_clone, timestamp, network, include_mainnet).await;
+
+            (timestamp, result)
+        });
+    }
+
+    // Collect results as they complete
     let mut all_validators: HashMap<String, usize> = HashMap::new();
-    let mut consecutive_failures = 0;
+    let mut processed_count = 0;
+    let mut failed_count = 0;
+    let total_hours = tasks.len();
 
-    for (idx, timestamp) in hourly_timestamps.iter().enumerate() {
-        debug!(
-            "Processing hour {}/{}: {}",
-            idx + 1,
-            hourly_timestamps.len(),
-            timestamp
-        );
-
-        match process_hourly_data(&s3_config, *timestamp, network, include_mainnet).await {
-            Ok(validators) => {
-                consecutive_failures = 0;
+    while let Some(task_result) = tasks.join_next().await {
+        match task_result {
+            Ok((timestamp, Ok(validators))) => {
+                processed_count += 1;
                 let count = validators.len();
 
                 // Count appearances for each validator
                 for validator in validators {
-                    *all_validators.entry(validator.pubkey.clone()).or_insert(0) += 1;
+                    *all_validators.entry(validator.pubkey).or_insert(0) += 1;
                 }
 
                 info!(
-                    "Hour {}: Found {} validators (total unique: {})",
+                    "Hour {} [{}/{}]: Found {} validators (total unique: {})",
                     timestamp.format("%Y-%m-%d %H:00"),
+                    processed_count,
+                    total_hours,
                     count,
                     all_validators.len()
                 );
             }
-            Err(e) => {
-                consecutive_failures += 1;
+            Ok((timestamp, Err(e))) => {
+                failed_count += 1;
                 warn!(
-                    "Failed to process hour {} (consecutive failures: {}): {}",
+                    "Failed to process hour {} [{}/{}]: {}",
                     timestamp.format("%Y-%m-%d %H:00"),
-                    consecutive_failures,
+                    processed_count + failed_count,
+                    total_hours,
                     e
                 );
-
-                if consecutive_failures >= s3_config.max_consecutive_failures {
-                    warn!(
-                        "Reached {} consecutive failures, stopping processing",
-                        s3_config.max_consecutive_failures
-                    );
-                    break;
-                }
             }
+            Err(e) => {
+                failed_count += 1;
+                warn!("Task join error: {}", e);
+            }
+        }
+    }
+
+    if failed_count > 0 {
+        warn!(
+            "Completed with {} successful and {} failed hours",
+            processed_count, failed_count
+        );
+
+        // Check if we exceeded the failure threshold
+        if failed_count >= s3_config.max_consecutive_failures {
+            warn!(
+                "Failed hour count ({}) exceeded threshold ({})",
+                failed_count, s3_config.max_consecutive_failures
+            );
         }
     }
 
