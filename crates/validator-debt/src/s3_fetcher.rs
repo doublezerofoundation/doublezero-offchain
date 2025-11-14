@@ -21,16 +21,20 @@
 //! - `VALIDATOR_DEBT_S3_MAX_CONSECUTIVE_FAILURES`: Max consecutive failures before stopping (default: 12)
 //! - `VALIDATOR_DEBT_S3_ENDPOINT`: Custom S3 endpoint for S3-compatible services (optional)
 
-use std::{collections::HashMap, env, fs::File as StdFile};
+use std::{collections::HashMap, env, fs::File as StdFile, sync::Arc};
 
 use anyhow::{Context, Result};
+use arrow::{
+    array::{Array, AsArray, BooleanArray, RecordBatch, StringArray},
+    datatypes::DataType,
+};
 use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
     Client as S3Client,
     config::{Credentials, Region},
 };
 use chrono::{DateTime, Duration, Timelike, Utc};
-use polars::prelude::*;
+use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::Serialize;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use tempfile::NamedTempFile;
@@ -289,28 +293,28 @@ async fn process_hourly_data(
     _include_mainnet: bool,
 ) -> Result<Vec<ValidatorKey>> {
     // Download Parquet files for this hour
-    let gossip_df = download_and_parse_parquet(
+    let gossip_batches = download_and_parse_parquet(
         s3_config,
         &format!("snapshot-solana-{}-gossip", network.prefix()),
         timestamp,
     )
     .await?;
 
-    let validators_df = download_and_parse_parquet(
+    let validators_batches = download_and_parse_parquet(
         s3_config,
         &format!("snapshot-solana-{}-validators", network.prefix()),
         timestamp,
     )
     .await?;
 
-    let users_df = download_and_parse_parquet(
+    let users_batches = download_and_parse_parquet(
         s3_config,
         &format!("snapshot-doublezero-{}-device-users", network.prefix()),
         timestamp,
     )
     .await?;
 
-    let devices_df = download_and_parse_parquet(
+    let devices_batches = download_and_parse_parquet(
         s3_config,
         &format!("snapshot-doublezero-{}-devices", network.prefix()),
         timestamp,
@@ -318,18 +322,23 @@ async fn process_hourly_data(
     .await?;
 
     // Merge datasets
-    let merged = merge_hourly_datasets(gossip_df, validators_df, users_df, devices_df)?;
+    let merged = merge_hourly_datasets(
+        gossip_batches,
+        validators_batches,
+        users_batches,
+        devices_batches,
+    )?;
 
     // Extract validator keys
     extract_validator_keys(merged)
 }
 
-/// Downloads a Parquet file from S3 and parses it with Polars
+/// Downloads a Parquet file from S3 and parses it with Arrow
 async fn download_and_parse_parquet(
     s3_config: &S3Config,
     prefix: &str,
     timestamp: DateTime<Utc>,
-) -> Result<DataFrame> {
+) -> Result<Vec<RecordBatch>> {
     let key = build_s3_key(prefix, timestamp);
     debug!("Downloading s3://{}/{}", s3_config.bucket, key);
 
@@ -353,20 +362,29 @@ async fn download_and_parse_parquet(
     file.flush().await?;
     drop(file); // Close file before reading
 
-    // Parse Parquet with Polars
+    // Parse Parquet with Arrow
     let file = StdFile::open(&temp_path)?;
-    let df = ParquetReader::new(file)
-        .finish()
-        .context(format!("Failed to parse Parquet file: {}", key))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .context(format!("Failed to create Parquet reader for: {}", key))?;
+
+    let reader = builder.build()?;
+    let mut batches = Vec::new();
+    let mut total_rows = 0;
+
+    for batch_result in reader {
+        let batch = batch_result.context(format!("Failed to read batch from: {}", key))?;
+        total_rows += batch.num_rows();
+        batches.push(batch);
+    }
 
     debug!(
-        "Parsed {}: {} rows, {} columns",
+        "Parsed {}: {} rows, {} batches",
         key,
-        df.height(),
-        df.width()
+        total_rows,
+        batches.len()
     );
 
-    Ok(df)
+    Ok(batches)
 }
 
 /// Builds S3 key for a Parquet file
@@ -380,84 +398,167 @@ fn build_s3_key(prefix: &str, timestamp: DateTime<Utc>) -> String {
     )
 }
 
-/// Merges hourly datasets (gossip + validators + users + devices)
+/// Merges hourly datasets (gossip + validators + users + devices) using manual joins
 fn merge_hourly_datasets(
-    gossip: DataFrame,
-    validators: DataFrame,
-    users: DataFrame,
-    devices: DataFrame,
-) -> Result<DataFrame> {
-    debug!("Gossip columns: {:?}", gossip.get_column_names());
-    debug!("Validators columns: {:?}", validators.get_column_names());
-    debug!("Users columns: {:?}", users.get_column_names());
-    debug!("Devices columns: {:?}", devices.get_column_names());
+    gossip_batches: Vec<RecordBatch>,
+    validators_batches: Vec<RecordBatch>,
+    users_batches: Vec<RecordBatch>,
+    devices_batches: Vec<RecordBatch>,
+) -> Result<Vec<RecordBatch>> {
+    // Build HashMaps for each dataset
+    let gossip_map = build_lut(&gossip_batches, "identity_pubkey")?;
+    let validators_map = build_lut(&validators_batches, "identity_pubkey")?;
+    let users_map = build_lut(&users_batches, "client_ip")?;
+    let devices_map = build_lut(&devices_batches, "pubkey")?;
 
-    // Merge gossip + validators on identity_pubkey
-    let merged = gossip
-        .join(
-            &validators,
-            ["identity_pubkey"],
-            ["identity_pubkey"],
-            JoinArgs::new(JoinType::Inner).with_coalesce(JoinCoalesce::CoalesceColumns),
-            None,
-        )
-        .context("Failed to join gossip and validators")?;
+    debug!(
+        "Built indexes: gossip={}, validators={}, users={}, devices={}",
+        gossip_map.len(),
+        validators_map.len(),
+        users_map.len(),
+        devices_map.len()
+    );
 
-    debug!("After gossip+validators join: {} rows", merged.height());
+    // Perform manual joins
+    let mut results = Vec::new();
 
-    // Merge with users on IP address
-    let merged = merged
-        .join(
-            &users,
-            ["ip_address"],
-            ["client_ip"],
-            JoinArgs::new(JoinType::Inner).with_coalesce(JoinCoalesce::CoalesceColumns),
-            None,
-        )
-        .context("Failed to join with users")?;
+    for (identity_pubkey, gossip_row) in &gossip_map {
+        // Join with validators on identity_pubkey
+        if let Some(validator_row) = validators_map.get(identity_pubkey) {
+            // Filter out delinquent validators (matches R script: connection[!(delinquent)])
+            // The gather_data.py script includes delinquent column in output,
+            // but the fee_per_epoch.R script filters it out at line 26
+            if let Some(delinquent_str) = validator_row.get("delinquent")
+                && (delinquent_str == "true" || delinquent_str == "True" || delinquent_str == "1")
+            {
+                continue; // Skip delinquent validators
+            }
 
-    debug!("After users join: {} rows", merged.height());
+            // Join with users on ip_address -> client_ip
+            if let Some(ip_address) = get_string_field(gossip_row, "ip_address")
+                && let Some(user_row) = users_map.get(ip_address)
+            {
+                // Join with devices on device_pubkey -> pubkey
+                if let Some(device_pubkey) = get_string_field(user_row, "device_pubkey")
+                    && devices_map.contains_key(device_pubkey)
+                {
+                    // All joins succeeded, keep this identity_pubkey
+                    results.push(identity_pubkey.clone());
+                }
+            }
+        }
+    }
 
-    // Merge with devices on device_pubkey
-    let merged = merged
-        .join(
-            &devices,
-            ["device_pubkey"],
-            ["pubkey"],
-            JoinArgs::new(JoinType::Inner).with_coalesce(JoinCoalesce::CoalesceColumns),
-            None,
-        )
-        .context("Failed to join with devices")?;
+    debug!("After merging and filtering: {} validators", results.len());
 
-    debug!("After devices join: {} rows", merged.height());
+    // Convert results to RecordBatch format (just identity_pubkey column)
+    let identity_array = Arc::new(StringArray::from(results));
+    let schema = Arc::new(arrow::datatypes::Schema::new(vec![
+        arrow::datatypes::Field::new("identity_pubkey", DataType::Utf8, false),
+    ]));
 
-    // Filter: only non-delinquent validators
-    let filtered = merged
-        .lazy()
-        .filter(col("delinquent").eq(lit(false)))
-        .collect()
-        .context("Failed to filter delinquent validators")?;
-
-    debug!("After filtering delinquent: {} rows", filtered.height());
-
-    Ok(filtered)
+    let batch = RecordBatch::try_new(schema, vec![identity_array])?;
+    Ok(vec![batch])
 }
 
-/// Extracts validator keys from merged DataFrame
-fn extract_validator_keys(df: DataFrame) -> Result<Vec<ValidatorKey>> {
-    let identity_series = df
-        .column("identity_pubkey")
-        .context("Missing identity_pubkey column")?;
+/// Builds a lookup table from record batches using a specific column as key
+fn build_lut(
+    batches: &[RecordBatch],
+    key_column: &str,
+) -> Result<HashMap<String, HashMap<String, String>>> {
+    let mut index = HashMap::new();
 
-    let identity_vec = identity_series.str()?.into_iter();
+    for batch in batches {
+        let schema = batch.schema();
+        let key_col = batch
+            .column_by_name(key_column)
+            .context(format!("Missing column: {}", key_column))?;
 
-    let validators: Vec<ValidatorKey> = identity_vec
-        .filter_map(|identity| {
-            Some(ValidatorKey {
-                pubkey: identity?.to_string(),
-            })
-        })
-        .collect();
+        let key_array = key_col
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .context(format!("Column {} is not a string array", key_column))?;
+
+        for row_idx in 0..batch.num_rows() {
+            // Skip rows with null keys
+            if key_array.is_null(row_idx) {
+                continue;
+            }
+
+            let key_value = key_array.value(row_idx).to_string();
+            let mut row_data = HashMap::new();
+
+            // Store all columns for this row
+            for field in schema.fields() {
+                let col_name = field.name();
+                if let Some(col) = batch.column_by_name(col_name)
+                    && let Some(value) = get_column_value_as_string(col, row_idx)
+                {
+                    row_data.insert(col_name.clone(), value);
+                }
+            }
+
+            index.insert(key_value, row_data);
+        }
+    }
+
+    Ok(index)
+}
+
+/// Gets a string field value from a row
+fn get_string_field<'a>(row: &'a HashMap<String, String>, field: &str) -> Option<&'a String> {
+    row.get(field)
+}
+
+/// Converts a column value at a given index to a string
+fn get_column_value_as_string(col: &Arc<dyn Array>, row_idx: usize) -> Option<String> {
+    if col.is_null(row_idx) {
+        return None;
+    }
+
+    match col.data_type() {
+        DataType::Utf8 => {
+            let array: &StringArray = col.as_string();
+            Some(array.value(row_idx).to_string())
+        }
+        DataType::Boolean => {
+            let array = col.as_any().downcast_ref::<BooleanArray>()?;
+            Some(array.value(row_idx).to_string())
+        }
+        DataType::Int64 => {
+            let array = col.as_primitive::<arrow::datatypes::Int64Type>();
+            Some(array.value(row_idx).to_string())
+        }
+        DataType::Float64 => {
+            let array = col.as_primitive::<arrow::datatypes::Float64Type>();
+            Some(array.value(row_idx).to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Extracts validator keys from merged record batches
+fn extract_validator_keys(batches: Vec<RecordBatch>) -> Result<Vec<ValidatorKey>> {
+    let mut validators = Vec::new();
+
+    for batch in batches {
+        let identity_col = batch
+            .column_by_name("identity_pubkey")
+            .context("Missing identity_pubkey column")?;
+
+        let identity_array = identity_col
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .context("identity_pubkey is not a string array")?;
+
+        for i in 0..batch.num_rows() {
+            if !identity_array.is_null(i) {
+                validators.push(ValidatorKey {
+                    pubkey: identity_array.value(i).to_string(),
+                });
+            }
+        }
+    }
 
     Ok(validators)
 }
