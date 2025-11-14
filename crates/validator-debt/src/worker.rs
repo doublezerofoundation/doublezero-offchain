@@ -492,21 +492,9 @@ pub async fn initialize_distribution(
     // one known by the Revenue Distribution program. If it does not, this
     // method has not been called for a long time.
     if next_dz_epoch.value() != expected_completed_dz_epoch {
-        let err_msg = format!(
+        bail!(
             "Last completed DZ epoch {expected_completed_dz_epoch} != program's epoch {next_dz_epoch}"
         );
-
-        // If the force flag is set, only allow the command to play catch up
-        // if the next DZ epoch is less than the expected completed DZ
-        // epoch. Prompt to be extra sure.
-        if next_dz_epoch.value() < expected_completed_dz_epoch {
-            log_warn!("{err_msg}");
-
-            return Ok(());
-        // Otherwise, we should not be allowed to proceed.
-        } else {
-            bail!("{err_msg}");
-        }
     }
 
     let dz_mint_key = if is_mainnet {
