@@ -301,15 +301,28 @@ async fn epoch_to_timestamps(
     Ok((start_time, end_time))
 }
 
-/// Generates list of hourly timestamps between start and end (inclusive)
+/// Generates list of hourly timestamps matching the R script filter logic
 fn generate_hourly_timestamps(start: DateTime<Utc>, end: DateTime<Utc>) -> Vec<DateTime<Utc>> {
     let mut timestamps = Vec::new();
-    let mut current = start
+
+    // Start from the first hour that is >= start time
+    // If start is 03:27, the first valid hour is 04:00 (since 03:00 < 03:27)
+    let start_hour = start
         .date_naive()
         .and_hms_opt(start.hour(), 0, 0)
         .unwrap()
         .and_utc();
 
+    let mut current = if start_hour >= start {
+        // If start is exactly on the hour (unlikely), include it
+        start_hour
+    } else {
+        // Otherwise, start from the next hour
+        start_hour + Duration::hours(1)
+    };
+
+    // Include all hours up to and including the hour containing end time
+    // If end is 03:29, we include 03:00 (since 03:00 <= 03:29)
     while current <= end {
         timestamps.push(current);
         current += Duration::hours(1);
@@ -393,7 +406,8 @@ async fn download_and_parse_parquet(
     let body = response.body.collect().await?;
     file.write_all(&body.into_bytes()).await?;
     file.flush().await?;
-    drop(file); // Close file before reading
+    // Close file before reading
+    drop(file);
 
     // Parse Parquet with Arrow
     let file = StdFile::open(&temp_path)?;
@@ -464,7 +478,8 @@ fn merge_hourly_datasets(
             if let Some(delinquent_str) = validator_row.get("delinquent")
                 && (delinquent_str == "true" || delinquent_str == "True" || delinquent_str == "1")
             {
-                continue; // Skip delinquent validators
+                // Skip delinquent validators
+                continue;
             }
 
             // Join with users on ip_address -> client_ip
