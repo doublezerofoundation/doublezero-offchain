@@ -44,7 +44,6 @@ const MAINNET_THRESHOLD: &str = "2025-09-12T21:00:00Z";
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ValidatorKey {
     pub pubkey: String,
-    pub votekey: String,
 }
 
 /// Network type for dataset selection
@@ -167,7 +166,7 @@ pub async fn fetch_validator_pubkeys(
     let include_mainnet = network == Network::MainnetBeta && end_time >= mainnet_threshold;
 
     // Fetch and process hourly data
-    let mut all_validators: HashMap<(String, String), usize> = HashMap::new();
+    let mut all_validators: HashMap<String, usize> = HashMap::new();
     let mut consecutive_failures = 0;
 
     for (idx, timestamp) in hourly_timestamps.iter().enumerate() {
@@ -186,7 +185,7 @@ pub async fn fetch_validator_pubkeys(
                 // Count appearances for each validator
                 for validator in validators {
                     *all_validators
-                        .entry((validator.pubkey.clone(), validator.votekey.clone()))
+                        .entry(validator.pubkey.clone())
                         .or_insert(0) += 1;
                 }
 
@@ -220,11 +219,10 @@ pub async fn fetch_validator_pubkeys(
     // Apply 12-hour connection rule: keep only validators with >12 appearances
     let qualified_validators: Vec<ValidatorKey> = all_validators
         .into_iter()
-        .filter_map(|((identity, vote), count)| {
+        .filter_map(|(identity, count)| {
             if count > 12 {
                 Some(ValidatorKey {
                     pubkey: identity,
-                    votekey: vote,
                 })
             } else {
                 None
@@ -463,10 +461,9 @@ fn extract_validator_keys(df: DataFrame) -> Result<Vec<ValidatorKey>> {
 
     let validators: Vec<ValidatorKey> = identity_vec
         .zip(vote_vec)
-        .filter_map(|(identity, vote)| {
+        .filter_map(|(identity, _vote)| {
             Some(ValidatorKey {
                 pubkey: identity?.to_string(),
-                votekey: vote?.to_string(),
             })
         })
         .collect();
