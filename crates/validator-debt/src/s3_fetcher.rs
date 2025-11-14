@@ -40,7 +40,7 @@ use tracing::{debug, info, warn};
 /// Mainnet threshold date (same as python)
 const MAINNET_THRESHOLD: &str = "2025-09-12T21:00:00Z";
 
-/// Validator identity pubkey and vote account pubkey pair
+/// Validator identity pubkey
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ValidatorKey {
     pub pubkey: String,
@@ -184,9 +184,7 @@ pub async fn fetch_validator_pubkeys(
 
                 // Count appearances for each validator
                 for validator in validators {
-                    *all_validators
-                        .entry(validator.pubkey.clone())
-                        .or_insert(0) += 1;
+                    *all_validators.entry(validator.pubkey.clone()).or_insert(0) += 1;
                 }
 
                 info!(
@@ -221,9 +219,7 @@ pub async fn fetch_validator_pubkeys(
         .into_iter()
         .filter_map(|(identity, count)| {
             if count > 12 {
-                Some(ValidatorKey {
-                    pubkey: identity,
-                })
+                Some(ValidatorKey { pubkey: identity })
             } else {
                 None
             }
@@ -452,16 +448,11 @@ fn extract_validator_keys(df: DataFrame) -> Result<Vec<ValidatorKey>> {
     let identity_series = df
         .column("identity_pubkey")
         .context("Missing identity_pubkey column")?;
-    let vote_series = df
-        .column("vote_account_pubkey")
-        .context("Missing vote_account_pubkey column")?;
 
     let identity_vec = identity_series.str()?.into_iter();
-    let vote_vec = vote_series.str()?.into_iter();
 
     let validators: Vec<ValidatorKey> = identity_vec
-        .zip(vote_vec)
-        .filter_map(|(identity, _vote)| {
+        .filter_map(|identity| {
             Some(ValidatorKey {
                 pubkey: identity?.to_string(),
             })
