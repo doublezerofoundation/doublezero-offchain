@@ -4,8 +4,7 @@ use doublezero_revenue_distribution::state::ProgramConfig;
 use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, Wallet},
-    rpc::DoubleZeroLedgerConnection,
-    rpc::DoubleZeroLedgerConnectionOptions,
+    rpc::{DoubleZeroLedgerConnection, DoubleZeroLedgerConnectionOptions},
 };
 use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer};
 
