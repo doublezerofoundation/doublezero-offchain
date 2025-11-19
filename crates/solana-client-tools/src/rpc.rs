@@ -5,7 +5,7 @@ use borsh::BorshDeserialize;
 use bytemuck::Pod;
 use clap::Args;
 use doublezero_program_tools::PrecomputedDiscriminator;
-use doublezero_sdk::record::{pubkey::create_record_key, state::RecordData};
+use doublezero_sdk::record::pubkey::create_record_key;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{account::Account, pubkey::Pubkey, sysvar::Sysvar};
