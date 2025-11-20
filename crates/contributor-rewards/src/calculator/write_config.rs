@@ -31,7 +31,7 @@
 /// let config = WriteConfig::skip_all();
 /// assert!(config.all_writes_skipped());
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct WriteConfig {
     /// Skip writing device telemetry aggregates to DZ Ledger
     pub skip_device_telemetry: bool,
@@ -43,19 +43,6 @@ pub struct WriteConfig {
     pub skip_shapley_output: bool,
     /// Skip posting merkle root to Solana
     pub skip_merkle_root: bool,
-}
-
-impl Default for WriteConfig {
-    /// Default configuration with all writes enabled (no skips).
-    fn default() -> Self {
-        Self {
-            skip_device_telemetry: false,
-            skip_internet_telemetry: false,
-            skip_reward_input: false,
-            skip_shapley_output: false,
-            skip_merkle_root: false,
-        }
-    }
 }
 
 impl WriteConfig {
