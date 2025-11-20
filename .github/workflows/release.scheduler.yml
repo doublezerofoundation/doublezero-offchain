@@ -1,0 +1,76 @@
+name: releaser.offchain-scheduler
+
+on:
+  push:
+    tags:
+      - "offchain-scheduler/v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          working-directory: scheduler
+          key: scheduler-rust
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install OpenSSL 1.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget http://ports.ubuntu.com/pool/main/o/openssl/openssl_1.1.1f-1ubuntu2_arm64.deb
+          wget http://ports.ubuntu.com/pool/main/o/openssl/libssl-dev_1.1.1f-1ubuntu2_arm64.deb
+          wget http://ports.ubuntu.com/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_arm64.deb
+
+          # install downloaded binary packages
+          sudo dpkg -i libssl1.1_1.1.1f-1ubuntu2_arm64.deb
+          sudo dpkg -i libssl-dev_1.1.1f-1ubuntu2_arm64.deb
+          sudo dpkg -i openssl_1.1.1f-1ubuntu2_arm64.deb
+
+      - name: Verify OpenSSL version
+        run: openssl version
+
+      - name: Set up Elixir and Erlang
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: '1.19.3'
+          otp-version: '28.1'
+
+      - name: Retrieve Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          shared-key: offchain-scheduler
+
+      - name: Install dependencies
+        run: mix deps.get
+        working-directory: ./scheduler
+
+      - name: Compiles without warnings
+        run: mix compile --warnings-as-errors
+        working-directory: ./scheduler
+
+      - name: Build release
+        run: MIX_ENV=prod mix release
+        working-directory: ./scheduler
+
+      - name: Deploy to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          source: "scheduler/_build/prod/rel/scheduler/releases/*/*.tar.gz"
+          target: "/opt/scheduler"
