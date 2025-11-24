@@ -106,23 +106,15 @@ where
     Ok(errors)
 }
 
-pub fn print_validation_errors(errors: &[String]) {
+pub fn should_continue_after_validation(errors: &[String], force: bool) -> bool {
     if errors.is_empty() {
-        return;
+        return true;
     }
 
     println!("\nErrors found:");
     for error in errors {
         println!(" - {}", error);
     }
-}
-
-pub fn should_continue_after_validation(errors: &[String], force: bool) -> bool {
-    if errors.is_empty() {
-        return true;
-    }
-
-    print_validation_errors(errors);
 
     if force {
         println!("Proceeding despite validation errors (--force).");
