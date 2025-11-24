@@ -4,6 +4,7 @@ use doublezero_passport::state::{AccessRequest, ProgramConfig};
 use doublezero_solana_client_tools::rpc::SolanaConnection;
 use solana_sdk::pubkey::Pubkey;
 
+mod access_validation;
 pub mod fetch;
 pub mod find_validator;
 pub mod prepare_access;

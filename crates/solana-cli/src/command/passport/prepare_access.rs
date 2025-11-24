@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Args;
-use doublezero_ledger_sentinel::{
-    client::solana::SolRpcClient, constants::ENV_PREVIOUS_LEADER_EPOCHS,
-};
+use doublezero_ledger_sentinel::client::solana::SolRpcClient;
 use doublezero_passport::{
     instruction::{AccessMode, SolanaValidatorAttestation},
     state::AccessRequest,
@@ -13,7 +11,8 @@ use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOpti
 use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use url::Url;
 
-use crate::utils::{find_node_by_node_id, identify_cluster};
+use super::access_validation::{should_continue_after_validation, validate_validator_access};
+use crate::utils::identify_cluster;
 
 /*
    doublezero-solana passport request-access --doublezero-address SSSS --primary-validator-id AAA --backup-validator-ids BBB,CCC --signature XXXXX
@@ -58,87 +57,20 @@ impl PrepareValidatorAccessCommand {
         // Identify the cluster
         let cluster = identify_cluster(&connection).await;
         // Fetch the cluster nodes
-        let nodes = connection.get_cluster_nodes().await?;
-        if nodes.is_empty() {
-            anyhow::bail!("Unable to fetch cluster nodes. Is your RPC endpoint correct?");
-        }
-        // Collect errors
-        let mut errors = Vec::<String>::new();
-
         println!("DoubleZero Passport - Prepare Validator Access Request");
         println!("Connected to Solana: {:}", cluster);
 
         println!("\nDoubleZero Address: {doublezero_address}\n");
 
-        println!("Primary validator 🖥️  💎:\n  ID: {primary_validator_id} ");
-        if let Some(node) = find_node_by_node_id(&nodes, &primary_validator_id) {
-            println!(
-                "  Gossip: ✅ OK ({})",
-                node.gossip.as_ref().map(|g| g.ip()).unwrap()
-            );
-            print!("  Leader scheduler: ");
-
-            if sol_client
-                .is_scheduled_leader(&primary_validator_id, ENV_PREVIOUS_LEADER_EPOCHS)
-                .await?
-            {
-                print!(" ✅ OK ");
-            } else {
-                print!(" ❌ Invalid ");
-                errors.push(format!(
-                    "Primary validator ID ({}) is not an active staked validator. The primary must have stake delegated and be participating in the leader scheduler.",
-                    primary_validator_id
-                ));
-            }
-        } else {
-            println!(" ❌ Gossip Fail",);
-            errors.push(format!(
-                "Primary validator ID ({}) is not visible in gossip. The primary validator must appear in gossip to be considered active.",
-                primary_validator_id
-            ));
-        }
-        println!();
-
-        if !backup_validator_ids.is_empty() {
-            println!("\nBackup validator 🖥️  🛟: ");
-
-            for backup_id in &backup_validator_ids {
-                print!("  ID: {backup_id}\n  Gossip: ");
-
-                if let Some(ip) = sol_client.get_validator_ip(backup_id).await? {
-                    println!(" ✅ OK ({})", ip);
-                    print!("  Leader scheduler: ");
-
-                    if sol_client
-                        .is_scheduled_leader(backup_id, ENV_PREVIOUS_LEADER_EPOCHS)
-                        .await?
-                    {
-                        println!(" ❌ Fail (on leader scheduler)");
-                        errors.push(format!(
-                            "Backup validator ID ({}) should not be on leader scheduler. It must be a non-leader scheduled validator.",
-                            backup_id
-                        ));
-                    } else {
-                        println!(" ✅ OK (not a leader scheduled validator)");
-                    }
-                } else {
-                    println!("❌ Gossip Fail",);
-                    errors.push(format!(
-                        "Backup validator ID ({}) is not visible in gossip. Backup validators must appear in gossip to be considered valid.",
-                        backup_id
-                    ));
-                }
-            }
-        }
-
-        if !errors.is_empty() {
-            println!("\nErrors found:");
-            for error in errors {
-                println!(" - {}", error);
-            }
-            if !force {
-                return Ok(());
-            }
+        let errors = validate_validator_access(
+            &connection,
+            &sol_client,
+            &primary_validator_id,
+            &backup_validator_ids,
+        )
+        .await?;
+        if !should_continue_after_validation(&errors, force) {
+            return Ok(());
         }
 
         println!(
