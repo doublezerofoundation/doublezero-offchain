@@ -129,11 +129,11 @@ mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
     use doublezero_ledger_sentinel::client::solana::MockSolRpcClientType;
+    use solana_client::rpc_response::RpcContactInfo;
     use solana_sdk::pubkey::Pubkey;
 
     use super::validate_validator_access_with_nodes;
     use crate::command::passport::access_validation::should_continue_after_validation;
-    use solana_client::rpc_response::RpcContactInfo;
 
     fn make_contact_info(pubkey: &Pubkey, gossip: Option<SocketAddr>) -> RpcContactInfo {
         RpcContactInfo {
