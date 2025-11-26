@@ -537,7 +537,7 @@ pub async fn check_contributor_reward(
             epoch,
             contributor: reward.contributor_key.to_string(),
             unit_share: reward.unit_share,
-            merkle_root: format!("{computed_root:?}"),
+            merkle_root: computed_root.to_string(),
             total_contributors: shapley_storage.rewards.len(),
             total_units: shapley_storage.total_unit_shares,
             verified: verification_result,
@@ -567,7 +567,7 @@ pub async fn check_contributor_reward(
             },
             RewardVerification {
                 field: "Merkle Root".to_string(),
-                value: format!("{computed_root:?}"),
+                value: computed_root.to_string(),
             },
             RewardVerification {
                 field: "Total Contributors".to_string(),
