@@ -369,12 +369,15 @@ impl Iterator for PreviousEpochSlots {
     type Item = u64;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let result = self.current;
-        if self.current < self.step {
-            return None;
+        let next_slot = self.current;
+
+        if self.current == 0 {
+            None
+        } else {
+            self.current = self.current.saturating_sub(self.step);
+
+            Some(next_slot)
         }
-        self.current -= self.step;
-        Some(result)
     }
 }
 
