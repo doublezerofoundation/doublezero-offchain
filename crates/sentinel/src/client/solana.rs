@@ -308,7 +308,7 @@ impl SolRpcClient {
 
             // Bail out early if there is either no leader schedule or this
             // validator has no slot indices.
-            if !schedule.is_some_and(|slot_indices| !slot_indices.is_empty()) {
+            if schedule.is_none_or(|slot_indices| slot_indices.is_empty()) {
                 return Ok(false);
             }
 
