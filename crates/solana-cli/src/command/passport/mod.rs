@@ -10,6 +10,22 @@ pub mod find_validator;
 pub mod prepare_access;
 pub mod request_access;
 
+#[derive(Debug, Args, Clone)]
+pub struct SharedAccessArgs {
+    /// The DoubleZero service key to request access from
+    #[arg(long)]
+    pub doublezero_address: Pubkey,
+    /// The validator's node ID (identity pubkey)
+    #[arg(long, value_name = "PUBKEY")]
+    pub primary_validator_id: Pubkey,
+    /// Optional backup validator IDs (identity pubkeys)
+    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',')]
+    pub backup_validator_ids: Vec<Pubkey>,
+    /// Number of previous epochs to check when evaluating the leader schedule (default: 2)
+    #[arg(long, hide = true, default_value_t = 2)]
+    pub leader_schedule_epochs: u8,
+}
+
 #[derive(Debug, Args)]
 pub struct PassportCommand {
     #[command(subcommand)]

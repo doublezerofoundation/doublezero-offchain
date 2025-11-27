@@ -16,12 +16,14 @@ use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutco
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     offchain_message::OffchainMessage,
-    pubkey::Pubkey,
     signature::{Keypair, Signature},
 };
 use url::Url;
 
-use super::access_validation::{should_continue_after_validation, validate_validator_access};
+use super::{
+    SharedAccessArgs,
+    access_validation::{should_continue_after_validation, validate_validator_access},
+};
 use crate::utils::identify_cluster;
 /*
    doublezero-solana passport request-access --doublezero-address SSSS --primary-validator-id AAA --backup-validator-ids BBB,CCC --signature XXXXX
@@ -29,15 +31,8 @@ use crate::utils::identify_cluster;
 
 #[derive(Debug, Args)]
 pub struct RequestValidatorAccessCommand {
-    /// The DoubleZero service key to request access from
-    #[arg(long)]
-    doublezero_address: Pubkey,
-    /// The validator's node ID (identity pubkey)
-    #[arg(long, value_name = "PUBKEY")]
-    primary_validator_id: Pubkey,
-    /// Optional backup validator IDs (identity pubkeys)
-    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',')]
-    backup_validator_ids: Vec<Pubkey>,
+    #[command(flatten)]
+    shared: SharedAccessArgs,
     /// Base58-encoded ed25519 signature of the access request message (service_key=AAA,backup_ids=BBBB,CCCC,DDDD)
     #[arg(long, short = 's', value_name = "BASE58_STRING")]
     signature: String,
@@ -62,7 +57,7 @@ impl RequestValidatorAccessCommand {
 
         let cluster = identify_cluster(&wallet.connection).await;
         println!("Connected to Solana: {:}", cluster);
-        println!("\nDoubleZero Address: {}\n", self.doublezero_address);
+        println!("\nDoubleZero Address: {}\n", self.shared.doublezero_address);
 
         let sol_client = SolRpcClient::new(
             Url::parse(&wallet.connection.url()).unwrap(),
@@ -72,15 +67,16 @@ impl RequestValidatorAccessCommand {
         let validation_errors = validate_validator_access(
             &wallet.connection,
             &sol_client,
-            &self.primary_validator_id,
-            &self.backup_validator_ids,
+            &self.shared.primary_validator_id,
+            &self.shared.backup_validator_ids,
+            self.shared.leader_schedule_epochs,
         )
         .await?;
         if !should_continue_after_validation(&validation_errors, self.force) {
             return Ok(());
         }
 
-        let (address, _) = AccessRequest::find_address(&self.doublezero_address);
+        let (address, _) = AccessRequest::find_address(&self.shared.doublezero_address);
 
         let request_account = wallet.connection.get_account(&address).await;
         if request_account.is_ok() {
@@ -104,18 +100,18 @@ impl RequestValidatorAccessCommand {
 
         // Create attestation
         let attestation = SolanaValidatorAttestation {
-            validator_id: self.primary_validator_id,
-            service_key: self.doublezero_address,
+            validator_id: self.shared.primary_validator_id,
+            service_key: self.shared.doublezero_address,
             ed25519_signature: ed25519_signature.into(),
         };
 
         // Verify the signature.
-        let access_mode = if self.backup_validator_ids.is_empty() {
+        let access_mode = if self.shared.backup_validator_ids.is_empty() {
             AccessMode::SolanaValidator(attestation)
         } else {
             AccessMode::SolanaValidatorWithBackupIds {
                 attestation,
-                backup_ids: self.backup_validator_ids.clone(),
+                backup_ids: self.shared.backup_validator_ids.clone(),
             }
         };
 
@@ -128,19 +124,25 @@ impl RequestValidatorAccessCommand {
         let message = OffchainMessage::new(self.message_version, raw_message.as_bytes())?;
         let serialized_message = message.serialize()?;
 
-        if !ed25519_signature.verify(self.primary_validator_id.as_array(), &serialized_message) {
+        if !ed25519_signature.verify(
+            self.shared.primary_validator_id.as_array(),
+            &serialized_message,
+        ) {
             bail!("Signature verification failed");
         } else if self.solana_payer_options.signer_options.verbose {
-            println!("Signature recovers node ID: {}", self.primary_validator_id);
+            println!(
+                "Signature recovers node ID: {}",
+                self.shared.primary_validator_id
+            );
         }
 
         let request_access_ix = try_build_instruction(
             &ID,
-            RequestAccessAccounts::new(&wallet_key, &self.doublezero_address),
+            RequestAccessAccounts::new(&wallet_key, &self.shared.doublezero_address),
             &PassportInstructionData::RequestAccess(access_mode),
         )?;
 
-        let (_, bump) = AccessRequest::find_address(&self.doublezero_address);
+        let (_, bump) = AccessRequest::find_address(&self.shared.doublezero_address);
 
         let mut compute_unit_limit = 10_000;
         compute_unit_limit += Wallet::compute_units_for_bump_seed(bump);

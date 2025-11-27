@@ -1,7 +1,5 @@
 use anyhow::{Result, bail};
-use doublezero_ledger_sentinel::{
-    client::solana::SolRpcClientType, constants::ENV_PREVIOUS_LEADER_EPOCHS,
-};
+use doublezero_ledger_sentinel::client::solana::SolRpcClientType;
 use doublezero_solana_client_tools::rpc::SolanaConnection;
 use solana_client::rpc_response::RpcContactInfo;
 use solana_sdk::pubkey::Pubkey;
@@ -13,6 +11,7 @@ pub async fn validate_validator_access<C>(
     sol_client: &C,
     primary_validator_id: &Pubkey,
     backup_validator_ids: &[Pubkey],
+    leader_schedule_epochs: u8,
 ) -> Result<Vec<String>>
 where
     C: SolRpcClientType + Sync,
@@ -27,6 +26,7 @@ where
         sol_client,
         primary_validator_id,
         backup_validator_ids,
+        leader_schedule_epochs,
     )
     .await
 }
@@ -36,6 +36,7 @@ pub async fn validate_validator_access_with_nodes<C>(
     sol_client: &C,
     primary_validator_id: &Pubkey,
     backup_validator_ids: &[Pubkey],
+    leader_schedule_epochs: u8,
 ) -> Result<Vec<String>>
 where
     C: SolRpcClientType + Sync,
@@ -51,7 +52,7 @@ where
         print!("  Leader scheduler: ");
 
         if sol_client
-            .is_scheduled_leader(primary_validator_id, ENV_PREVIOUS_LEADER_EPOCHS)
+            .is_scheduled_leader(primary_validator_id, leader_schedule_epochs)
             .await?
         {
             print!(" ✅ OK ");
@@ -82,7 +83,7 @@ where
                 print!("  Leader scheduler: ");
 
                 if sol_client
-                    .is_scheduled_leader(backup_id, ENV_PREVIOUS_LEADER_EPOCHS)
+                    .is_scheduled_leader(backup_id, leader_schedule_epochs)
                     .await?
                 {
                     println!(" ❌ Fail (on leader scheduler)");
@@ -172,7 +173,7 @@ mod tests {
             let primary_clone = primary;
             client
                 .expect_is_scheduled_leader()
-                .withf(move |validator_id, _| validator_id == &primary_clone)
+                .withf(move |validator_id, epochs| validator_id == &primary_clone && *epochs == 2)
                 .returning(|_, _| Ok(true));
         }
         {
@@ -186,11 +187,11 @@ mod tests {
             let backup_clone = backup;
             client
                 .expect_is_scheduled_leader()
-                .withf(move |validator_id, _| validator_id == &backup_clone)
+                .withf(move |validator_id, epochs| validator_id == &backup_clone && *epochs == 2)
                 .returning(|_, _| Ok(false));
         }
 
-        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup])
+        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup], 2)
             .await
             .unwrap();
 
@@ -218,11 +219,11 @@ mod tests {
             let backup_clone = backup;
             client
                 .expect_is_scheduled_leader()
-                .withf(move |validator_id, _| validator_id == &backup_clone)
+                .withf(move |validator_id, epochs| validator_id == &backup_clone && *epochs == 2)
                 .returning(|_, _| Ok(true));
         }
 
-        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup])
+        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup], 2)
             .await
             .unwrap();
 
@@ -240,5 +241,29 @@ mod tests {
         let errors = vec!["some error".to_string()];
         assert!(!should_continue_after_validation(&errors, false));
         assert!(should_continue_after_validation(&errors, true));
+    }
+
+    #[tokio::test]
+    async fn validation_uses_custom_leader_schedule_epochs() {
+        let primary = Pubkey::new_unique();
+        let nodes = vec![make_contact_info(
+            &primary,
+            Some(SocketAddr::from((Ipv4Addr::LOCALHOST, 8001))),
+        )];
+
+        let mut client = MockSolRpcClientType::new();
+        {
+            let primary_clone = primary;
+            client
+                .expect_is_scheduled_leader()
+                .withf(move |validator_id, epochs| validator_id == &primary_clone && *epochs == 1)
+                .returning(|_, _| Ok(true));
+        }
+
+        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[], 1)
+            .await
+            .unwrap();
+
+        assert!(errors.is_empty());
     }
 }

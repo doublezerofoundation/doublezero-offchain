@@ -8,10 +8,13 @@ use doublezero_passport::{
     state::AccessRequest,
 };
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
-use solana_sdk::{pubkey::Pubkey, signature::Keypair};
+use solana_sdk::signature::Keypair;
 use url::Url;
 
-use super::access_validation::{should_continue_after_validation, validate_validator_access};
+use super::{
+    SharedAccessArgs,
+    access_validation::{should_continue_after_validation, validate_validator_access},
+};
 use crate::utils::identify_cluster;
 
 /*
@@ -20,15 +23,8 @@ use crate::utils::identify_cluster;
 
 #[derive(Debug, Args)]
 pub struct PrepareValidatorAccessCommand {
-    /// The DoubleZero service key to request access from
-    #[arg(long)]
-    doublezero_address: Pubkey,
-    /// The validator's node ID (identity pubkey)
-    #[arg(long, value_name = "PUBKEY")]
-    primary_validator_id: Pubkey,
-    /// Optional backup validator IDs (identity pubkeys)
-    #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',')]
-    backup_validator_ids: Vec<Pubkey>,
+    #[command(flatten)]
+    shared: SharedAccessArgs,
 
     #[arg(long, default_value_t = false)]
     force: bool,
@@ -40,9 +36,13 @@ pub struct PrepareValidatorAccessCommand {
 impl PrepareValidatorAccessCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let PrepareValidatorAccessCommand {
-            doublezero_address,
-            primary_validator_id,
-            backup_validator_ids,
+            shared:
+                SharedAccessArgs {
+                    doublezero_address,
+                    primary_validator_id,
+                    backup_validator_ids,
+                    leader_schedule_epochs,
+                },
             solana_connection_options,
             force,
         } = self;
@@ -67,6 +67,7 @@ impl PrepareValidatorAccessCommand {
             &sol_client,
             &primary_validator_id,
             &backup_validator_ids,
+            leader_schedule_epochs,
         )
         .await?;
         if !should_continue_after_validation(&errors, force) {
