@@ -1,5 +1,7 @@
 use anyhow::{Result, bail};
-use doublezero_ledger_sentinel::client::solana::SolRpcClientType;
+use doublezero_ledger_sentinel::{
+    client::solana::SolRpcClientType, constants::ENV_PREVIOUS_LEADER_EPOCHS,
+};
 use doublezero_solana_client_tools::rpc::SolanaConnection;
 use solana_client::rpc_response::RpcContactInfo;
 use solana_sdk::pubkey::Pubkey;
@@ -11,7 +13,7 @@ pub async fn validate_validator_access<C>(
     sol_client: &C,
     primary_validator_id: &Pubkey,
     backup_validator_ids: &[Pubkey],
-    leader_schedule_epochs: u8,
+    leader_schedule_epochs: Option<u8>,
 ) -> Result<Vec<String>>
 where
     C: SolRpcClientType + Sync,
@@ -36,12 +38,13 @@ pub async fn validate_validator_access_with_nodes<C>(
     sol_client: &C,
     primary_validator_id: &Pubkey,
     backup_validator_ids: &[Pubkey],
-    leader_schedule_epochs: u8,
+    leader_schedule_epochs: Option<u8>,
 ) -> Result<Vec<String>>
 where
     C: SolRpcClientType + Sync,
 {
     let mut errors = Vec::<String>::new();
+    let leader_schedule_epochs = leader_schedule_epochs.unwrap_or(ENV_PREVIOUS_LEADER_EPOCHS);
 
     println!("Primary validator 🖥️  💎:\n  ID: {primary_validator_id} ");
     if let Some(node) = find_node_by_node_id(nodes, primary_validator_id) {
@@ -129,7 +132,9 @@ pub fn should_continue_after_validation(errors: &[String], force: bool) -> bool 
 mod tests {
     use std::net::{Ipv4Addr, SocketAddr};
 
-    use doublezero_ledger_sentinel::client::solana::MockSolRpcClientType;
+    use doublezero_ledger_sentinel::{
+        client::solana::MockSolRpcClientType, constants::ENV_PREVIOUS_LEADER_EPOCHS,
+    };
     use solana_client::rpc_response::RpcContactInfo;
     use solana_sdk::pubkey::Pubkey;
 
@@ -156,7 +161,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validation_succeeds_for_valid_primary_and_backup() {
+    async fn validation_succeeds_with_default_leader_schedule_epochs() {
         let primary = Pubkey::new_unique();
         let backup = Pubkey::new_unique();
         let nodes = vec![
@@ -173,7 +178,9 @@ mod tests {
             let primary_clone = primary;
             client
                 .expect_is_scheduled_leader()
-                .withf(move |validator_id, epochs| validator_id == &primary_clone && *epochs == 2)
+                .withf(move |validator_id, epochs| {
+                    validator_id == &primary_clone && *epochs == ENV_PREVIOUS_LEADER_EPOCHS
+                })
                 .returning(|_, _| Ok(true));
         }
         {
@@ -187,13 +194,16 @@ mod tests {
             let backup_clone = backup;
             client
                 .expect_is_scheduled_leader()
-                .withf(move |validator_id, epochs| validator_id == &backup_clone && *epochs == 2)
+                .withf(move |validator_id, epochs| {
+                    validator_id == &backup_clone && *epochs == ENV_PREVIOUS_LEADER_EPOCHS
+                })
                 .returning(|_, _| Ok(false));
         }
 
-        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup], 2)
-            .await
-            .unwrap();
+        let errors =
+            validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup], None)
+                .await
+                .unwrap();
 
         assert!(errors.is_empty());
     }
@@ -219,13 +229,16 @@ mod tests {
             let backup_clone = backup;
             client
                 .expect_is_scheduled_leader()
-                .withf(move |validator_id, epochs| validator_id == &backup_clone && *epochs == 2)
+                .withf(move |validator_id, epochs| {
+                    validator_id == &backup_clone && *epochs == ENV_PREVIOUS_LEADER_EPOCHS
+                })
                 .returning(|_, _| Ok(true));
         }
 
-        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup], 2)
-            .await
-            .unwrap();
+        let errors =
+            validate_validator_access_with_nodes(&nodes, &client, &primary, &[backup], None)
+                .await
+                .unwrap();
 
         assert_eq!(errors.len(), 2);
         assert!(errors.iter().any(|e| e.contains("not visible in gossip")));
@@ -260,7 +273,7 @@ mod tests {
                 .returning(|_, _| Ok(true));
         }
 
-        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[], 1)
+        let errors = validate_validator_access_with_nodes(&nodes, &client, &primary, &[], Some(1))
             .await
             .unwrap();
 

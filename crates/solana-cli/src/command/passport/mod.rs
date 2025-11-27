@@ -21,9 +21,9 @@ pub struct SharedAccessArgs {
     /// Optional backup validator IDs (identity pubkeys)
     #[arg(long, value_name = "PUBKEY,PUBKEY,PUBKEY", value_delimiter = ',')]
     pub backup_validator_ids: Vec<Pubkey>,
-    /// Number of previous epochs to check when evaluating the leader schedule (default: 2)
-    #[arg(long, hide = true, default_value_t = 2)]
-    pub leader_schedule_epochs: u8,
+    /// Number of previous epochs to check when evaluating the leader schedule (defaults to ENV_PREVIOUS_LEADER_EPOCHS)
+    #[arg(long, hide = true)]
+    pub leader_schedule_epochs: Option<u8>,
 }
 
 #[derive(Debug, Args)]
