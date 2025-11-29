@@ -6633,6 +6633,7 @@ dependencies = [
  "anyhow",
  "doublezero-solana-client-tools",
  "doublezero-solana-validator-debt",
+ "reqwest",
  "rustler",
  "serde_json",
  "slack-notifier",

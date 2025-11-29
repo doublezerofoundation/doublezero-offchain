@@ -5,7 +5,8 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-
+## Unreleased
+- feat(summarize_debt): Summarize debt for each epoch and then for all epochs ([#218](https://github.com/doublezerofoundation/doublezero-offchain/pull/218))
 ## [v0.1.3]
 - feat(deploy service): Add deploy steps through actions and goreleaser ([#205]https://github.com/doublezerofoundation/doublezero-offchain/pull/205)
 - feat(automate_finalize_distribution):
