@@ -260,7 +260,9 @@ impl Transaction {
 
         let mut overrides = Vec::new();
 
-        if let Ok(file) = File::open("overrides.csv") {
+        // TODO: This is a temporary fix to exclude a couple of validators
+        // the longer term fix will be using data on-chain as it's more transparent, less error-prone
+        if let Ok(file) = File::open("/opt/doublezero-offchain-scheduler/overrides.csv") {
             let mut rdr = csv::Reader::from_reader(file);
             overrides.extend(
                 rdr.records()
