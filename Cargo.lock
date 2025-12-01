@@ -2810,6 +2810,8 @@ dependencies = [
  "solana-rpc-client-types",
  "solana-sdk",
  "solana-transaction-status-client-types",
+ "tempfile",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "tracing-subscriber",

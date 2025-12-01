@@ -20,6 +20,7 @@ use solana_sdk::{
 use solana_transaction_status_client_types::UiTransactionEncoding;
 
 use crate::{
+    keypair::load_keypair,
     log_info,
     rpc::{SolanaConnection, SolanaConnectionOptions},
     transaction::new_transaction,
@@ -335,14 +336,17 @@ impl TryFrom<SolanaPayerOptions> for Wallet {
     }
 }
 
-/// Taken from a Solana cookbook to load a keypair from a user's Solana config
-/// location.
+/// Load a keypair following the precedence chain:
+/// 1. CLI argument (--keypair)
+/// 2. Environment variable (DOUBLEZERO_SOLANA_KEYPAIR)
+/// 3. Stdin (if not a TTY)
+/// 4. Default path (~/.config/solana/id.json)
 pub fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
-    let home_path = std::env::var_os("HOME").unwrap();
-    let default_keypair_path = ".config/solana/id.json";
+    let home = std::env::var_os("HOME").unwrap_or_default();
+    let default_path = PathBuf::from(home).join(".config/solana/id.json");
 
-    let keypair_path = path.unwrap_or_else(|| PathBuf::from(home_path).join(default_keypair_path));
-    try_load_specified_keypair(&keypair_path)
+    let result = load_keypair(path, default_path)?;
+    Ok(result.keypair)
 }
 
 fn try_load_specified_keypair(path: &PathBuf) -> Result<Keypair> {
