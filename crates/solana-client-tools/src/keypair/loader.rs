@@ -6,7 +6,10 @@ use std::{
 
 use solana_sdk::signature::Keypair;
 
-use super::{error::KeypairLoadError, source::KeypairSource};
+use crate::keypair::{error::KeypairLoadError, source::KeypairSource};
+
+/// Default keypair path relative to HOME
+const DEFAULT_KEYPAIR_PATH: &str = ".config/solana/id.json";
 
 /// Result of loading a keypair, including provenance information
 pub struct KeypairLoadResult {
@@ -128,6 +131,27 @@ pub fn load_keypair(
     }
 
     Err(KeypairLoadError::NoSourceAvailable { attempted })
+}
+
+/// Load keypair following the precedence chain:
+/// 1. CLI argument (--keypair)
+/// 2. Stdin (if not a TTY)
+/// 3. Default path (~/.config/solana/id.json)
+///
+/// This is a convenience wrapper around [`load_keypair`] that automatically
+/// computes the default path from the HOME environment variable.
+///
+/// # Arguments
+/// * `cli_path` - Optional path from CLI --keypair argument
+///
+/// # Returns
+/// * `Ok(Keypair)` - Successfully loaded keypair
+/// * `Err(KeypairLoadError)` - Failed to load keypair from any source
+pub fn try_load_keypair(cli_path: Option<PathBuf>) -> Result<Keypair, KeypairLoadError> {
+    let home = home::home_dir().ok_or(KeypairLoadError::HomeDirNotFound)?;
+    let default_path = home.join(DEFAULT_KEYPAIR_PATH);
+    let result = load_keypair(cli_path, default_path)?;
+    Ok(result.keypair)
 }
 
 #[cfg(test)]

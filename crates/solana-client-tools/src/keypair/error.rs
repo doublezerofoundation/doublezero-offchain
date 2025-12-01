@@ -47,6 +47,10 @@ pub enum KeypairLoadError {
         "Stdin is a TTY - cannot read keypair interactively. Pipe keypair JSON via stdin or use --keypair"
     )]
     StdinIsTty,
+
+    /// Could not determine home directory
+    #[error("Could not determine home directory for default keypair path")]
+    HomeDirNotFound,
 }
 
 fn format_attempted(attempted: &[String]) -> String {

@@ -19,8 +19,9 @@ use solana_sdk::{
 };
 use solana_transaction_status_client_types::UiTransactionEncoding;
 
+// Re-export for backward compatibility
+pub use crate::keypair::try_load_keypair;
 use crate::{
-    keypair::load_keypair,
     log_info,
     rpc::{SolanaConnection, SolanaConnectionOptions},
     transaction::new_transaction,
@@ -334,18 +335,6 @@ impl TryFrom<SolanaPayerOptions> for Wallet {
             dry_run,
         })
     }
-}
-
-/// Load a keypair following the precedence chain:
-/// 1. CLI argument (--keypair)
-/// 2. Stdin (if not a TTY)
-/// 3. Default path (~/.config/solana/id.json)
-pub fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
-    let home = std::env::var_os("HOME").unwrap_or_default();
-    let default_path = PathBuf::from(home).join(".config/solana/id.json");
-
-    let result = load_keypair(path, default_path)?;
-    Ok(result.keypair)
 }
 
 fn try_load_specified_keypair(path: &PathBuf) -> Result<Keypair> {

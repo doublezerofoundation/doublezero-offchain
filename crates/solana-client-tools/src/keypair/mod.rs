@@ -8,23 +8,14 @@
 //! # Example
 //!
 //! ```ignore
-//! use solana_client_tools::keypair::{load_keypair, KeypairSource};
+//! use solana_client_tools::keypair::try_load_keypair;
 //! use std::path::PathBuf;
 //!
-//! let home = home::home_dir().unwrap();
-//! let default_path = home.join(".config/solana/id.json");
+//! // Load from CLI path, falling back to stdin or ~/.config/solana/id.json
+//! let keypair = try_load_keypair(Some(PathBuf::from("/path/from/cli")))?;
 //!
-//! let result = load_keypair(
-//!     Some(PathBuf::from("/path/from/cli")),
-//!     default_path,
-//! );
-//!
-//! match result {
-//!     Ok(result) => {
-//!         println!("Loaded keypair from: {}", result.source);
-//!     }
-//!     Err(e) => eprintln!("Failed to load keypair: {}", e),
-//! }
+//! // Or let it use the default precedence chain
+//! let keypair = try_load_keypair(None)?;
 //! ```
 
 mod error;
@@ -32,5 +23,5 @@ mod loader;
 mod source;
 
 pub use error::KeypairLoadError;
-pub use loader::{KeypairLoadResult, load_keypair, parse_keypair_json};
+pub use loader::{KeypairLoadResult, load_keypair, parse_keypair_json, try_load_keypair};
 pub use source::KeypairSource;
