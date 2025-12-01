@@ -4,7 +4,7 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum KeypairLoadError {
     /// No keypair source was available
-    #[error("No keypair source available. Tried:\n{}\n\nHint: Provide keypair via:\n  - doublezero-solana --keypair /path/to/key.json\n  - cat key.json | doublezero-solana ...\n  - export DOUBLEZERO_SOLANA_KEYPAIR=/path/to/key.json", format_attempted(.attempted))]
+    #[error("No keypair source available. Tried:\n{}\n\nHint: Provide keypair via:\n  - doublezero-solana --keypair /path/to/key.json\n  - cat key.json | doublezero-solana ...", format_attempted(.attempted))]
     NoSourceAvailable {
         /// List of sources that were attempted
         attempted: Vec<String>,

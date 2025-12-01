@@ -6,11 +6,6 @@ use std::{fmt, path::PathBuf};
 pub enum KeypairSource {
     /// Keypair loaded from CLI argument (highest precedence)
     CliArgument(PathBuf),
-    /// Keypair loaded from DOUBLEZERO_SOLANA_KEYPAIR environment variable
-    EnvVar {
-        /// Whether the env var contained raw JSON or a file path
-        is_json: bool,
-    },
     /// Keypair loaded from stdin (piped input)
     Stdin,
     /// Keypair loaded from default path
@@ -21,12 +16,6 @@ impl fmt::Display for KeypairSource {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::CliArgument(path) => write!(f, "CLI argument ({})", path.display()),
-            Self::EnvVar { is_json: true } => {
-                write!(f, "DOUBLEZERO_SOLANA_KEYPAIR env var (JSON content)")
-            }
-            Self::EnvVar { is_json: false } => {
-                write!(f, "DOUBLEZERO_SOLANA_KEYPAIR env var (file path)")
-            }
             Self::Stdin => write!(f, "stdin"),
             Self::DefaultPath(path) => write!(f, "default path ({})", path.display()),
         }

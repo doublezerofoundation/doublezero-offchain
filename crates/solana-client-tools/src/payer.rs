@@ -338,9 +338,8 @@ impl TryFrom<SolanaPayerOptions> for Wallet {
 
 /// Load a keypair following the precedence chain:
 /// 1. CLI argument (--keypair)
-/// 2. Environment variable (DOUBLEZERO_SOLANA_KEYPAIR)
-/// 3. Stdin (if not a TTY)
-/// 4. Default path (~/.config/solana/id.json)
+/// 2. Stdin (if not a TTY)
+/// 3. Default path (~/.config/solana/id.json)
 pub fn try_load_keypair(path: Option<PathBuf>) -> Result<Keypair> {
     let home = std::env::var_os("HOME").unwrap_or_default();
     let default_path = PathBuf::from(home).join(".config/solana/id.json");

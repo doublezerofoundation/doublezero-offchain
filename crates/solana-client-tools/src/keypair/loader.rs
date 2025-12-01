@@ -1,5 +1,5 @@
 use std::{
-    env, fs,
+    fs,
     io::{IsTerminal, Read},
     path::PathBuf,
 };
@@ -8,21 +8,12 @@ use solana_sdk::signature::Keypair;
 
 use super::{error::KeypairLoadError, source::KeypairSource};
 
-/// Environment variable name for keypair (can be JSON content or file path)
-pub const ENV_KEYPAIR: &str = "DOUBLEZERO_SOLANA_KEYPAIR";
-
 /// Result of loading a keypair, including provenance information
 pub struct KeypairLoadResult {
     /// The loaded keypair
     pub keypair: Keypair,
     /// The source from which the keypair was loaded
     pub source: KeypairSource,
-}
-
-/// Check if a string value looks like JSON keypair content (starts with '[' and ends with ']')
-pub fn is_keypair_json_content(value: &str) -> bool {
-    let trimmed = value.trim();
-    trimmed.starts_with('[') && trimmed.ends_with(']')
 }
 
 /// Parse keypair from JSON string
@@ -72,27 +63,10 @@ fn read_keypair_from_stdin() -> Result<Keypair, KeypairLoadError> {
     parse_keypair_json(&buffer, "stdin")
 }
 
-/// Read keypair from environment variable
-fn read_keypair_from_env() -> Result<(Keypair, bool), KeypairLoadError> {
-    let value = env::var(ENV_KEYPAIR).map_err(|_| KeypairLoadError::NoSourceAvailable {
-        attempted: vec![format!("Env {} not set", ENV_KEYPAIR)],
-    })?;
-
-    if is_keypair_json_content(&value) {
-        let keypair = parse_keypair_json(&value, &format!("{} (JSON)", ENV_KEYPAIR))?;
-        Ok((keypair, true))
-    } else {
-        let path = PathBuf::from(&value);
-        let keypair = read_keypair_from_path(&path)?;
-        Ok((keypair, false))
-    }
-}
-
 /// Load keypair following the precedence chain:
 /// 1. CLI argument (--keypair)
-/// 2. Environment variable (DOUBLEZERO_SOLANA_KEYPAIR)
-/// 3. Stdin (if not a TTY)
-/// 4. Default path (~/.config/solana/id.json)
+/// 2. Stdin (if not a TTY)
+/// 3. Default path (~/.config/solana/id.json)
 ///
 /// # Arguments
 /// * `cli_path` - Optional path from CLI --keypair argument
@@ -124,23 +98,7 @@ pub fn load_keypair(
         attempted.push("CLI --keypair: not provided".to_string());
     }
 
-    // 2. Try environment variable
-    match read_keypair_from_env() {
-        Ok((keypair, is_json)) => {
-            return Ok(KeypairLoadResult {
-                keypair,
-                source: KeypairSource::EnvVar { is_json },
-            });
-        }
-        Err(KeypairLoadError::NoSourceAvailable { .. }) => {
-            attempted.push(format!("Env {}: not set", ENV_KEYPAIR));
-        }
-        Err(e) => {
-            attempted.push(format!("Env {}: {}", ENV_KEYPAIR, e));
-        }
-    }
-
-    // 3. Try stdin (if not a TTY)
+    // 2. Try stdin (if not a TTY)
     match read_keypair_from_stdin() {
         Ok(keypair) => {
             return Ok(KeypairLoadResult {
@@ -156,7 +114,7 @@ pub fn load_keypair(
         }
     }
 
-    // 4. Try default path
+    // 3. Try default path
     match read_keypair_from_path(&default_path) {
         Ok(keypair) => {
             return Ok(KeypairLoadResult {
@@ -188,16 +146,6 @@ mod tests {
         let mut file = fs::File::create(&path).unwrap();
         file.write_all(json.as_bytes()).unwrap();
         (path, keypair)
-    }
-
-    #[test]
-    fn test_is_keypair_json_content() {
-        assert!(is_keypair_json_content("[1,2,3,4,5]"));
-        assert!(is_keypair_json_content("  [1,2,3,4,5]  "));
-        assert!(is_keypair_json_content("\n[1,2,3]\n"));
-        assert!(!is_keypair_json_content("/path/to/file.json"));
-        assert!(!is_keypair_json_content("~/.config/solana/id.json"));
-        assert!(!is_keypair_json_content(""));
     }
 
     #[test]
@@ -243,9 +191,6 @@ mod tests {
 
         let default_path = tmp.path().join("default-keypair.json");
 
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::remove_var(ENV_KEYPAIR) };
-
         let result = load_keypair(Some(cli_path.clone()), default_path).unwrap();
 
         assert_eq!(result.keypair.pubkey(), cli_keypair.pubkey());
@@ -257,9 +202,6 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let (default_path, default_keypair) = create_test_keypair_file(&tmp);
 
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::remove_var(ENV_KEYPAIR) };
-
         let result = load_keypair(None, default_path).unwrap();
 
         assert_eq!(result.keypair.pubkey(), default_keypair.pubkey());
@@ -270,9 +212,6 @@ mod tests {
     fn test_load_keypair_no_source_available() {
         let tmp = TempDir::new().unwrap();
 
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::remove_var(ENV_KEYPAIR) };
-
         let nonexistent = tmp.path().join("nonexistent.json");
         let result = load_keypair(None, nonexistent);
 
@@ -280,48 +219,5 @@ mod tests {
             result,
             Err(KeypairLoadError::NoSourceAvailable { .. })
         ));
-    }
-
-    #[test]
-    fn test_load_keypair_env_var_path() {
-        let tmp = TempDir::new().unwrap();
-        let (env_path, env_keypair) = create_test_keypair_file(&tmp);
-
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::set_var(ENV_KEYPAIR, env_path.to_str().unwrap()) };
-
-        let nonexistent = tmp.path().join("nonexistent.json");
-        let result = load_keypair(None, nonexistent).unwrap();
-
-        assert_eq!(result.keypair.pubkey(), env_keypair.pubkey());
-        assert!(matches!(
-            result.source,
-            KeypairSource::EnvVar { is_json: false }
-        ));
-
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::remove_var(ENV_KEYPAIR) };
-    }
-
-    #[test]
-    fn test_load_keypair_env_var_json() {
-        let tmp = TempDir::new().unwrap();
-        let keypair = Keypair::new();
-        let json = serde_json::to_string(&keypair.to_bytes().to_vec()).unwrap();
-
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::set_var(ENV_KEYPAIR, &json) };
-
-        let nonexistent = tmp.path().join("nonexistent.json");
-        let result = load_keypair(None, nonexistent).unwrap();
-
-        assert_eq!(result.keypair.pubkey(), keypair.pubkey());
-        assert!(matches!(
-            result.source,
-            KeypairSource::EnvVar { is_json: true }
-        ));
-
-        // SAFETY: Test environment, single-threaded test
-        unsafe { env::remove_var(ENV_KEYPAIR) };
     }
 }
