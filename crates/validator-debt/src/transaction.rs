@@ -282,6 +282,9 @@ impl Transaction {
                 .iter()
                 .any(|(key, epoch)| key == &node_id_str && *epoch == dz_epoch)
             {
+                println!(
+                    "Validator {node_id_str} for epoch #{dz_epoch} excluded from debt collection"
+                );
                 continue;
             }
             let debt_proof = debt_clone.find_debt_proof(&d.node_id).unwrap();
