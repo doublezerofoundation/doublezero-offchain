@@ -549,8 +549,12 @@ pub async fn post_debt_collection_to_slack(
     let successful_transactions_count = debt_collection_results.successful_transactions.len();
     let already_paid_count = debt_collection_results.already_paid.len();
 
-    let percentage_paid: f64 = (already_paid_count + successful_transactions_count) as f64
-        / total_attempted_transactions_count as f64;
+    let percentage_paid: f64 = if total_attempted_transactions_count == 0 {
+        0.0
+    } else {
+        (already_paid_count + successful_transactions_count) as f64
+            / total_attempted_transactions_count as f64
+    };
 
     // the total amount paid for an epoch is `total_collected_this_run` + `already_paid`
     let already_paid_total: u64 = debt_collection_results
@@ -570,16 +574,11 @@ pub async fn post_debt_collection_to_slack(
         .iter()
         .map(|cr| cr.amount)
         .sum();
-    let percentage_paid = if percentage_paid.is_nan() {
-        0.0
-    } else {
-        percentage_paid
-    };
     let table_values = vec![
         debt_collection_results.dz_epoch.to_string(),
         total_paid.to_string(),
         total_debt.to_string(),
-        format!("{:.2}%", percentage_paid),
+        format!("{:.2}%", percentage_paid * 100.0),
         total_attempted_transactions_count.to_string(),
         successful_transactions_count.to_string(),
         debt_collection_results.insufficient_funds.len().to_string(),
