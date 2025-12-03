@@ -77,7 +77,7 @@ where
     let backoff = ExponentialBuilder::default()
         .with_min_delay(Duration::from_secs(1))
         .with_max_delay(Duration::from_secs(30))
-        .with_max_times(4)
+        .with_max_times(10)
         .with_jitter();
 
     (move || op())
@@ -102,6 +102,7 @@ fn retryable_client_error(err: &ClientError) -> bool {
         ClientErrorKind::Reqwest(reqwest_err) => {
             if reqwest_err.is_timeout()
                 || reqwest_err.is_connect()
+                || reqwest_err.is_request()
                 || is_connection_reset(reqwest_err)
             {
                 return true;
@@ -117,7 +118,8 @@ fn is_connection_reset(reqwest_err: &ReqwestError) -> bool {
 
     while let Some(err) = source {
         if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-            && io_err.kind() == std::io::ErrorKind::ConnectionReset
+            && (io_err.kind() == std::io::ErrorKind::ConnectionReset
+                || io_err.kind() == std::io::ErrorKind::BrokenPipe)
         {
             return true;
         }
@@ -129,7 +131,11 @@ fn is_connection_reset(reqwest_err: &ReqwestError) -> bool {
 
 fn retryable_status(status: Option<StatusCode>) -> bool {
     match status {
-        Some(code) => code.is_server_error() || code == StatusCode::TOO_MANY_REQUESTS,
+        Some(code) => {
+            code.is_server_error()
+                || code == StatusCode::TOO_MANY_REQUESTS
+                || code == StatusCode::FORBIDDEN
+        }
         None => false,
     }
 }
@@ -146,6 +152,7 @@ mod tests {
         assert!(retryable_status(Some(StatusCode::INTERNAL_SERVER_ERROR)));
         assert!(retryable_status(Some(StatusCode::TOO_MANY_REQUESTS)));
         assert!(retryable_status(Some(StatusCode::SERVICE_UNAVAILABLE)));
+        assert!(retryable_status(Some(StatusCode::FORBIDDEN)));
         assert!(!retryable_status(Some(StatusCode::BAD_REQUEST)));
         assert!(!retryable_status(None));
     }
