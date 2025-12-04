@@ -19,7 +19,7 @@ use tracing::warn;
 
 pub type Result<T = ()> = std::result::Result<T, Error>;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, strum::IntoStaticStr)]
 pub enum Error {
     #[error("base64 decode error: {0}")]
     Base64Decode(#[from] base64::DecodeError),
@@ -80,14 +80,35 @@ where
         .with_max_times(10)
         .with_jitter();
 
-    (move || op())
+    let result = (move || op())
         .retry(backoff)
         .when(|err: &Error| should_retry(err))
         .notify(|err: &Error, delay: Duration| {
             let attempt = attempts.fetch_add(1, Ordering::Relaxed) + 1;
+            let error_type = classify_rpc_error(err);
+
+            metrics::counter!(
+                "doublezero_sentinel_rpc_retry_total",
+                "operation" => label,
+                "error_type" => error_type
+            )
+            .increment(1);
+
             warn!(attempt, retry_in = ?delay, error = ?err, operation = label, "transient RPC failure");
         })
-        .await
+        .await;
+
+    if let Err(ref err) = result {
+        let error_type = classify_rpc_error(err);
+        metrics::counter!(
+            "doublezero_sentinel_rpc_retry_exhausted_total",
+            "operation" => label,
+            "error_type" => error_type
+        )
+        .increment(1);
+    }
+
+    result
 }
 
 fn should_retry(err: &Error) -> bool {
@@ -129,6 +150,43 @@ fn is_connection_reset(reqwest_err: &ReqwestError) -> bool {
     false
 }
 
+fn classify_rpc_error(err: &Error) -> &'static str {
+    match err {
+        Error::RpcClient(client_err) => classify_client_error(client_err.as_ref()),
+        _ => err.into(),
+    }
+}
+
+fn classify_client_error(err: &ClientError) -> &'static str {
+    match err.kind() {
+        ClientErrorKind::Reqwest(reqwest_err) => {
+            if reqwest_err.is_timeout() {
+                return "timeout";
+            }
+            if reqwest_err.is_connect() {
+                return "connect";
+            }
+            if is_connection_reset(reqwest_err) {
+                return "connection_reset";
+            }
+            if reqwest_err.is_request() {
+                return "request";
+            }
+            if reqwest_err.status().is_some() {
+                return "http_status";
+            }
+            "reqwest"
+        }
+        ClientErrorKind::Io(_) => "io",
+        ClientErrorKind::TransactionError(_) => "transaction",
+        ClientErrorKind::RpcError(_) => "rpc",
+        ClientErrorKind::SigningError(_) => "signing",
+        ClientErrorKind::SerdeJson(_) => "serde_json",
+        ClientErrorKind::Custom(_) => "custom",
+        ClientErrorKind::Middleware(_) => "middleware",
+    }
+}
+
 fn retryable_status(status: Option<StatusCode>) -> bool {
     match status {
         Some(code) => {
@@ -161,5 +219,20 @@ mod tests {
     fn does_not_retry_transaction_errors() {
         let err = Error::from(ClientError::from(TransactionError::AccountNotFound));
         assert!(!should_retry(&err));
+    }
+
+    #[test]
+    fn classify_non_rpc_errors_by_variant() {
+        let err = Error::MissingTxnSignature;
+        assert_eq!(classify_rpc_error(&err), "MissingTxnSignature");
+
+        let err = Error::SignatureVerify;
+        assert_eq!(classify_rpc_error(&err), "SignatureVerify");
+    }
+
+    #[test]
+    fn classify_transaction_errors() {
+        let err = Error::from(ClientError::from(TransactionError::AccountNotFound));
+        assert_eq!(classify_rpc_error(&err), "transaction");
     }
 }
