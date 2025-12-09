@@ -2735,6 +2735,7 @@ name = "doublezero-solana-client-tools"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "bincode 1.3.3",
  "borsh 1.5.7",
  "bytemuck",
  "clap",

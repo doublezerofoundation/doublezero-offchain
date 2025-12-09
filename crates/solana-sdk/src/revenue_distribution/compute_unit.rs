@@ -9,11 +9,11 @@ pub const fn initialize_solana_validator_deposit(deposit_pda_bump: u8) -> u32 {
 }
 
 // TODO: Scale based on proof size.
-pub const fn pay_solana_validator_debt(_proof: &MerkleProof) -> u64 {
+pub const fn pay_solana_validator_debt(_proof: &MerkleProof) -> u32 {
     10_000
 }
 
 // TODO: Scale based on proof size.
-pub const fn write_off_solana_validator_debt(_proof: &MerkleProof) -> u64 {
+pub const fn write_off_solana_validator_debt(_proof: &MerkleProof) -> u32 {
     10_000
 }
