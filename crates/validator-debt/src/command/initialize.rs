@@ -1,11 +1,11 @@
 use anyhow::{Result, ensure};
 use clap::Args;
-use doublezero_revenue_distribution::state::ProgramConfig;
 use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, Wallet},
     rpc::{DoubleZeroLedgerConnection, DoubleZeroLedgerConnectionOptions},
 };
+use doublezero_solana_sdk::revenue_distribution::state::ProgramConfig;
 use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer};
 
 use crate::worker;

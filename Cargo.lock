@@ -2782,6 +2782,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "doublezero-solana-sdk"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "doublezero-passport",
+ "doublezero-program-tools",
+ "doublezero-revenue-distribution",
+ "svm-hash",
+]
+
+[[package]]
 name = "doublezero-solana-validator-debt"
 version = "0.1.0-rc6"
 dependencies = [
@@ -2796,12 +2807,11 @@ dependencies = [
  "chrono",
  "clap",
  "csv",
- "doublezero-program-tools",
  "doublezero-record",
- "doublezero-revenue-distribution",
  "doublezero-scheduled-command",
  "doublezero-serviceability",
  "doublezero-solana-client-tools",
+ "doublezero-solana-sdk",
  "doublezero_sdk",
  "futures",
  "leaky-bucket",

@@ -1,19 +1,21 @@
 use std::{collections::HashMap, str::FromStr};
 
 use anyhow::{Result, bail, ensure};
-use doublezero_program_tools::instruction::try_build_instruction;
-use doublezero_revenue_distribution::{
-    ID,
-    instruction::{
-        RevenueDistributionInstructionData::{self, ConfigureDistributionDebt},
-        account::{InitializeDistributionAccounts, InitializeSolanaValidatorDepositAccounts},
-    },
-    state::{self, Distribution, ProgramConfig, SolanaValidatorDeposit},
-    types::SolanaValidatorDebt,
-};
 use doublezero_solana_client_tools::{
     payer::{TransactionOutcome, Wallet},
     rpc::{DoubleZeroLedgerConnection, SolanaConnection},
+};
+use doublezero_solana_sdk::{
+    revenue_distribution::{
+        self, ID,
+        instruction::{
+            RevenueDistributionInstructionData::{self, ConfigureDistributionDebt},
+            account::{InitializeDistributionAccounts, InitializeSolanaValidatorDepositAccounts},
+        },
+        state::{self, Distribution, ProgramConfig, SolanaValidatorDeposit},
+        types::SolanaValidatorDebt,
+    },
+    try_build_instruction,
 };
 use leaky_bucket::RateLimiter;
 use serde::Serialize;
@@ -478,9 +480,9 @@ pub async fn initialize_distribution(
     }
 
     let dz_mint_key = if is_mainnet {
-        doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
+        revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
     } else {
-        doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
+        revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
     };
 
     let initialize_distribution_ix = try_build_instruction(

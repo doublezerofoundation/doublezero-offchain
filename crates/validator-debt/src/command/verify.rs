@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Args;
-use doublezero_revenue_distribution::state::ProgramConfig;
 use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, try_load_keypair},
     rpc::{DoubleZeroLedgerConnectionOptions, SolanaConnection, SolanaConnectionOptions},
 };
+use doublezero_solana_sdk::revenue_distribution::state::ProgramConfig;
 use leaky_bucket::RateLimiter;
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
