@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow, bail};
 use doublezero_sdk::record::pubkey;
 use doublezero_solana_client_tools::rpc::DoubleZeroLedgerConnection;
 use doublezero_solana_sdk::{
+    merkle::MerkleProof,
     revenue_distribution::{
         ID,
         instruction::{
@@ -33,7 +34,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::{TransactionError, VersionedTransaction},
 };
-use svm_hash::merkle::MerkleProof;
 
 use crate::{ledger, validator_debt::ComputedSolanaValidatorDebts};
 

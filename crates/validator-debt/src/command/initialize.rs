@@ -1,6 +1,5 @@
 use anyhow::{Result, ensure};
 use clap::Args;
-use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, Wallet},
     rpc::{DoubleZeroLedgerConnection, DoubleZeroLedgerConnectionOptions},
@@ -13,25 +12,20 @@ use crate::worker;
 #[derive(Debug, Args, Clone)]
 pub struct InitializeDistributionCommand {
     #[command(flatten)]
-    schedule_or_force: super::ScheduleOrForce,
-
-    #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
 
     #[command(flatten)]
     dz_ledger_connection_options: DoubleZeroLedgerConnectionOptions,
 }
 
-#[async_trait::async_trait]
-impl Schedulable for InitializeDistributionCommand {
-    fn schedule(&self) -> &ScheduleOption {
-        &self.schedule_or_force.schedule
-    }
+impl InitializeDistributionCommand {
+    pub async fn try_into_execute(self) -> Result<()> {
+        let Self {
+            solana_payer_options,
+            dz_ledger_connection_options,
+        } = self;
 
-    async fn execute_once(&self) -> Result<()> {
-        self.schedule_or_force.ensure_safe_execution()?;
-
-        let wallet = Wallet::try_from(self.solana_payer_options.clone())?;
+        let wallet = Wallet::try_from(solana_payer_options)?;
 
         let ProgramConfig {
             debt_accountant_key: expected_accountant_key,
@@ -47,7 +41,7 @@ impl Schedulable for InitializeDistributionCommand {
         );
 
         let dz_ledger_rpc_client = DoubleZeroLedgerConnection::new_with_commitment(
-            self.dz_ledger_connection_options.dz_ledger_url.clone(),
+            dz_ledger_connection_options.dz_ledger_url,
             CommitmentConfig::confirmed(),
         );
 
