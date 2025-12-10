@@ -2,14 +2,16 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, ensure};
 use clap::{Args, ValueEnum};
-use doublezero_revenue_distribution::{
-    DOUBLEZERO_MINT_DECIMALS,
-    state::{Distribution, SolanaValidatorDeposit},
-    types::{DoubleZeroEpoch, UnitShare32},
-};
 use doublezero_solana_client_tools::{
     account::zero_copy::ZeroCopyAccountOwnedData,
     rpc::{DoubleZeroLedgerConnection, SolanaConnection, SolanaConnectionOptions},
+};
+use doublezero_solana_sdk::{
+    DOUBLEZERO_MINT_DECIMALS,
+    revenue_distribution::{
+        state::{Distribution, SolanaValidatorDeposit},
+        types::{DoubleZeroEpoch, UnitShare32},
+    },
 };
 use solana_client::{
     rpc_config::RpcProgramAccountsConfig,

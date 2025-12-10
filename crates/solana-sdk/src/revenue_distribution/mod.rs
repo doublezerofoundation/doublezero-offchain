@@ -11,7 +11,7 @@ pub use doublezero_revenue_distribution::{ID, env, instruction, state, types};
 
 pub fn try_is_processed_leaf(processed_leaf_data: &[u8], leaf_index: usize) -> Result<bool> {
     // Calculate which byte contains the bit for this leaf index
-    // (8 bits per byte, so divide by 8)
+    // (8 bits per byte, so divide by 8).
     let leaf_byte_index = leaf_index / 8;
 
     // First, we have to grab the relevant byte from the processed data.

@@ -1,18 +1,21 @@
 use anyhow::{Context, Result, ensure};
 use clap::Args;
 use doublezero_contributor_rewards::calculator::proof::ShapleyOutputStorage;
-use doublezero_program_tools::instruction::try_build_instruction;
-use doublezero_revenue_distribution::{
-    DOUBLEZERO_MINT_KEY, ID,
-    instruction::{RevenueDistributionInstructionData, account::DistributeRewardsAccounts},
-    state::{ContributorRewards, Distribution, ProgramConfig},
-    types::{DoubleZeroEpoch, RewardShare, UnitShare32},
-};
 use doublezero_scheduled_command::{Schedulable, ScheduleOption};
 use doublezero_solana_client_tools::{
     account::zero_copy::ZeroCopyAccountOwnedData,
     payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
     rpc::DoubleZeroLedgerConnection,
+};
+use doublezero_solana_sdk::{
+    environment_2z_token_mint_key,
+    revenue_distribution::{
+        ID,
+        instruction::{RevenueDistributionInstructionData, account::DistributeRewardsAccounts},
+        state::{ContributorRewards, Distribution, ProgramConfig},
+        types::{DoubleZeroEpoch, RewardShare, UnitShare32},
+    },
+    try_build_instruction,
 };
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 use spl_associated_token_account_interface::{
@@ -197,6 +200,12 @@ async fn try_distribute_contributor_rewards(
 ) -> Result<()> {
     let wallet_key = wallet.pubkey();
 
+    let dz_mint_key = wallet
+        .connection
+        .try_network_environment()
+        .await
+        .map(environment_2z_token_mint_key)?;
+
     let (contributor_rewards_key, _) =
         ContributorRewards::find_address(&reward_share.contributor_key);
 
@@ -244,7 +253,7 @@ async fn try_distribute_contributor_rewards(
         DistributeRewardsAccounts::new(
             distribution.dz_epoch,
             &reward_share.contributor_key,
-            &DOUBLEZERO_MINT_KEY,
+            &dz_mint_key,
             &wallet_key,
             &recipient_keys,
         ),
@@ -262,7 +271,7 @@ async fn try_distribute_contributor_rewards(
         .map(|recipient_key| {
             get_associated_token_address_and_bump_seed(
                 recipient_key,
-                &DOUBLEZERO_MINT_KEY,
+                &dz_mint_key,
                 &spl_associated_token_account_interface::program::ID,
                 &spl_token::id(),
             )
@@ -289,7 +298,7 @@ async fn try_distribute_contributor_rewards(
             let ix = create_associated_token_account_idempotent(
                 &wallet_key,
                 recipient_key,
-                &DOUBLEZERO_MINT_KEY,
+                &dz_mint_key,
                 &spl_token::id(),
             );
 

@@ -7,6 +7,7 @@ pub use doublezero_program_tools::{
     DISCRIMINATOR_LEN, Discriminator, PrecomputedDiscriminator, get_program_data_address,
     instruction::try_build_instruction, zero_copy,
 };
+pub use doublezero_revenue_distribution::DOUBLEZERO_MINT_DECIMALS;
 pub use doublezero_sol_conversion_interface as sol_conversion;
 pub use doublezero_solana_client_tools::rpc::NetworkEnvironment;
 pub use solana_sdk::pubkey::Pubkey;

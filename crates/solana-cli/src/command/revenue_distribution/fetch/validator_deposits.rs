@@ -1,10 +1,12 @@
 use anyhow::{Result, bail};
 use clap::Args;
-use doublezero_program_tools::PrecomputedDiscriminator;
-use doublezero_revenue_distribution::state::SolanaValidatorDeposit;
 use doublezero_solana_client_tools::{
     account::zero_copy::ZeroCopyAccountOwnedData,
     rpc::{SolanaConnection, SolanaConnectionOptions},
+};
+use doublezero_solana_sdk::{
+    PrecomputedDiscriminator,
+    revenue_distribution::{self, state::SolanaValidatorDeposit},
 };
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::{
@@ -112,7 +114,7 @@ impl ValidatorDepositsCommand {
                 .await?;
 
             let mut outputs = connection
-                .get_program_accounts_with_config(&doublezero_revenue_distribution::ID, config)
+                .get_program_accounts_with_config(&revenue_distribution::ID, config)
                 .await?
                 .into_iter()
                 .map(|(deposit_key, deposit_account_info)| {

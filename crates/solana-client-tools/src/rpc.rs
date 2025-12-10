@@ -63,7 +63,7 @@ impl NetworkEnvironment {
         }
     }
 
-    pub fn is_mainnet(&self) -> bool {
+    pub fn is_mainnet_beta(&self) -> bool {
         self == &NetworkEnvironment::MainnetBeta
     }
 
@@ -188,8 +188,8 @@ impl From<SolanaConnectionOptions> for SolanaConnection {
 
         let url_or_moniker = solana_url_or_moniker.as_deref().unwrap_or("m");
 
-        // Give it the ol' college try to try to convert a moniker. If it fails,
-        // assume a URL was provided.
+        // Give it the ol' college try to convert a moniker. If it fails, assume
+        // a URL was provided.
         let url = <NetworkEnvironment as FromStr>::from_str(url_or_moniker)
             .as_ref()
             .map(NetworkEnvironment::solana_public_url)

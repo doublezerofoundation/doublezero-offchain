@@ -216,7 +216,7 @@ async fn latest_distribution_epoch(
     let is_mainnet = solana_connection
         .try_network_environment()
         .await?
-        .is_mainnet();
+        .is_mainnet_beta();
 
     let dz_ledger_rpc_client = RpcClient::new_with_commitment(
         dz_ledger_connection_options.dz_ledger_url.clone(),

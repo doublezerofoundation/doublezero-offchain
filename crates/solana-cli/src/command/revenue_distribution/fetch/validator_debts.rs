@@ -2,18 +2,19 @@ use std::collections::HashSet;
 
 use anyhow::{Context, Result, ensure};
 use clap::{Args, ValueEnum};
-use doublezero_revenue_distribution::{
-    state::{Distribution, SolanaValidatorDeposit},
-    types::DoubleZeroEpoch,
-};
 use doublezero_solana_client_tools::{
     account::{record::BorshRecordAccountData, zero_copy::ZeroCopyAccountOwnedData},
     rpc::{DoubleZeroLedgerConnection, SolanaConnection, SolanaConnectionOptions},
 };
+use doublezero_solana_sdk::revenue_distribution::{
+    state::{Distribution, SolanaValidatorDeposit},
+    try_is_processed_leaf,
+    types::DoubleZeroEpoch,
+};
 use doublezero_solana_validator_debt::validator_debt::ComputedSolanaValidatorDebts;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 
-use crate::command::revenue_distribution::{try_fetch_program_config, try_is_processed_leaf};
+use crate::command::revenue_distribution::try_fetch_program_config;
 
 const DEFAULT_SINCE_DZ_EPOCH_MAINNET: u64 = 31;
 
