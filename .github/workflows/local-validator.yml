@@ -40,8 +40,6 @@ jobs:
         run: cargo build --bin doublezero-solana
       - name: Run `doublezero-solana` tests
         run: bash sh/test_doublezero_solana_fork.sh
-      - name: Run `doublezero-solana-validator-debt` tests
-        run: bash sh/test_doublezero_solana_fork.sh
 
   test-doublezero-solana-validator-debt-fork:
     runs-on: ubuntu-latest
