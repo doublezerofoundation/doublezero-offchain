@@ -24,7 +24,7 @@ pub struct DoubleZeroLedgerConnectionOptions {
 #[derive(Debug, Args, Clone)]
 pub struct DoubleZeroLedgerEnvironmentOverride {
     /// DoubleZero Ledger environment override.
-    #[arg(long)]
+    #[arg(hide = true, long)]
     pub dz_env: Option<NetworkEnvironment>,
 }
 
