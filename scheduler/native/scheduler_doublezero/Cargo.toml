@@ -21,3 +21,9 @@ solana-sdk.workspace = true
 slack-notifier.workspace = true
 solana-transaction-status-client-types.workspace = true
 tokio.workspace = true
+
+[features]
+tracing = [
+    "doublezero-solana-client-tools/tracing",
+    "doublezero-solana-validator-debt/tracing",
+]

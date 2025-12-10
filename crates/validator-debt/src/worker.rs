@@ -506,10 +506,12 @@ pub async fn try_initialize_distribution(
 
         // Ensure that the epoch from the DoubleZero Ledger network equals
         // the next one known by the Revenue Distribution program.
-        ensure!(
-            next_dz_epoch.value() == expected_completed_dz_epoch,
-            "Last completed DZ epoch {expected_completed_dz_epoch} != program's epoch {next_dz_epoch}"
-        );
+        if next_dz_epoch.value() != expected_completed_dz_epoch {
+            log_warn!(
+                "Last completed DZ epoch {expected_completed_dz_epoch} != program's epoch {next_dz_epoch}"
+            );
+            return Ok(());
+        }
     }
 
     let minimum_epoch_duration_to_finalize_rewards = config
@@ -822,7 +824,7 @@ async fn try_write_off_distribution_debt(
         .value()
         .saturating_sub(minimum_epoch_duration_to_finalize_rewards.into())
         .saturating_add(1);
-    println!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
+    log_info!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
 
     let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(rewards_dz_epoch));
     let rewards_distribution = wallet
@@ -831,12 +833,12 @@ async fn try_write_off_distribution_debt(
         .await?;
 
     if rewards_distribution.is_rewards_calculation_finalized() {
-        println!("Rewards already finalized for epoch {rewards_dz_epoch}");
+        log_info!("Rewards already finalized for epoch {rewards_dz_epoch}");
         return Ok(());
     }
 
     if rewards_distribution.solana_validator_debt_merkle_root == Default::default() {
-        println!("No debt found for epoch {rewards_dz_epoch}");
+        log_info!("No debt found for epoch {rewards_dz_epoch}");
         return Ok(());
     }
 
@@ -915,7 +917,7 @@ async fn try_write_off_distribution_debt(
                     &rent_sysvar,
                 );
                 deposit_balances.insert(node_id, deposit_balance);
-                println!("Fetched deposit balance for node {node_id}: {deposit_balance}");
+                log_info!("Fetched deposit balance for node {node_id}: {deposit_balance}");
             }
 
             let deposit_balance = deposit_balances.get_mut(&node_id).unwrap();
@@ -955,7 +957,7 @@ async fn try_write_off_distribution_debt(
                 instructions_and_compute_units.push((instruction, compute_units));
 
                 *deposit_balance -= debt.amount;
-                println!("Updated deposit balance for node {node_id} to {deposit_balance}");
+                log_info!("Updated deposit balance for node {node_id} to {deposit_balance}");
 
                 pay_count += 1;
             } else {
@@ -999,7 +1001,7 @@ async fn try_write_off_distribution_debt(
             continue;
         }
 
-        println!("Epoch {dz_epoch} summary: {pay_count} payments, {write_off_count} write-offs");
+        log_info!("Epoch {dz_epoch} summary: {pay_count} payments, {write_off_count} write-offs");
 
         let instruction_batches =
         doublezero_solana_client_tools::transaction::try_batch_instructions_with_common_signers(
@@ -1014,7 +1016,7 @@ async fn try_write_off_distribution_debt(
             let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
             if let TransactionOutcome::Executed(tx_sig) = tx_sig {
-                println!("Process Solana validator debt for epoch {dz_epoch}: {tx_sig}");
+                log_info!("Process Solana validator debt for epoch {dz_epoch}: {tx_sig}");
 
                 wallet.print_verbose_output(&[tx_sig]).await?;
             }
