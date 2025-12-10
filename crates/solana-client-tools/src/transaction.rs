@@ -114,7 +114,7 @@ fn try_complete_instructions_batch(
 
     // Out of paranoia, try to serialize the transaction again.
     let transaction = try_new_transaction(
-        &batch,
+        batch,
         signers,
         address_lookup_table_accounts,
         Default::default(),

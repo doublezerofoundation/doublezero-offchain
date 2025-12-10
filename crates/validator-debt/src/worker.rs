@@ -911,12 +911,14 @@ async fn try_write_off_distribution_debt(
             let (deposit_key, deposit_bump) = SolanaValidatorDeposit::find_address(&node_id);
             let deposit_account_info = wallet.connection.get_account(&deposit_key).await?;
 
-            if !deposit_balances.contains_key(&node_id) {
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                deposit_balances.entry(node_id)
+            {
                 let deposit_balance = doublezero_solana_client_tools::account::balance(
                     &deposit_account_info,
                     &rent_sysvar,
                 );
-                deposit_balances.insert(node_id, deposit_balance);
+                entry.insert(deposit_balance);
                 log_info!("Fetched deposit balance for node {node_id}: {deposit_balance}");
             }
 
