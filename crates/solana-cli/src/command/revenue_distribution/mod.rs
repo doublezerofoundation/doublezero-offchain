@@ -258,7 +258,16 @@ fn try_distribution_rewards_iter<'a>(
 fn try_distribution_solana_validator_debt_iter<'a>(
     distribution: &ZeroCopyAccountOwnedData<Distribution>,
     computed_debt: &'a ComputedSolanaValidatorDebts,
-) -> Result<impl Iterator<Item = (usize, &'a ComputedSolanaValidatorDebt, bool)>> {
+) -> Result<
+    impl Iterator<
+        Item = (
+            usize,
+            &'a ComputedSolanaValidatorDebt,
+            bool, // is_processed_leaf
+            bool, // is_written_off_leaf
+        ),
+    >,
+> {
     let start_index = distribution.processed_solana_validator_debt_start_index as usize;
     let end_index = distribution.processed_solana_validator_debt_end_index as usize;
     let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
@@ -266,14 +275,30 @@ fn try_distribution_solana_validator_debt_iter<'a>(
     let num_debts = computed_debt.debts.len();
     let max_supported_debts = processed_leaf_data.len() * 8;
 
+    let written_off_leaf_data = if distribution.is_solana_validator_debt_write_off_enabled() {
+        let start_index =
+            distribution.processed_solana_validator_debt_write_off_start_index as usize;
+        let end_index = distribution.processed_solana_validator_debt_write_off_end_index as usize;
+        Some(&distribution.remaining_data[start_index..end_index])
+    } else {
+        None
+    };
+
     ensure!(
         max_supported_debts >= num_debts,
         "Insufficient processed leaf data for epoch {}: can support {max_supported_debts} debts, but got {num_debts}",
         distribution.dz_epoch
     );
 
-    Ok(computed_debt.debts.iter().enumerate().map(|(index, debt)| {
-        let is_processed = try_is_processed_leaf(processed_leaf_data, index).unwrap();
-        (index, debt, is_processed)
-    }))
+    Ok(computed_debt
+        .debts
+        .iter()
+        .enumerate()
+        .map(move |(index, debt)| {
+            let is_processed = try_is_processed_leaf(processed_leaf_data, index).unwrap();
+            let is_written_off = written_off_leaf_data
+                .map(|data| try_is_processed_leaf(data, index).unwrap())
+                .unwrap_or(false);
+            (index, debt, is_processed, is_written_off)
+        }))
 }

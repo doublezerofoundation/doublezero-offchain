@@ -4,7 +4,7 @@ use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutco
 use doublezero_solana_sdk::{
     environment_2z_token_mint_key, get_program_data_address,
     revenue_distribution::{
-        ID,
+        GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
         instruction::{
             ProgramConfiguration, ProgramFlagConfiguration, RevenueDistributionInstructionData,
             account::{
@@ -297,10 +297,9 @@ pub async fn execute_migrate_program_accounts(
         .try_fetch_zero_copy_data::<Journal>(&journal_key)
         .await?;
 
-    let first_dz_epoch = 31;
     let until_dz_epoch = journal.next_dz_epoch_to_sweep_tokens.value();
 
-    for dz_epoch in first_dz_epoch..until_dz_epoch {
+    for dz_epoch in GENESIS_DZ_EPOCH_MAINNET_BETA..until_dz_epoch {
         let distribution_key = Distribution::find_address(DoubleZeroEpoch::new(dz_epoch)).0;
         accounts.push(AccountMeta::new_readonly(distribution_key, false));
     }

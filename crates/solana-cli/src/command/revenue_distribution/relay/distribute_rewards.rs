@@ -43,7 +43,7 @@ pub struct DistributeRewards {
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
 
-    #[arg(hide = true, long, value_name = "PUBKEY")]
+    #[arg(hide = true, long)]
     rewards_accountant: Option<Pubkey>,
 }
 
