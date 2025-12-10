@@ -87,7 +87,7 @@ impl ValidatorDebtsCommand {
             .filter(|distribution| distribution.is_debt_calculation_finalized())
             .collect::<Vec<_>>();
 
-        let dz_env = solana_connection.try_dz_environment().await?;
+        let dz_env = solana_connection.try_network_environment().await?;
         let dz_connection = DoubleZeroLedgerConnection::from(dz_env);
 
         let debt_record_keys = distributions

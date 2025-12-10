@@ -111,7 +111,7 @@ impl DistributionCommand {
                     "Debt calculation is not finalized yet"
                 );
 
-                let dz_env = solana_connection.try_dz_environment().await?;
+                let dz_env = solana_connection.try_network_environment().await?;
                 let dz_connection = DoubleZeroLedgerConnection::from(dz_env);
 
                 try_print_distribution_debt_table(
@@ -129,7 +129,7 @@ impl DistributionCommand {
                     "Rewards calculation is not finalized yet"
                 );
 
-                let dz_env = solana_connection.try_dz_environment().await?;
+                let dz_env = solana_connection.try_network_environment().await?;
                 let dz_connection = DoubleZeroLedgerConnection::from(dz_env);
 
                 try_print_distribution_rewards_table(

@@ -1,11 +1,10 @@
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use clap::Args;
 use doublezero_solana_client_tools::{
     payer::{SolanaPayerOptions, Wallet},
-    rpc::{DoubleZeroLedgerConnection, DoubleZeroLedgerConnectionOptions},
+    rpc::DoubleZeroLedgerEnvironmentOverride,
 };
-use doublezero_solana_sdk::revenue_distribution::state::ProgramConfig;
-use solana_sdk::{commitment_config::CommitmentConfig, signer::Signer};
+use solana_sdk::pubkey::Pubkey;
 
 use crate::worker;
 
@@ -15,38 +14,32 @@ pub struct InitializeDistributionCommand {
     solana_payer_options: SolanaPayerOptions,
 
     #[command(flatten)]
-    dz_ledger_connection_options: DoubleZeroLedgerConnectionOptions,
+    dz_env: DoubleZeroLedgerEnvironmentOverride,
+
+    #[arg(hide = true, long)]
+    bypass_dz_epoch_check: bool,
+
+    #[arg(hide = true, long)]
+    record_debt_accountant: Option<Pubkey>,
 }
 
 impl InitializeDistributionCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let Self {
             solana_payer_options,
-            dz_ledger_connection_options,
+            dz_env,
+            bypass_dz_epoch_check,
+            record_debt_accountant: record_accountant_key,
         } = self;
 
         let wallet = Wallet::try_from(solana_payer_options)?;
 
-        let ProgramConfig {
-            debt_accountant_key: expected_accountant_key,
-            ..
-        } = *wallet
-            .connection
-            .try_fetch_zero_copy_data::<ProgramConfig>(&ProgramConfig::find_address().0)
-            .await?;
-
-        ensure!(
-            wallet.signer.pubkey() == expected_accountant_key,
-            "Signer does not match expected debt accountant"
-        );
-
-        let dz_ledger_rpc_client = DoubleZeroLedgerConnection::new_with_commitment(
-            dz_ledger_connection_options.dz_ledger_url,
-            CommitmentConfig::confirmed(),
-        );
-
-        worker::initialize_distribution(wallet, dz_ledger_rpc_client).await?;
-
-        Ok(())
+        worker::try_initialize_distribution(
+            wallet,
+            dz_env.dz_env,
+            bypass_dz_epoch_check,
+            record_accountant_key,
+        )
+        .await
     }
 }

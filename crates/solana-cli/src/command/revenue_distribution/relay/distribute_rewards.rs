@@ -86,7 +86,7 @@ impl Schedulable for DistributeRewards {
         // that 2Z tokens have been swept.
         let distribution = try_prepare_distribution_rewards(&wallet, &config, dz_epoch).await?;
 
-        let dz_env = wallet.connection.try_dz_environment().await?;
+        let dz_env = wallet.connection.try_network_environment().await?;
         let dz_connection = DoubleZeroLedgerConnection::from(dz_env);
 
         let shapley_output = try_fetch_shapley_record(

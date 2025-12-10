@@ -3,7 +3,7 @@ use std::{collections::HashMap, str::FromStr};
 use anyhow::{Context, Result, bail, ensure};
 use doublezero_solana_client_tools::{
     payer::{TransactionOutcome, Wallet},
-    rpc::{DoubleZeroLedgerConnection, SolanaConnection},
+    rpc::{DoubleZeroLedgerConnection, NetworkEnvironment, SolanaConnection},
 };
 use doublezero_solana_sdk::{
     revenue_distribution::{
@@ -448,63 +448,95 @@ async fn write_transaction(
     }
 }
 
-pub async fn initialize_distribution(
+pub async fn try_initialize_distribution(
     wallet: Wallet,
-    dz_ledger_connection: DoubleZeroLedgerConnection,
+    dz_env: Option<NetworkEnvironment>,
+    bypass_dz_epoch_check: bool,
+    record_accountant_key: Option<Pubkey>,
 ) -> Result<()> {
-    let is_mainnet = wallet.connection.try_is_mainnet().await?;
+    let network_env = wallet.connection.try_network_environment().await?;
+
+    // Allow an override to the DoubleZero Ledger environment.
+    let dz_env = dz_env.unwrap_or(network_env);
+    let dz_connection = DoubleZeroLedgerConnection::from(dz_env);
 
     let config = wallet
         .connection
         .try_fetch_zero_copy_data::<ProgramConfig>(&ProgramConfig::find_address().0)
         .await?;
 
+    let record_accountant_key = match record_accountant_key {
+        Some(accountant_key) => {
+            // Disallow if the accountant key is not used with localnet.
+            ensure!(
+                network_env.is_localnet(),
+                "Cannot specify accountant key with non-localnet network"
+            );
+
+            accountant_key
+        }
+        None => {
+            let expected_accountant_key = config.debt_accountant_key;
+            ensure!(
+                wallet.signer.pubkey() == expected_accountant_key,
+                "Signer does not match expected debt accountant"
+            );
+
+            expected_accountant_key
+        }
+    };
+
     let next_dz_epoch = config.next_completed_dz_epoch;
-
-    let expected_accountant_key = config.debt_accountant_key;
-    ensure!(
-        wallet.signer.pubkey() == expected_accountant_key,
-        "Signer does not match expected debt accountant"
-    );
-
-    ledger::ensure_same_network_environment(&dz_ledger_connection.0, is_mainnet).await?;
 
     // We want to make sure the next DZ epoch is in sync with the last
     // completed DZ epoch.
-    let expected_completed_dz_epoch = dz_ledger_connection
-        .0
-        .get_epoch_info()
-        .await?
-        .epoch
-        .saturating_sub(1);
+    if bypass_dz_epoch_check {
+        // Disallow if the bypass is not used with localnet.
+        ensure!(
+            network_env.is_localnet(),
+            "Cannot bypass DZ epoch check with non-localnet network"
+        );
+    } else {
+        let expected_completed_dz_epoch = dz_connection
+            .get_epoch_info()
+            .await?
+            .epoch
+            .saturating_sub(1);
 
-    // Ensure that the epoch from the DoubleZero Ledger network equals the next
-    // one known by the Revenue Distribution program. If it does not, this
-    // method has not been called for a long time.
-    ensure!(
-        next_dz_epoch.value() == expected_completed_dz_epoch,
-        "Last completed DZ epoch {expected_completed_dz_epoch} != program's epoch {next_dz_epoch}"
-    );
+        // Ensure that the epoch from the DoubleZero Ledger network equals
+        // the next one known by the Revenue Distribution program.
+        ensure!(
+            next_dz_epoch.value() == expected_completed_dz_epoch,
+            "Last completed DZ epoch {expected_completed_dz_epoch} != program's epoch {next_dz_epoch}"
+        );
+    }
+
+    let minimum_epoch_duration_to_finalize_rewards = config
+        .checked_minimum_epoch_duration_to_finalize_rewards()
+        .context("Minimum epoch duration to finalize rewards not set")?;
 
     // Try to write off distribution debt for the distribution that will have
     // rewards distributed to network contributors. If rewards were already
     // distributed or all debt is already accounted for, this is a no-op.
-    try_write_off_distribution_debt(&wallet, &dz_ledger_connection, &config).await?;
+    try_write_off_distribution_debt(
+        &wallet,
+        &dz_connection,
+        &record_accountant_key,
+        next_dz_epoch,
+        minimum_epoch_duration_to_finalize_rewards,
+    )
+    .await?;
 
-    let dz_mint_key = if is_mainnet {
-        revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
-    } else {
-        revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
+    let dz_mint_key = match network_env {
+        NetworkEnvironment::Testnet => revenue_distribution::env::development::DOUBLEZERO_MINT_KEY,
+        _ => revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY,
     };
+
+    let wallet_key = wallet.pubkey();
 
     let initialize_distribution_ix = try_build_instruction(
         &ID,
-        InitializeDistributionAccounts::new(
-            &expected_accountant_key,
-            &expected_accountant_key,
-            next_dz_epoch,
-            &dz_mint_key,
-        ),
+        InitializeDistributionAccounts::new(&wallet_key, &wallet_key, next_dz_epoch, &dz_mint_key),
         &RevenueDistributionInstructionData::InitializeDistribution,
     )
     .unwrap();
@@ -781,15 +813,11 @@ async fn try_fetch_program_config(
 async fn try_write_off_distribution_debt(
     wallet: &Wallet,
     dz_ledger_connection: &DoubleZeroLedgerConnection,
-    config: &ProgramConfig,
+    record_accountant_key: &Pubkey,
+    next_dz_epoch: DoubleZeroEpoch,
+    minimum_epoch_duration_to_finalize_rewards: u32,
 ) -> Result<()> {
     println!("Trying to write off distribution debt");
-
-    let next_dz_epoch = config.next_completed_dz_epoch;
-
-    let minimum_epoch_duration_to_finalize_rewards = config
-        .checked_minimum_epoch_duration_to_finalize_rewards()
-        .context("Minimum epoch duration to finalize rewards not set")?;
 
     println!("Next DZ epoch: {next_dz_epoch}");
     let rewards_dz_epoch = next_dz_epoch
@@ -825,10 +853,9 @@ async fn try_write_off_distribution_debt(
     let end_index = distribution.processed_solana_validator_debt_end_index as usize;
     let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
 
-    let accountant_key = config.debt_accountant_key;
     let (_, computed_debt) = ledger::try_fetch_debt_record(
         dz_ledger_connection,
-        &accountant_key,
+        record_accountant_key,
         rewards_dz_epoch,
         dz_ledger_connection.commitment(),
     )
@@ -858,11 +885,13 @@ async fn try_write_off_distribution_debt(
 
         let (_, proof) = computed_debt.find_debt_proof(node_id).unwrap();
 
+        let wallet_key = wallet.pubkey();
+
         if deposit_balance >= debt.amount {
             if deposit_account_info.data.is_empty() {
                 let instruction = try_build_instruction(
                     &ID,
-                    InitializeSolanaValidatorDepositAccounts::new(&accountant_key, node_id),
+                    InitializeSolanaValidatorDepositAccounts::new(&wallet_key, node_id),
                     &RevenueDistributionInstructionData::InitializeSolanaValidatorDeposit(*node_id),
                 )
                 .unwrap();
@@ -889,7 +918,7 @@ async fn try_write_off_distribution_debt(
             if !distribution.is_solana_validator_debt_write_off_enabled() && write_off_count == 0 {
                 let instruction = try_build_instruction(
                     &ID,
-                    EnableSolanaValidatorDebtWriteOffAccounts::new(dz_epoch, &accountant_key),
+                    EnableSolanaValidatorDebtWriteOffAccounts::new(dz_epoch, &wallet_key),
                     &RevenueDistributionInstructionData::EnableSolanaValidatorDebtWriteOff,
                 )
                 .unwrap();
@@ -903,12 +932,7 @@ async fn try_write_off_distribution_debt(
 
             let instruction = try_build_instruction(
                 &ID,
-                WriteOffSolanaValidatorDebtAccounts::new(
-                    &accountant_key,
-                    dz_epoch,
-                    node_id,
-                    dz_epoch,
-                ),
+                WriteOffSolanaValidatorDebtAccounts::new(&wallet_key, dz_epoch, node_id, dz_epoch),
                 &RevenueDistributionInstructionData::WriteOffSolanaValidatorDebt {
                     amount: debt.amount,
                     proof,
@@ -923,7 +947,7 @@ async fn try_write_off_distribution_debt(
     let instruction_batches =
         doublezero_solana_client_tools::transaction::try_batch_instructions_with_common_signers(
             instructions_and_compute_units,
-            &[&wallet.signer],
+            &[wallet],
             &[],
             false, // allow_compute_price_instruction
         )?;

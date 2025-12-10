@@ -84,7 +84,10 @@ async fn latest_distribution_epoch(
     dz_ledger_connection_options: &DoubleZeroLedgerConnectionOptions,
 ) -> Result<u64> {
     let solana_connection = SolanaConnection::from(solana_connection_options.clone());
-    let is_mainnet = solana_connection.try_is_mainnet().await?;
+    let is_mainnet = solana_connection
+        .try_network_environment()
+        .await?
+        .is_mainnet();
 
     let dz_ledger_rpc_client = RpcClient::new_with_commitment(
         dz_ledger_connection_options.dz_ledger_url.clone(),

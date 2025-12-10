@@ -2626,9 +2626,8 @@ version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
- "doublezero-program-tools",
- "doublezero-revenue-distribution",
  "doublezero-solana-client-tools",
+ "doublezero-solana-sdk",
  "solana-sdk",
  "tokio",
 ]
@@ -2767,11 +2766,8 @@ dependencies = [
  "borsh 1.5.7",
  "bytemuck",
  "clap",
- "doublezero-passport",
- "doublezero-program-tools",
- "doublezero-revenue-distribution",
- "doublezero-sol-conversion-interface",
  "doublezero-solana-client-tools",
+ "doublezero-solana-sdk",
  "reqwest",
  "serde",
  "serde_json",
@@ -2790,6 +2786,9 @@ dependencies = [
  "doublezero-passport",
  "doublezero-program-tools",
  "doublezero-revenue-distribution",
+ "doublezero-sol-conversion-interface",
+ "doublezero-solana-client-tools",
+ "solana-sdk",
  "svm-hash",
 ]
 

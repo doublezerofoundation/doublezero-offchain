@@ -291,6 +291,14 @@ impl Wallet {
     }
 }
 
+impl std::ops::Deref for Wallet {
+    type Target = Keypair;
+
+    fn deref(&self) -> &Self::Target {
+        &self.signer
+    }
+}
+
 impl TryFrom<SolanaPayerOptions> for Wallet {
     type Error = anyhow::Error;
 
