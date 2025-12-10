@@ -51,15 +51,15 @@ pub fn try_batch_instructions_with_common_signers(
 
     let mut batches = Vec::new();
 
-    let mut current_batch = Vec::new();
-    let mut current_compute_units = 0;
+    let mut last_batch = Vec::new();
+    let mut last_compute_units = 0;
 
     while let Some((instruction, compute_units)) = instructions_and_compute_units.pop() {
-        current_batch.push(instruction);
-        current_compute_units += compute_units;
+        last_batch.push(instruction);
+        last_compute_units += compute_units;
 
         let transaction = new_transaction(
-            &current_batch,
+            &last_batch,
             signers,
             address_lookup_table_accounts,
             Default::default(),
@@ -67,30 +67,60 @@ pub fn try_batch_instructions_with_common_signers(
         .unwrap();
 
         if bincode::serialize(&transaction).unwrap().len() > transaction_size_limit {
-            let offending_instruction = current_batch.pop().unwrap();
+            let instruction = last_batch.pop().unwrap();
 
-            let mut batch = std::mem::replace(&mut current_batch, vec![offending_instruction]);
-            batch.push(ComputeBudgetInstruction::set_compute_unit_limit(
-                current_compute_units,
-            ));
-
-            // Out of paranoia, try to serialize the transaction again.
-            let transaction = new_transaction(
-                &batch,
+            let mut batch = std::mem::replace(&mut last_batch, vec![instruction]);
+            try_complete_instructions_batch(
+                &mut batch,
                 signers,
                 address_lookup_table_accounts,
-                Default::default(),
-            )
-            .unwrap();
-            ensure!(
-                bincode::serialize(&transaction).unwrap().len() <= transaction_size_limit,
-                "Transaction is too large"
-            );
+                transaction_size_limit,
+                last_compute_units,
+            )?;
 
             batches.push(batch);
-            current_compute_units = 0;
+            last_compute_units = compute_units;
         }
     }
 
+    if !last_batch.is_empty() {
+        try_complete_instructions_batch(
+            &mut last_batch,
+            signers,
+            address_lookup_table_accounts,
+            transaction_size_limit,
+            last_compute_units,
+        )?;
+
+        batches.push(last_batch);
+    }
+
     Ok(batches)
+}
+
+fn try_complete_instructions_batch(
+    batch: &mut Vec<Instruction>,
+    signers: &[&Keypair],
+    address_lookup_table_accounts: &[AddressLookupTableAccount],
+    transaction_size_limit: usize,
+    current_compute_units: u32,
+) -> Result<()> {
+    batch.push(ComputeBudgetInstruction::set_compute_unit_limit(
+        current_compute_units,
+    ));
+
+    // Out of paranoia, try to serialize the transaction again.
+    let transaction = new_transaction(
+        &batch,
+        signers,
+        address_lookup_table_accounts,
+        Default::default(),
+    )
+    .unwrap();
+    ensure!(
+        bincode::serialize(&transaction).unwrap().len() <= transaction_size_limit,
+        "Transaction is too large"
+    );
+
+    Ok(())
 }
