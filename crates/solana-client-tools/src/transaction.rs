@@ -9,7 +9,7 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 
-pub fn new_transaction(
+pub fn try_new_transaction(
     instructions: &[Instruction],
     signers: &[&Keypair],
     address_lookup_table_accounts: &[AddressLookupTableAccount],
@@ -58,7 +58,7 @@ pub fn try_batch_instructions_with_common_signers(
         last_batch.push(instruction);
         last_compute_units += compute_units;
 
-        let transaction = new_transaction(
+        let transaction = try_new_transaction(
             &last_batch,
             signers,
             address_lookup_table_accounts,
@@ -110,7 +110,7 @@ fn try_complete_instructions_batch(
     ));
 
     // Out of paranoia, try to serialize the transaction again.
-    let transaction = new_transaction(
+    let transaction = try_new_transaction(
         &batch,
         signers,
         address_lookup_table_accounts,

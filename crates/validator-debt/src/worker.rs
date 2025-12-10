@@ -6,8 +6,9 @@ use doublezero_solana_client_tools::{
     rpc::{DoubleZeroLedgerConnection, NetworkEnvironment, SolanaConnection},
 };
 use doublezero_solana_sdk::{
+    environment_2z_token_mint_key,
     revenue_distribution::{
-        self, ID,
+        self, GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
         instruction::{
             RevenueDistributionInstructionData::{self, ConfigureDistributionDebt},
             account::{
@@ -527,12 +528,8 @@ pub async fn try_initialize_distribution(
     )
     .await?;
 
-    let dz_mint_key = match network_env {
-        NetworkEnvironment::Testnet => revenue_distribution::env::development::DOUBLEZERO_MINT_KEY,
-        _ => revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY,
-    };
-
     let wallet_key = wallet.pubkey();
+    let dz_mint_key = environment_2z_token_mint_key(network_env);
 
     let initialize_distribution_ix = try_build_instruction(
         &ID,
@@ -810,6 +807,7 @@ async fn try_fetch_program_config(
     Ok((program_config_key, program_config.mucked_data))
 }
 
+// TODO: This method may need a rate limiter for account fetches.
 async fn try_write_off_distribution_debt(
     wallet: &Wallet,
     dz_ledger_connection: &DoubleZeroLedgerConnection,
@@ -817,134 +815,193 @@ async fn try_write_off_distribution_debt(
     next_dz_epoch: DoubleZeroEpoch,
     minimum_epoch_duration_to_finalize_rewards: u32,
 ) -> Result<()> {
-    println!("Trying to write off distribution debt");
+    // Track running deposit balances when we iterate through epochs.
+    let mut deposit_balances = HashMap::new();
 
-    println!("Next DZ epoch: {next_dz_epoch}");
     let rewards_dz_epoch = next_dz_epoch
         .value()
         .saturating_sub(minimum_epoch_duration_to_finalize_rewards.into())
         .saturating_add(1);
-    println!("Rewards DZ epoch: {rewards_dz_epoch}");
+    println!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
 
     let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(rewards_dz_epoch));
-    let distribution = wallet
+    let rewards_distribution = wallet
         .connection
         .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
         .await?;
 
-    if distribution.is_rewards_calculation_finalized()
-        && distribution.distributed_rewards_count == distribution.total_contributors
-    {
-        println!("Rewards already distributed for epoch {rewards_dz_epoch}");
+    if rewards_distribution.is_rewards_calculation_finalized() {
+        println!("Rewards already finalized for epoch {rewards_dz_epoch}");
         return Ok(());
     }
 
-    if distribution.solana_validator_debt_merkle_root == Default::default() {
+    if rewards_distribution.solana_validator_debt_merkle_root == Default::default() {
         println!("No debt found for epoch {rewards_dz_epoch}");
         return Ok(());
     }
 
-    if distribution.solana_validator_payments_count == distribution.total_solana_validators {
-        println!("All Solana validator debt is already processed for epoch {rewards_dz_epoch}");
-        return Ok(());
-    }
+    // Traverse backwards through epochs to write off debt.
+    //
+    // TODO: We should be able to terminate this loop early if we find that
+    // all processed debt is already accounted for. But for now, we will just
+    // iterate through all epochs.
+    for dz_epoch in (GENESIS_DZ_EPOCH_MAINNET_BETA..=rewards_dz_epoch).rev() {
+        let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
 
-    let start_index = distribution.processed_solana_validator_debt_start_index as usize;
-    let end_index = distribution.processed_solana_validator_debt_end_index as usize;
-    let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
+        let distribution = if dz_epoch == rewards_dz_epoch {
+            rewards_distribution.clone()
+        } else {
+            wallet
+                .connection
+                .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
+                .await?
+        };
 
-    let (_, computed_debt) = ledger::try_fetch_debt_record(
-        dz_ledger_connection,
-        record_accountant_key,
-        rewards_dz_epoch,
-        dz_ledger_connection.commitment(),
-    )
-    .await?;
-
-    let rent_sysvar = wallet
-        .connection
-        .try_fetch_sysvar::<solana_sdk::rent::Rent>()
-        .await?;
-
-    let dz_epoch = DoubleZeroEpoch::new(rewards_dz_epoch);
-
-    let mut instructions_and_compute_units = Vec::new();
-    let mut write_off_count = 0;
-
-    for (leaf_index, debt) in computed_debt.debts.iter().enumerate() {
-        if revenue_distribution::try_is_processed_leaf(processed_leaf_data, leaf_index).unwrap() {
+        if distribution.solana_validator_payments_count == distribution.total_solana_validators {
             continue;
         }
 
-        let node_id = &debt.node_id;
-        let (deposit_key, deposit_bump) = SolanaValidatorDeposit::find_address(node_id);
-        let deposit_account_info = wallet.connection.get_account(&deposit_key).await?;
+        let start_index = distribution.processed_solana_validator_debt_start_index as usize;
+        let end_index = distribution.processed_solana_validator_debt_end_index as usize;
+        let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
 
-        let deposit_balance =
-            doublezero_solana_client_tools::account::balance(&deposit_account_info, &rent_sysvar);
+        let (_, computed_debt) = ledger::try_fetch_debt_record(
+            dz_ledger_connection,
+            record_accountant_key,
+            dz_epoch,
+            dz_ledger_connection.commitment(),
+        )
+        .await?;
 
-        let (_, proof) = computed_debt.find_debt_proof(node_id).unwrap();
+        // First scan to check whether all are processed.
+        let mut all_processed = true;
+        for (leaf_index, _) in computed_debt.debts.iter().enumerate() {
+            if !revenue_distribution::try_is_processed_leaf(processed_leaf_data, leaf_index)
+                .unwrap()
+            {
+                all_processed = false;
+                break;
+            }
+        }
 
-        let wallet_key = wallet.pubkey();
+        if all_processed {
+            continue;
+        }
 
-        if deposit_balance >= debt.amount {
-            if deposit_account_info.data.is_empty() {
+        let rent_sysvar = wallet
+            .connection
+            .try_fetch_sysvar::<solana_sdk::rent::Rent>()
+            .await?;
+
+        let dz_epoch = DoubleZeroEpoch::new(dz_epoch);
+
+        let mut instructions_and_compute_units = Vec::new();
+        let mut pay_count = 0;
+        let mut write_off_count = 0;
+
+        for (leaf_index, debt) in computed_debt.debts.iter().enumerate() {
+            if revenue_distribution::try_is_processed_leaf(processed_leaf_data, leaf_index).unwrap()
+            {
+                continue;
+            }
+
+            let node_id = debt.node_id;
+            let (deposit_key, deposit_bump) = SolanaValidatorDeposit::find_address(&node_id);
+            let deposit_account_info = wallet.connection.get_account(&deposit_key).await?;
+
+            if !deposit_balances.contains_key(&node_id) {
+                let deposit_balance = doublezero_solana_client_tools::account::balance(
+                    &deposit_account_info,
+                    &rent_sysvar,
+                );
+                deposit_balances.insert(node_id, deposit_balance);
+                println!("Fetched deposit balance for node {node_id}: {deposit_balance}");
+            }
+
+            let deposit_balance = deposit_balances.get_mut(&node_id).unwrap();
+
+            let (_, proof) = computed_debt.find_debt_proof(&node_id).unwrap();
+
+            let wallet_key = wallet.pubkey();
+
+            if *deposit_balance >= debt.amount {
+                if deposit_account_info.data.is_empty() {
+                    let instruction = try_build_instruction(
+                        &ID,
+                        InitializeSolanaValidatorDepositAccounts::new(&wallet_key, &node_id),
+                        &RevenueDistributionInstructionData::InitializeSolanaValidatorDeposit(
+                            node_id,
+                        ),
+                    )
+                    .unwrap();
+
+                    let compute_units = Wallet::compute_units_for_bump_seed(deposit_bump);
+                    instructions_and_compute_units.push((instruction, compute_units));
+                }
+
+                let compute_units =
+                    revenue_distribution::compute_unit::pay_solana_validator_debt(&proof);
+
                 let instruction = try_build_instruction(
                     &ID,
-                    InitializeSolanaValidatorDepositAccounts::new(&wallet_key, node_id),
-                    &RevenueDistributionInstructionData::InitializeSolanaValidatorDeposit(*node_id),
+                    PaySolanaValidatorDebtAccounts::new(dz_epoch, &node_id),
+                    &RevenueDistributionInstructionData::PaySolanaValidatorDebt {
+                        amount: debt.amount,
+                        proof,
+                    },
                 )
                 .unwrap();
 
-                let compute_units = Wallet::compute_units_for_bump_seed(deposit_bump);
                 instructions_and_compute_units.push((instruction, compute_units));
-            }
 
-            let compute_units =
-                revenue_distribution::compute_unit::pay_solana_validator_debt(&proof);
+                *deposit_balance -= debt.amount;
+                println!("Updated deposit balance for node {node_id} to {deposit_balance}");
 
-            let instruction = try_build_instruction(
-                &ID,
-                PaySolanaValidatorDebtAccounts::new(dz_epoch, node_id),
-                &RevenueDistributionInstructionData::PaySolanaValidatorDebt {
-                    amount: debt.amount,
-                    proof,
-                },
-            )
-            .unwrap();
+                pay_count += 1;
+            } else {
+                if !distribution.is_solana_validator_debt_write_off_enabled()
+                    && write_off_count == 0
+                {
+                    let instruction = try_build_instruction(
+                        &ID,
+                        EnableSolanaValidatorDebtWriteOffAccounts::new(dz_epoch, &wallet_key),
+                        &RevenueDistributionInstructionData::EnableSolanaValidatorDebtWriteOff,
+                    )
+                    .unwrap();
 
-            instructions_and_compute_units.push((instruction, compute_units));
-        } else {
-            if !distribution.is_solana_validator_debt_write_off_enabled() && write_off_count == 0 {
+                    instructions_and_compute_units.push((instruction, 5_000));
+                }
+
+                let compute_units =
+                    revenue_distribution::compute_unit::write_off_solana_validator_debt(&proof);
+
                 let instruction = try_build_instruction(
                     &ID,
-                    EnableSolanaValidatorDebtWriteOffAccounts::new(dz_epoch, &wallet_key),
-                    &RevenueDistributionInstructionData::EnableSolanaValidatorDebtWriteOff,
+                    WriteOffSolanaValidatorDebtAccounts::new(
+                        &wallet_key,
+                        dz_epoch,
+                        &node_id,
+                        DoubleZeroEpoch::new(rewards_dz_epoch),
+                    ),
+                    &RevenueDistributionInstructionData::WriteOffSolanaValidatorDebt {
+                        amount: debt.amount,
+                        proof,
+                    },
                 )
                 .unwrap();
 
-                instructions_and_compute_units.push((instruction, 5_000));
+                instructions_and_compute_units.push((instruction, compute_units));
                 write_off_count += 1;
-            }
+            };
+        }
 
-            let compute_units =
-                revenue_distribution::compute_unit::write_off_solana_validator_debt(&proof);
+        if pay_count == 0 && write_off_count == 0 {
+            continue;
+        }
 
-            let instruction = try_build_instruction(
-                &ID,
-                WriteOffSolanaValidatorDebtAccounts::new(&wallet_key, dz_epoch, node_id, dz_epoch),
-                &RevenueDistributionInstructionData::WriteOffSolanaValidatorDebt {
-                    amount: debt.amount,
-                    proof,
-                },
-            )
-            .unwrap();
+        println!("Epoch {dz_epoch} summary: {pay_count} payments, {write_off_count} write-offs");
 
-            instructions_and_compute_units.push((instruction, compute_units));
-        };
-    }
-
-    let instruction_batches =
+        let instruction_batches =
         doublezero_solana_client_tools::transaction::try_batch_instructions_with_common_signers(
             instructions_and_compute_units,
             &[wallet],
@@ -952,14 +1009,15 @@ async fn try_write_off_distribution_debt(
             false, // allow_compute_price_instruction
         )?;
 
-    for instructions in instruction_batches {
-        let transaction = wallet.new_transaction(&instructions).await?;
-        let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
+        for instructions in instruction_batches {
+            let transaction = wallet.new_transaction(&instructions).await?;
+            let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
-        if let TransactionOutcome::Executed(tx_sig) = tx_sig {
-            println!("Write off distribution debt: {tx_sig}");
+            if let TransactionOutcome::Executed(tx_sig) = tx_sig {
+                println!("Process Solana validator debt for epoch {dz_epoch}: {tx_sig}");
 
-            wallet.print_verbose_output(&[tx_sig]).await?;
+                wallet.print_verbose_output(&[tx_sig]).await?;
+            }
         }
     }
 
