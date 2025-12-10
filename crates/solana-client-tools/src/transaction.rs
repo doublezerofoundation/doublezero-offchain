@@ -32,6 +32,8 @@ pub fn try_batch_instructions_with_common_signers(
     address_lookup_table_accounts: &[AddressLookupTableAccount],
     allow_compute_price_instruction: bool,
 ) -> Result<Vec<Vec<Instruction>>> {
+    const TRANSACTION_CU_BUFFER: u32 = 5_000;
+
     // These adjustments may be too conservative. But we want to err on the side
     // of caution to avoid an accidental RPC revert with a transaction being
     // too large.
@@ -52,7 +54,7 @@ pub fn try_batch_instructions_with_common_signers(
     let mut batches = Vec::new();
 
     let mut last_batch = Vec::new();
-    let mut last_compute_units = 0;
+    let mut last_compute_units = TRANSACTION_CU_BUFFER;
 
     while let Some((instruction, compute_units)) = instructions_and_compute_units.pop() {
         last_batch.push(instruction);
@@ -68,6 +70,7 @@ pub fn try_batch_instructions_with_common_signers(
 
         if bincode::serialize(&transaction).unwrap().len() > transaction_size_limit {
             let instruction = last_batch.pop().unwrap();
+            let batch_compute_units = last_compute_units - compute_units;
 
             let mut batch = std::mem::replace(&mut last_batch, vec![instruction]);
             try_complete_instructions_batch(
@@ -75,11 +78,11 @@ pub fn try_batch_instructions_with_common_signers(
                 signers,
                 address_lookup_table_accounts,
                 transaction_size_limit,
-                last_compute_units,
+                batch_compute_units,
             )?;
 
             batches.push(batch);
-            last_compute_units = compute_units;
+            last_compute_units = TRANSACTION_CU_BUFFER + compute_units;
         }
     }
 
