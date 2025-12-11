@@ -327,7 +327,7 @@ async fn try_print_distribution_summary_table(
                 },
             },
             DistributionSummaryTableRow {
-                field: "Convertible SOL debt",
+                field: "SOL to be exchanged",
                 value: format!(
                     "{:.9} SOL",
                     distribution.checked_total_sol_debt().unwrap() as f64 / LAMPORTS_PER_SOL as f64,
