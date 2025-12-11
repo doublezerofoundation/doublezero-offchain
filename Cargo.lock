@@ -2765,7 +2765,6 @@ dependencies = [
  "clap",
  "doublezero-solana-client-tools",
  "doublezero-solana-sdk",
- "reqwest",
  "serde",
  "serde_json",
  "solana-account-decoder-client-types",

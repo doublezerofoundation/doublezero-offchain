@@ -21,9 +21,10 @@ pub struct DoubleZeroLedgerConnectionOptions {
     pub dz_ledger_url: String,
 }
 
+/// If specified, the DoubleZero Ledger environment will not be the same as the
+/// Solana connection's. This argument is useful for local development.
 #[derive(Debug, Args, Clone)]
 pub struct DoubleZeroLedgerEnvironmentOverride {
-    /// DoubleZero Ledger environment override.
     #[arg(hide = true, long)]
     pub dz_env: Option<NetworkEnvironment>,
 }
