@@ -79,7 +79,7 @@ pub async fn finalize_distribution(
         .await?;
 
     if let Some(finalized_sig) = transaction_signature {
-        println!("finalized distribution tx: {finalized_sig:?}");
+        tracing::info!("finalized distribution tx: {finalized_sig:?}");
         slack_notifier::validator_debt::post_finalized_distribution_to_slack(
             finalized_sig,
             dz_epoch,
@@ -223,8 +223,9 @@ pub async fn calculate_distribution(
         )
         .await?;
 
+        // TODO: Do we want force as an option?
         if transaction.force {
-            println!(
+            tracing::warn!(
                 "No non-overlapping solana epoch found. Zeroing out debt for DZ epoch {dz_epoch}"
             );
             transaction
@@ -246,10 +247,12 @@ pub async fn calculate_distribution(
     let solana_epoch = if solana_epoch_from_first_dz_epoch_block
         == solana_epoch_from_last_dz_epoch_block
     {
-        println!("DZ epoch {dz_epoch} contains only {solana_epoch_from_first_dz_epoch_block} only");
+        tracing::info!(
+            "DZ epoch {dz_epoch} contains only {solana_epoch_from_first_dz_epoch_block} only"
+        );
         solana_epoch_from_first_dz_epoch_block
     } else {
-        println!(
+        tracing::info!(
             "DZ epoch {dz_epoch} overlaps {solana_epoch_from_last_dz_epoch_block} and {solana_epoch_from_first_dz_epoch_block}"
         );
         solana_epoch_from_last_dz_epoch_block
@@ -283,7 +286,7 @@ pub async fn calculate_distribution(
             .await?;
 
     // gather rewards into debts for all validators
-    println!("Computing solana validator debt");
+    tracing::info!("Computing solana validator debt");
     let computed_solana_validator_debt_vec: Vec<ComputedSolanaValidatorDebt> = validator_rewards
         .rewards
         .iter()
@@ -329,7 +332,8 @@ pub async fn calculate_distribution(
     };
 
     if transaction.dry_run {
-        println!("posting to ledger is not supported with `--dry-run`");
+        // TODO: Should this be an error?
+        tracing::warn!("Posting to ledger is not supported with `--dry-run`");
     } else {
         create_or_validate_ledger_record(
             solana_debt_calculator,
@@ -421,7 +425,7 @@ async fn write_transaction(
         .map(|debt| debt.amount)
         .sum();
 
-    println!("Writing total debt {total_debt} to solana for {total_validators} validators");
+    tracing::info!("Writing total debt {total_debt} to solana for {total_validators} validators");
 
     let debt = ConfigureDistributionDebt {
         total_validators,
@@ -438,7 +442,7 @@ async fn write_transaction(
         .await?;
 
     if let Some(tx) = tx_submitted_sig {
-        println!("submitted distribution tx: {tx:?}");
+        tracing::info!("Submitted distribution tx: {tx:?}");
         metrics::gauge!("doublezero_validator_debt_total_debt", "dz_epoch" => dz_epoch.to_string())
             .set(total_debt as f64);
         metrics::gauge!("doublezero_validator_debt_total_validators", "dz_epoch" => dz_epoch.to_string()).set(total_validators as f64);
@@ -507,7 +511,7 @@ pub async fn try_initialize_distribution(
         // Ensure that the epoch from the DoubleZero Ledger network equals
         // the next one known by the Revenue Distribution program.
         if next_dz_epoch.value() != expected_completed_dz_epoch {
-            log_warn!(
+            tracing::warn!(
                 "Last completed DZ epoch {expected_completed_dz_epoch} != program's epoch {next_dz_epoch}"
             );
             return Ok(());
@@ -679,8 +683,8 @@ async fn create_or_validate_ledger_record(
                     ],
                 )
                 .await?;
-                println!(
-                    "Warning: DZ Ledger record does not match the new computed solana validator debt and has been overwritten"
+                tracing::warn!(
+                    "DZ Ledger record does not match the new computed solana validator debt and has been overwritten"
                 );
             } else {
                 ensure!(
@@ -689,14 +693,14 @@ async fn create_or_validate_ledger_record(
                 )
             };
 
-            println!(
-                "computed debt and deserialized ledger record data are identical, proceeding to write transaction"
+            tracing::warn!(
+                "Computed debt and deserialized ledger record data are identical, proceeding to write transaction"
             );
             Ok(existing_computed_debt)
         }
         Err(_err) => {
             // create record
-            println!("creating a new record on DZ ledger");
+            tracing::info!("Creating a new record on DZ ledger");
             ledger::create_record_on_ledger(
                 solana_debt_calculator.ledger_rpc_client(),
                 recent_blockhash,
@@ -788,9 +792,7 @@ async fn try_initialize_missing_deposit_accounts(
         let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
         if let TransactionOutcome::Executed(tx_sig) = tx_sig {
-            println!("Initialize Solana validator deposit: {tx_sig}");
-
-            wallet.print_verbose_output(&[tx_sig]).await?;
+            tracing::info!("Initialize Solana validator deposits: {tx_sig}");
         }
     }
 
@@ -824,7 +826,7 @@ async fn try_write_off_distribution_debt(
         .value()
         .saturating_sub(minimum_epoch_duration_to_finalize_rewards.into())
         .saturating_add(1);
-    log_info!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
+    tracing::info!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
 
     let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(rewards_dz_epoch));
     let rewards_distribution = wallet
@@ -833,12 +835,12 @@ async fn try_write_off_distribution_debt(
         .await?;
 
     if rewards_distribution.is_rewards_calculation_finalized() {
-        log_info!("Rewards already finalized for epoch {rewards_dz_epoch}");
+        tracing::info!("Rewards already finalized for epoch {rewards_dz_epoch}");
         return Ok(());
     }
 
     if rewards_distribution.solana_validator_debt_merkle_root == Default::default() {
-        log_info!("No debt found for epoch {rewards_dz_epoch}");
+        tracing::info!("No debt found for epoch {rewards_dz_epoch}");
         return Ok(());
     }
 
@@ -919,7 +921,7 @@ async fn try_write_off_distribution_debt(
                     &rent_sysvar,
                 );
                 entry.insert(deposit_balance);
-                log_info!("Fetched deposit balance for node {node_id}: {deposit_balance}");
+                tracing::info!("Fetched deposit balance for node {node_id}: {deposit_balance}");
             }
 
             let deposit_balance = deposit_balances.get_mut(&node_id).unwrap();
@@ -959,7 +961,7 @@ async fn try_write_off_distribution_debt(
                 instructions_and_compute_units.push((instruction, compute_units));
 
                 *deposit_balance -= debt.amount;
-                log_info!("Updated deposit balance for node {node_id} to {deposit_balance}");
+                tracing::info!("Updated deposit balance for node {node_id} to {deposit_balance}");
 
                 pay_count += 1;
             } else {
@@ -1003,7 +1005,9 @@ async fn try_write_off_distribution_debt(
             continue;
         }
 
-        log_info!("Epoch {dz_epoch} summary: {pay_count} payments, {write_off_count} write-offs");
+        tracing::info!(
+            "Epoch {dz_epoch} summary: {pay_count} payments, {write_off_count} write-offs"
+        );
 
         let instruction_batches =
         doublezero_solana_client_tools::transaction::try_batch_instructions_with_common_signers(
@@ -1018,7 +1022,7 @@ async fn try_write_off_distribution_debt(
             let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
             if let TransactionOutcome::Executed(tx_sig) = tx_sig {
-                log_info!("Process Solana validator debt for epoch {dz_epoch}: {tx_sig}");
+                tracing::info!("Process Solana validator debt for epoch {dz_epoch}: {tx_sig}");
 
                 wallet.print_verbose_output(&[tx_sig]).await?;
             }
