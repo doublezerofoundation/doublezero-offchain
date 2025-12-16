@@ -118,8 +118,7 @@ fn try_complete_instructions_batch(
         signers,
         address_lookup_table_accounts,
         Default::default(),
-    )
-    .unwrap();
+    )?;
     ensure!(
         bincode::serialize(&transaction).unwrap().len() <= transaction_size_limit,
         "Transaction is too large"
