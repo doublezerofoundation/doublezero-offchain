@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use doublezero_solana_client_tools::{
     payer::{Wallet, try_load_keypair},
     rpc::{DoubleZeroLedgerConnection, SolanaConnection},
 };
+use doublezero_solana_sdk::revenue_distribution::fetch::try_fetch_config;
 use doublezero_solana_validator_debt::{
     rpc::SolanaValidatorDebtConnectionOptions,
     solana_debt_calculator::SolanaDebtCalculator,
@@ -74,28 +77,11 @@ pub fn pay_debt(
         .block_on(async { async_pay_debt(dz_epoch, ledger_rpc, solana_rpc).await })
         .map_err(display_to_nif_error)?;
 
-    let total_validators = tx_results.collection_results.len();
-
-    let total_debt: u64 = tx_results
-        .collection_results
-        .iter()
-        .map(|tx| tx.amount)
-        .sum();
-
-    let insufficient_funds_count = tx_results.insufficient_funds.len();
-
-    let already_paid: u64 = tx_results.already_paid.iter().map(|tx| tx.amount).sum();
-    let successful_transactions: u64 = tx_results
-        .successful_transactions
-        .iter()
-        .map(|tx| tx.amount)
-        .sum();
-    let total_paid = already_paid + successful_transactions;
     let debt_collection = DebtCollection {
-        total_debt,
-        total_paid,
-        total_validators,
-        insufficient_funds_count,
+        total_debt: tx_results.total_debt,
+        total_paid: tx_results.total_paid,
+        total_validators: tx_results.total_validators,
+        insufficient_funds_count: tx_results.insufficient_funds_count,
     };
 
     Ok(debt_collection)
@@ -126,6 +112,29 @@ pub fn initialize_distribution(solana_rpc: String) -> Result<(), NifError> {
         })
         .map_err(display_to_nif_error)?;
 
+    Ok(())
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn pay_debt_for_all_epochs(ledger_rpc: String, solana_rpc: String) -> Result<(), NifError> {
+    let ledger_rpc_client = DoubleZeroLedgerConnection::new(ledger_rpc);
+
+    // TODO: collect debt collection results for all epochs and put into a single slack message
+    Runtime::new()
+        .map_err(display_to_nif_error)?
+        .block_on(async {
+            let wallet = Wallet {
+                connection: SolanaConnection::new(solana_rpc),
+                signer: try_load_keypair(None)?,
+                compute_unit_price_ix: None,
+                verbose: false,
+                fee_payer: None,
+                dry_run: false,
+            };
+
+            worker::pay_all_solana_validator_debt(wallet, ledger_rpc_client).await
+        })
+        .map_err(display_to_nif_error)?;
     Ok(())
 }
 
@@ -218,7 +227,10 @@ async fn async_pay_debt(
         dry_run: false,
     };
 
-    let tx_results = worker::pay_solana_validator_debt(wallet, ledger_rpc_client, dz_epoch).await?;
+    let (_, config) = try_fetch_config(&wallet.connection).await?;
+
+    let tx_results =
+        worker::pay_solana_validator_debt(&wallet, &ledger_rpc_client, dz_epoch, &config).await?;
 
     worker::post_debt_collection_to_slack(tx_results.clone(), false, None).await?;
 
@@ -237,8 +249,9 @@ async fn async_calculate_distribution(
     };
     let solana_debt_calculator: SolanaDebtCalculator =
         SolanaDebtCalculator::try_from(connection_options)?;
-
-    let transaction = Transaction::new(try_load_keypair(None)?, false, false);
+    let keypair = try_load_keypair(None)?;
+    let arc_keypair = Arc::new(keypair);
+    let transaction = Transaction::new(arc_keypair, false, false);
 
     let write_summary =
         worker::calculate_distribution(&solana_debt_calculator, transaction, dz_epoch, false)
@@ -271,8 +284,9 @@ async fn async_finalize_distribution(
     };
     let solana_debt_calculator: SolanaDebtCalculator =
         SolanaDebtCalculator::try_from(connection_options)?;
-
-    let transaction = Transaction::new(try_load_keypair(None)?, false, false);
+    let keypair = try_load_keypair(None)?;
+    let arc_keypair = Arc::new(keypair);
+    let transaction = Transaction::new(arc_keypair, false, false);
 
     worker::finalize_distribution(&solana_debt_calculator, transaction, dz_epoch).await?;
     Ok(())

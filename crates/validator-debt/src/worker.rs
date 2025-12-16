@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use anyhow::{Context, Result, bail, ensure};
 use doublezero_solana_client_tools::{
@@ -23,6 +23,7 @@ use doublezero_solana_sdk::{
     },
     try_build_instruction,
 };
+use futures::{StreamExt, TryStreamExt, stream};
 use leaky_bucket::RateLimiter;
 use serde::Serialize;
 use slack_notifier;
@@ -41,6 +42,8 @@ use crate::{
     transaction::{DebtCollectionResults, Transaction},
     validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
 };
+
+const MAX_CONCURRENT_CONNECTIONS: usize = 2;
 
 #[derive(Debug, Default, Serialize)]
 pub struct WriteSummary {
@@ -386,26 +389,62 @@ pub async fn calculate_distribution(
     Ok(write_summary)
 }
 
-pub async fn pay_solana_validator_debt(
+pub async fn pay_all_solana_validator_debt(
     wallet: Wallet,
     dz_ledger: DoubleZeroLedgerConnection,
-    dz_epoch: u64,
-) -> Result<DebtCollectionResults> {
+) -> Result<HashMap<u64, DebtCollectionResults>> {
     let (_, config) = try_fetch_config(&wallet.connection).await?;
+    let dz_epoch_range = Vec::from_iter(
+        GENESIS_DZ_EPOCH_MAINNET_BETA..(config.last_completed_epoch().unwrap().value()),
+    );
 
+    let tasks: HashMap<u64, DebtCollectionResults> = stream::iter(dz_epoch_range)
+        .map(|dz_epoch| {
+            let wallet_ref = &wallet;
+            let ledger_ref = &dz_ledger;
+            let config_ref = &config;
+
+            async move {
+                let result =
+                    pay_solana_validator_debt(wallet_ref, ledger_ref, dz_epoch, config_ref).await?;
+                println!("Finished debt collection for epoch {dz_epoch}");
+                Ok::<_, anyhow::Error>((dz_epoch, result))
+            }
+        })
+        .buffer_unordered(MAX_CONCURRENT_CONNECTIONS)
+        .try_collect()
+        .await?;
+
+    Ok(tasks)
+}
+
+pub async fn pay_solana_validator_debt(
+    wallet: &Wallet,
+    dz_ledger: &DoubleZeroLedgerConnection,
+    dz_epoch: u64,
+    config: &ProgramConfig,
+) -> Result<DebtCollectionResults> {
     let (_, computed_debt) = ledger::try_fetch_debt_record(
-        &dz_ledger,
+        dz_ledger,
         &config.debt_accountant_key,
         dz_epoch,
         dz_ledger.commitment(),
     )
     .await?;
-    try_initialize_missing_deposit_accounts(&wallet, &computed_debt).await?;
 
-    let transaction = Transaction::new(wallet.signer, wallet.dry_run, false);
+    let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
+    let distribution = wallet
+        .connection
+        .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
+        .await?;
+
+    try_initialize_missing_deposit_accounts(wallet, &computed_debt).await?;
+
+    let arc_signer = Arc::new(wallet.signer.insecure_clone());
+    let transaction = Transaction::new(arc_signer, wallet.dry_run, false);
 
     let tx_results = transaction
-        .pay_solana_validator_debt(&wallet.connection, computed_debt, dz_epoch)
+        .pay_solana_validator_debt(&wallet.connection, computed_debt, dz_epoch, &distribution)
         .await?;
     Ok(tx_results)
 }
@@ -599,9 +638,10 @@ pub async fn post_debt_collection_to_slack(
         "Already Paid".to_string(),
     ];
 
-    let total_attempted_transactions_count = debt_collection_results.collection_results.len();
-    let successful_transactions_count = debt_collection_results.successful_transactions.len();
-    let already_paid_count = debt_collection_results.already_paid.len();
+    let total_attempted_transactions_count: u64 = debt_collection_results.total_validators as u64;
+    let successful_transactions_count: u64 =
+        debt_collection_results.successful_transactions_count as u64;
+    let already_paid_count: u64 = debt_collection_results.already_paid_count as u64;
 
     let percentage_paid: f64 = if total_attempted_transactions_count == 0 {
         0.0
@@ -610,32 +650,14 @@ pub async fn post_debt_collection_to_slack(
             / total_attempted_transactions_count as f64
     };
 
-    // the total amount paid for an epoch is `total_collected_this_run` + `already_paid`
-    let already_paid_total: u64 = debt_collection_results
-        .already_paid
-        .iter()
-        .map(|ap| ap.amount)
-        .sum();
-    let total_collected_this_run: u64 = debt_collection_results
-        .successful_transactions
-        .iter()
-        .map(|ap| ap.amount)
-        .sum();
-
-    let total_paid = already_paid_total + total_collected_this_run;
-    let total_debt: u64 = debt_collection_results
-        .collection_results
-        .iter()
-        .map(|cr| cr.amount)
-        .sum();
     let table_values = vec![
         debt_collection_results.dz_epoch.to_string(),
-        total_paid.to_string(),
-        total_debt.to_string(),
+        debt_collection_results.total_paid.to_string(),
+        debt_collection_results.total_debt.to_string(),
         format!("{:.2}%", percentage_paid * 100.0),
         total_attempted_transactions_count.to_string(),
         successful_transactions_count.to_string(),
-        debt_collection_results.insufficient_funds.len().to_string(),
+        debt_collection_results.insufficient_funds_count.to_string(),
         already_paid_count.to_string(),
     ];
 

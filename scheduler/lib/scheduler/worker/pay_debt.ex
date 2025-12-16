@@ -44,7 +44,7 @@ defmodule Scheduler.Worker.PayDebt do
             state.total_paid
           )
 
-          {:stop, :shutdown, state}
+          {:stop, :normal, state}
         else
           Logger.error(
             "scheduler encountered unexpected error at epoch #{state.current_epoch}: #{inspect(error)}"
