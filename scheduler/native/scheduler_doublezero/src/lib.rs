@@ -11,6 +11,7 @@ use doublezero_solana_validator_debt::{
 };
 use rustler::{Error as NifError, NifStruct};
 use tokio::runtime::Runtime;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(NifStruct)]
 #[module = "Scheduler.ValidatorDebt.DebtCollection"]
@@ -28,6 +29,21 @@ pub struct Debt {
     pub amount: u64,
     pub result: Option<String>,
     pub success: bool,
+}
+
+#[rustler::nif]
+pub fn initialize_tracing_subscriber() -> Result<(), NifError> {
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_thread_names(false),
+        )
+        .init();
+
+    Ok(())
 }
 
 #[rustler::nif]

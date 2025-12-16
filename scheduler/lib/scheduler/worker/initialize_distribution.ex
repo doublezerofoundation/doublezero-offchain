@@ -20,8 +20,8 @@ defmodule Scheduler.Worker.InitializeDistribution do
       {:error, error} ->
         Logger.error("initialize_distribution: received error: #{inspect(error)}")
 
-      {:ok, msg} ->
-        Logger.info("initialize_distribution: completed with msg: #{msg}")
+      {} ->
+        Logger.info("initialize_distribution: completed")
     end
 
     {:stop, :shutdown, state}
