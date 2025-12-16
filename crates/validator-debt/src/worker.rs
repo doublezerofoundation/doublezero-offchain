@@ -921,7 +921,7 @@ async fn try_write_off_distribution_debt(
                     &rent_sysvar,
                 );
                 entry.insert(deposit_balance);
-                tracing::info!("Fetched deposit balance for node {node_id}: {deposit_balance}");
+                tracing::debug!("Fetched deposit balance for node {node_id}: {deposit_balance}");
             }
 
             let deposit_balance = deposit_balances.get_mut(&node_id).unwrap();
@@ -961,7 +961,7 @@ async fn try_write_off_distribution_debt(
                 instructions_and_compute_units.push((instruction, compute_units));
 
                 *deposit_balance -= debt.amount;
-                tracing::info!("Updated deposit balance for node {node_id} to {deposit_balance}");
+                tracing::debug!("Updated deposit balance for node {node_id} to {deposit_balance}");
 
                 pay_count += 1;
             } else {
