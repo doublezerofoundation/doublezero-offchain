@@ -458,6 +458,7 @@ pub async fn try_initialize_distribution(
     dz_env: Option<NetworkEnvironment>,
     bypass_dz_epoch_check: bool,
     record_accountant_key: Option<Pubkey>,
+    enable_debt_write_off: bool,
 ) -> Result<()> {
     let network_env = wallet.connection.try_network_environment().await?;
 
@@ -522,17 +523,21 @@ pub async fn try_initialize_distribution(
         .checked_minimum_epoch_duration_to_finalize_rewards()
         .context("Minimum epoch duration to finalize rewards not set")?;
 
-    // Try to write off distribution debt for the distribution that will have
-    // rewards distributed to network contributors. If rewards were already
-    // distributed or all debt is already accounted for, this is a no-op.
-    try_write_off_distribution_debt(
-        &wallet,
-        &dz_connection,
-        &record_accountant_key,
-        next_dz_epoch,
-        minimum_epoch_duration_to_finalize_rewards,
-    )
-    .await?;
+    // TODO: Remove when the accountant should take advantage of this new
+    // feature.
+    if enable_debt_write_off {
+        // Try to write off distribution debt for the distribution that will have
+        // rewards distributed to network contributors. If rewards were already
+        // distributed or all debt is already accounted for, this is a no-op.
+        try_write_off_distribution_debt(
+            &wallet,
+            &dz_connection,
+            &record_accountant_key,
+            next_dz_epoch,
+            minimum_epoch_duration_to_finalize_rewards,
+        )
+        .await?;
+    }
 
     let wallet_key = wallet.pubkey();
     let dz_mint_key = environment_2z_token_mint_key(network_env);
