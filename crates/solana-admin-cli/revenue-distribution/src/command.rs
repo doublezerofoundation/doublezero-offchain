@@ -4,7 +4,7 @@ use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutco
 use doublezero_solana_sdk::{
     environment_2z_token_mint_key, get_program_data_address,
     revenue_distribution::{
-        GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
+        ID,
         instruction::{
             ProgramConfiguration, ProgramFlagConfiguration, RevenueDistributionInstructionData,
             account::{
@@ -13,8 +13,7 @@ use doublezero_solana_sdk::{
                 InitializeSwapDestinationAccounts, SetAdminAccounts, SetRewardsManagerAccounts,
             },
         },
-        state::{self, ContributorRewards, Distribution, Journal, ProgramConfig},
-        types::DoubleZeroEpoch,
+        state::{self, ContributorRewards, Journal, ProgramConfig},
     },
     try_build_instruction,
 };
