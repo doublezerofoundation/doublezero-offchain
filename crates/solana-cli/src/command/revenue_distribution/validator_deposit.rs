@@ -10,6 +10,7 @@ use doublezero_solana_sdk::{
     NetworkEnvironment,
     revenue_distribution::{
         GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
+        fetch::try_fetch_config,
         instruction::{
             RevenueDistributionInstructionData, account::InitializeSolanaValidatorDepositAccounts,
         },
@@ -265,10 +266,9 @@ async fn try_compute_outstanding_debt(
     dz_env_override: Option<NetworkEnvironment>,
     debt_accountant_key: Option<&Pubkey>,
 ) -> Result<u64> {
-    let (_, config) = super::try_fetch_program_config(solana_connection).await?;
+    let (_, config) = try_fetch_config(solana_connection).await?;
     let last_dz_epoch = config
-        .next_completed_dz_epoch
-        .checked_sub_duration(1)
+        .last_completed_epoch()
         .unwrap_or(DoubleZeroEpoch::new(GENESIS_DZ_EPOCH_MAINNET_BETA))
         .value();
 

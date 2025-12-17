@@ -11,14 +11,13 @@ use doublezero_solana_client_tools::{
 };
 use doublezero_solana_sdk::revenue_distribution::{
     GENESIS_DZ_EPOCH_MAINNET_BETA,
+    fetch::try_fetch_config,
     state::{Distribution, SolanaValidatorDeposit},
     try_is_processed_leaf,
     types::DoubleZeroEpoch,
 };
 use doublezero_solana_validator_debt::validator_debt::ComputedSolanaValidatorDebts;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
-
-use crate::command::revenue_distribution::try_fetch_program_config;
 
 #[derive(Debug, Clone, PartialEq, Eq, ValueEnum)]
 pub enum ValidatorDebtsViewMode {
@@ -74,7 +73,7 @@ impl ValidatorDebtsCommand {
 
         let solana_connection = SolanaConnection::from(solana_connection_options);
 
-        let (_, config) = try_fetch_program_config(&solana_connection).await?;
+        let (_, config) = try_fetch_config(&solana_connection).await?;
         let last_dz_epoch = config.next_completed_dz_epoch.value().saturating_sub(1);
 
         // Limit to either the last 100 epochs or the default (first) epoch.
