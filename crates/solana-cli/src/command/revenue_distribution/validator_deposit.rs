@@ -1,19 +1,25 @@
-use anyhow::{Result, bail};
+use anyhow::{Result, ensure};
 use clap::Args;
 use doublezero_solana_client_tools::{
+    account::{record::BorshRecordAccountData, zero_copy::ZeroCopyAccountOwnedData},
     instruction::take_instruction,
     payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
+    rpc::{DoubleZeroLedgerConnection, DoubleZeroLedgerEnvironmentOverride, SolanaConnection},
 };
 use doublezero_solana_sdk::{
+    NetworkEnvironment,
     revenue_distribution::{
-        ID,
+        GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
         instruction::{
             RevenueDistributionInstructionData, account::InitializeSolanaValidatorDepositAccounts,
         },
-        state::SolanaValidatorDeposit,
+        state::{Distribution, SolanaValidatorDeposit},
+        try_is_processed_leaf,
+        types::DoubleZeroEpoch,
     },
     try_build_instruction,
 };
+use doublezero_solana_validator_debt::validator_debt::ComputedSolanaValidatorDebts;
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 
 use crate::command::{
@@ -37,6 +43,11 @@ pub struct ValidatorDepositCommand {
     #[arg(long, value_name = "SOL")]
     fund: Option<String>,
 
+    /// Fund the Solana validator deposit account with outstanding debt. This
+    /// argument cannot be used with `--fund`.
+    #[arg(long)]
+    fund_outstanding_debt: bool,
+
     /// Fund with 2Z limited by specified conversion rate for 2Z -> SOL.
     #[arg(long, value_name = "PRICE_LIMIT")]
     convert_2z_limit_price: Option<String>,
@@ -48,17 +59,26 @@ pub struct ValidatorDepositCommand {
 
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
+
+    #[arg(hide = true, long)]
+    debt_accountant: Option<Pubkey>,
+
+    #[command(flatten)]
+    dz_env: DoubleZeroLedgerEnvironmentOverride,
 }
 
 impl ValidatorDepositCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let ValidatorDepositCommand {
             node_id,
-            initialize,
-            fund,
+            initialize: mut should_initialize,
+            fund: fund_amount_str,
+            fund_outstanding_debt: should_fund_outstanding_debt,
             convert_2z_limit_price: convert_2z_limit_price_str,
             source_2z_account: source_2z_account_key,
             solana_payer_options,
+            debt_accountant: debt_accountant_key,
+            dz_env,
         } = self;
 
         let wallet = Wallet::try_from(solana_payer_options)?;
@@ -67,25 +87,50 @@ impl ValidatorDepositCommand {
         // First check if the Solana validator deposit is already initialized.
         let (deposit_key, deposit, mut deposit_balance) =
             super::try_fetch_solana_validator_deposit(&wallet.connection, &node_id).await?;
+        ensure!(
+            !should_initialize || deposit.is_none(),
+            "Solana validator deposit already initialized"
+        );
 
-        if initialize && deposit.is_some() {
-            bail!("Solana validator deposit already initialized");
+        // If specified, fund any outstanding debt. Otherwise, use the specified
+        // fund amount.
+        let fund_lamports = if should_fund_outstanding_debt {
+            ensure!(
+                fund_amount_str.is_none(),
+                "Cannot use --fund and --fund-outstanding-debt together"
+            );
+
+            let outstanding_debt_amount = try_compute_outstanding_debt(
+                &wallet.connection,
+                &node_id,
+                deposit_balance,
+                dz_env.dz_env,
+                debt_accountant_key.as_ref(),
+            )
+            .await?;
+
+            if outstanding_debt_amount == 0 {
+                println!("No outstanding debt found. Nothing to do");
+                return Ok(());
+            }
+
+            outstanding_debt_amount
         }
-
         // Parse fund amount from SOL string (representing 9 decimal places at
         // most) to lamports.
-        let fund_lamports = match fund {
-            Some(fund) => crate::utils::parse_sol_amount_to_lamports(fund)?,
-            None => 0,
+        else if let Some(fund_str) = fund_amount_str {
+            crate::utils::parse_sol_amount_to_lamports(fund_str)?
+        } else {
+            0
         };
 
         // Ensure that we initialize if it does not exist and we are funding.
-        let should_initialize = deposit.is_none() && fund_lamports != 0;
+        should_initialize |= deposit.is_none() && fund_lamports != 0;
 
         let mut instructions = vec![];
         let mut compute_unit_limit = 5_000;
 
-        let and_initialized_str = if initialize || should_initialize {
+        if should_initialize {
             let initialize_solana_validator_deposit_ix = try_build_instruction(
                 &ID,
                 InitializeSolanaValidatorDepositAccounts::new(&wallet_key, &node_id),
@@ -163,9 +208,10 @@ impl ValidatorDepositCommand {
             compute_unit_limit += 5_000;
         }
 
-        if instructions.is_empty() {
-            bail!("Nothing to do. Please specify `--initialize` or `--fund`");
-        }
+        ensure!(
+            !instructions.is_empty(),
+            "Please specify `--initialize`, `--fund-outstanding-debt` or `--fund`"
+        );
 
         instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
             compute_unit_limit,
@@ -181,7 +227,11 @@ impl ValidatorDepositCommand {
         // TODO: Add simulation result handling with state changes.
         if let TransactionOutcome::Executed(tx_sig) = tx_sig {
             println!("Solana validator deposit: {deposit_key}");
-            println!("Funded{and_initialized_str}: {tx_sig}");
+            if should_initialize {
+                println!("Funded and initialized: {tx_sig}");
+            } else {
+                println!("Funded: {tx_sig}");
+            }
             println!("Node ID: {node_id}");
             println!("Balance: {:.9} SOL", deposit_balance as f64 * 1e-9);
 
@@ -206,4 +256,93 @@ impl ValidatorDepositCommand {
 
         Ok(())
     }
+}
+
+async fn try_compute_outstanding_debt(
+    solana_connection: &SolanaConnection,
+    node_id: &Pubkey,
+    deposit_balance: u64,
+    dz_env_override: Option<NetworkEnvironment>,
+    debt_accountant_key: Option<&Pubkey>,
+) -> Result<u64> {
+    let (_, config) = super::try_fetch_program_config(solana_connection).await?;
+    let last_dz_epoch = config
+        .next_completed_dz_epoch
+        .checked_sub_duration(1)
+        .unwrap_or(DoubleZeroEpoch::new(GENESIS_DZ_EPOCH_MAINNET_BETA))
+        .value();
+
+    // Limit to either the last 100 epochs or the default (first) epoch.
+    let since_dz_epoch = last_dz_epoch
+        .saturating_sub(100)
+        .max(GENESIS_DZ_EPOCH_MAINNET_BETA);
+
+    let distribution_keys = (since_dz_epoch..=last_dz_epoch)
+        .map(|dz_epoch| Distribution::find_address(DoubleZeroEpoch::new(dz_epoch)).0)
+        .collect::<Vec<_>>();
+
+    let distributions = solana_connection
+        .get_multiple_accounts(&distribution_keys)
+        .await?
+        .iter()
+        .flatten()
+        .filter_map(ZeroCopyAccountOwnedData::<Distribution>::from_account)
+        .filter(|distribution| distribution.is_debt_calculation_finalized())
+        .collect::<Vec<_>>();
+
+    let network_env = solana_connection.try_network_environment().await?;
+    let dz_env = dz_env_override.unwrap_or(network_env);
+    let dz_connection = DoubleZeroLedgerConnection::from(dz_env);
+
+    let debt_record_keys = distributions
+        .iter()
+        .map(|distribution| {
+            doublezero_solana_validator_debt::ledger::debt_record_key(
+                debt_accountant_key.unwrap_or(&config.debt_accountant_key),
+                distribution.dz_epoch.value(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let debt_records = dz_connection
+        .get_multiple_accounts(&debt_record_keys)
+        .await?
+        .iter()
+        .flatten()
+        .filter_map(BorshRecordAccountData::<ComputedSolanaValidatorDebts>::from_account)
+        .collect::<Vec<_>>();
+    ensure!(
+        debt_records.len() == distributions.len(),
+        "Expected {} debt records, but got {}",
+        distributions.len(),
+        debt_records.len()
+    );
+
+    let mut total_debt = 0;
+
+    for (debt_record, distribution) in debt_records.iter().zip(distributions) {
+        if debt_record.debts.is_empty() {
+            continue;
+        }
+
+        let index = debt_record
+            .data
+            .debts
+            .iter()
+            .position(|debt| &debt.node_id == node_id);
+
+        if let Some(index) = index {
+            let start_index = distribution.processed_solana_validator_debt_start_index as usize;
+            let end_index = distribution.processed_solana_validator_debt_end_index as usize;
+            let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
+
+            if try_is_processed_leaf(processed_leaf_data, index).unwrap() {
+                continue;
+            }
+
+            total_debt += debt_record.data.debts[index].amount;
+        }
+    }
+
+    Ok(total_debt.saturating_sub(deposit_balance))
 }
