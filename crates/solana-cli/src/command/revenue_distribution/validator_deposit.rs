@@ -143,10 +143,6 @@ impl ValidatorDepositCommand {
 
             let (_, bump) = SolanaValidatorDeposit::find_address(&node_id);
             compute_unit_limit += Wallet::compute_units_for_bump_seed(bump);
-
-            " and initialized"
-        } else {
-            ""
         };
 
         struct Convert2zContextItems {
