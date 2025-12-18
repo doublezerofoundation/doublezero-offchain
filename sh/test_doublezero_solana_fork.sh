@@ -185,7 +185,11 @@ echo "doublezero-solana revenue-distribution fetch validator-deposits -ul --node
 $CLI_BIN revenue-distribution fetch validator-deposits -ul --node-id $NODE_ID
 echo
 
-echo "doublezero-solana revenue-distribution fetch validator-debts -ul --node-id $NODE_ID"
+echo "doublezero-solana revenue-distribution fetch validator-debts -ul --node-id $NODE_ID --dz-env mainnet-beta"
+$CLI_BIN revenue-distribution fetch validator-debts -ul --node-id $NODE_ID --dz-env mainnet-beta
+echo
+
+echo "doublezero-solana revenue-distribution validator-deposit --node-id $NODE_ID -ul --fund-outstanding-debt --dz-env mainnet-beta"
 $CLI_BIN revenue-distribution validator-deposit \
     --node-id $NODE_ID \
     -ul \
@@ -197,14 +201,9 @@ echo "doublezero-solana revenue-distribution fetch validator-deposits -ul --node
 $CLI_BIN revenue-distribution fetch validator-deposits -ul --node-id $NODE_ID
 echo
 
-echo "doublezero-solana revenue-distribution fetch validator-debts -ul --node-id $NODE_ID"
-$CLI_BIN revenue-distribution validator-deposit \
-    --node-id $NODE_ID \
-    -ul \
-    --fund-outstanding-debt \
-    --dz-env mainnet-beta
+echo "doublezero-solana revenue-distribution fetch validator-debts -ul --node-id $NODE_ID --dz-env mainnet-beta"
+$CLI_BIN revenue-distribution fetch validator-debts -ul --node-id $NODE_ID --dz-env mainnet-beta
 echo
-
 
 ### Clean up.
 
