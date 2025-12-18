@@ -280,7 +280,7 @@ async fn try_distribute_contributor_rewards(
                 recipient_key,
                 dz_mint_key,
                 &spl_associated_token_account_interface::program::ID,
-                &spl_token::id(),
+                &spl_token_interface::ID,
             )
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
@@ -306,7 +306,7 @@ async fn try_distribute_contributor_rewards(
                 &wallet_key,
                 recipient_key,
                 dz_mint_key,
-                &spl_token::id(),
+                &spl_token_interface::ID,
             );
 
             let compute_unit_limit = CREATE_ATA_CU_BASE + Wallet::compute_units_for_bump_seed(bump);
