@@ -392,13 +392,13 @@ pub async fn calculate_distribution(
 pub async fn pay_all_solana_validator_debt(
     wallet: Wallet,
     dz_ledger: DoubleZeroLedgerConnection,
-) -> Result<HashMap<u64, DebtCollectionResults>> {
+) -> Result<Vec<DebtCollectionResults>> {
     let (_, config) = try_fetch_config(&wallet.connection).await?;
     let dz_epoch_range = Vec::from_iter(
         GENESIS_DZ_EPOCH_MAINNET_BETA..(config.last_completed_epoch().unwrap().value()),
     );
 
-    let tasks: HashMap<u64, DebtCollectionResults> = stream::iter(dz_epoch_range)
+    let tasks: Vec<DebtCollectionResults> = stream::iter(dz_epoch_range)
         .map(|dz_epoch| {
             let wallet_ref = &wallet;
             let ledger_ref = &dz_ledger;
@@ -408,7 +408,7 @@ pub async fn pay_all_solana_validator_debt(
                 let result =
                     pay_solana_validator_debt(wallet_ref, ledger_ref, dz_epoch, config_ref).await?;
                 println!("Finished debt collection for epoch {dz_epoch}");
-                Ok::<_, anyhow::Error>((dz_epoch, result))
+                Ok::<_, anyhow::Error>(result)
             }
         })
         .buffer_unordered(MAX_CONCURRENT_CONNECTIONS)
@@ -630,6 +630,7 @@ pub async fn post_debt_collection_to_slack(
     let table_header = vec![
         "DoubleZero Epoch".to_string(),
         "Total Paid".to_string(),
+        "Outstanding Debt".to_string(),
         "Total Debt".to_string(),
         "Percentage Paid".to_string(),
         "Total Attempted Transactions".to_string(),
@@ -652,8 +653,10 @@ pub async fn post_debt_collection_to_slack(
 
     let table_values = vec![
         debt_collection_results.dz_epoch.to_string(),
-        debt_collection_results.total_paid.to_string(),
-        debt_collection_results.total_debt.to_string(),
+        (debt_collection_results.total_paid / 1_000_000_000).to_string(),
+        ((debt_collection_results.total_debt - debt_collection_results.total_paid) / 1_000_000_000)
+            .to_string(),
+        (debt_collection_results.total_debt / 1_000_000_000).to_string(),
         format!("{:.2}%", percentage_paid * 100.0),
         total_attempted_transactions_count.to_string(),
         successful_transactions_count.to_string(),

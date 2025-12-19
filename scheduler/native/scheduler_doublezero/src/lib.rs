@@ -17,12 +17,21 @@ use tokio::runtime::Runtime;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(NifStruct)]
+#[module = "Scheduler.ValidatorDebt.DebtCollections"]
+pub struct DebtCollections {
+    pub debt_collections: Vec<DebtCollection>,
+}
+
+#[derive(NifStruct)]
 #[module = "Scheduler.ValidatorDebt.DebtCollection"]
 pub struct DebtCollection {
-    pub total_paid: u64,
-    pub total_debt: u64,
-    pub total_validators: usize,
-    pub insufficient_funds_count: usize,
+    pub dz_epoch: String,
+    pub total_paid: String,
+    pub total_debt: String,
+    pub already_paid: String,
+    pub outstanding_debt: String,
+    pub total_validators: String,
+    pub insufficient_funds_count: String,
 }
 
 #[derive(NifStruct)]
@@ -76,12 +85,14 @@ pub fn pay_debt(
         .map_err(display_to_nif_error)?
         .block_on(async { async_pay_debt(dz_epoch, ledger_rpc, solana_rpc).await })
         .map_err(display_to_nif_error)?;
-
     let debt_collection = DebtCollection {
-        total_debt: tx_results.total_debt,
-        total_paid: tx_results.total_paid,
-        total_validators: tx_results.total_validators,
-        insufficient_funds_count: tx_results.insufficient_funds_count,
+        dz_epoch: tx_results.dz_epoch.to_string(),
+        already_paid: tx_results.already_paid.to_string(),
+        total_debt: tx_results.total_debt.to_string(),
+        total_paid: tx_results.total_paid.to_string(),
+        outstanding_debt: (tx_results.total_debt - tx_results.total_paid).to_string(),
+        total_validators: tx_results.total_validators.to_string(),
+        insufficient_funds_count: tx_results.insufficient_funds_count.to_string(),
     };
 
     Ok(debt_collection)
@@ -116,11 +127,14 @@ pub fn initialize_distribution(solana_rpc: String) -> Result<(), NifError> {
 }
 
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn pay_debt_for_all_epochs(ledger_rpc: String, solana_rpc: String) -> Result<(), NifError> {
+pub fn pay_debt_for_all_epochs(
+    ledger_rpc: String,
+    solana_rpc: String,
+) -> Result<DebtCollections, NifError> {
     let ledger_rpc_client = DoubleZeroLedgerConnection::new(ledger_rpc);
 
     // TODO: collect debt collection results for all epochs and put into a single slack message
-    Runtime::new()
+    let debt_collection_results = Runtime::new()
         .map_err(display_to_nif_error)?
         .block_on(async {
             let wallet = Wallet {
@@ -135,7 +149,21 @@ pub fn pay_debt_for_all_epochs(ledger_rpc: String, solana_rpc: String) -> Result
             worker::pay_all_solana_validator_debt(wallet, ledger_rpc_client).await
         })
         .map_err(display_to_nif_error)?;
-    Ok(())
+
+    let debt_collections: Vec<DebtCollection> = debt_collection_results
+        .iter()
+        .map(|dc| DebtCollection {
+            dz_epoch: dc.dz_epoch.to_string(),
+            already_paid: dc.already_paid.to_string(),
+            total_paid: dc.total_paid.to_string(),
+            total_debt: dc.total_debt.to_string(),
+            outstanding_debt: (dc.total_debt - dc.total_paid).to_string(),
+            total_validators: dc.total_validators.to_string(),
+            insufficient_funds_count: dc.insufficient_funds_count.to_string(),
+        })
+        .collect();
+
+    Ok(DebtCollections { debt_collections })
 }
 
 #[rustler::nif]
@@ -191,11 +219,13 @@ async fn async_post_debt_summary(
     let table_header = vec![
         "Total Paid".to_string(),
         "Total Debt".to_string(),
+        "Total Outstanding".to_string(),
         "Total Insufficient Funds Count".to_string(),
     ];
     let table_values = vec![
-        total_paid.to_string(),
-        total_debt.to_string(),
+        (total_paid / 1_000_000_000).to_string(),
+        (total_debt / 1_000_000_000).to_string(),
+        ((total_debt - total_paid) / 1_000_000_000).to_string(),
         insufficient_funds_count.to_string(),
     ];
     slack_notifier::validator_debt::post_to_slack(
