@@ -524,9 +524,7 @@ pub async fn try_initialize_distribution(
         .checked_minimum_epoch_duration_to_finalize_rewards()
         .context("Minimum epoch duration to finalize rewards not set")?;
 
-    // TODO: Remove when the accountant should take advantage of this new
-    // feature.
-    if enable_debt_write_off {
+    if config.is_debt_write_off_feature_activated() {
         // Try to write off distribution debt for the distribution that will have
         // rewards distributed to network contributors. If rewards were already
         // distributed or all debt is already accounted for, this is a no-op.
