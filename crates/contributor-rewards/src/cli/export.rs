@@ -9,7 +9,7 @@ use std::{
 
 use anyhow::{Result, bail};
 use clap::Subcommand;
-use network_shapley::types::{Demands, Devices, PrivateLinks, PublicLinks};
+use network_shapley::types::{Demand, Demands, Devices, PrivateLinks, PublicLinks};
 use tracing::info;
 
 use crate::{
@@ -41,6 +41,9 @@ pub enum ExportCommands {
     # Export to directory as CSV (creates separate files for inputs and outputs)
     export shapley -s snapshot.json -f csv -o ./debug-output/
 
+    # Export to directory as CSV with demands split by origin city
+    export shapley -s snapshot.json -f csv -o ./debug-output/ -c
+
     # Export to directory as JSON (creates single shapley-epoch-N.json)
     export shapley -s snapshot.json -f json-pretty -o ./debug-output/"#
     )]
@@ -60,6 +63,10 @@ pub enum ExportCommands {
         /// Specific output file path (JSON formats only)
         #[arg(long, value_name = "FILE")]
         output_file: Option<PathBuf>,
+
+        /// Split demands CSV by origin city (creates separate files per city)
+        #[arg(short = 'c', long)]
+        split_by_city: bool,
     },
 }
 
@@ -133,6 +140,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: ExportCommands) -> Result<
             output_format,
             output_dir,
             output_file,
+            split_by_city,
         } => {
             handle_export_shapley(
                 orchestrator,
@@ -140,6 +148,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: ExportCommands) -> Result<
                 output_format,
                 output_dir,
                 output_file,
+                split_by_city,
             )
             .await
         }
@@ -156,6 +165,7 @@ async fn handle_export_shapley(
     output_format: OutputFormat,
     output_dir: Option<PathBuf>,
     output_file: Option<PathBuf>,
+    split_by_city: bool,
 ) -> Result<()> {
     // Validate CSV requires output_dir
     if matches!(output_format, OutputFormat::Csv) && output_dir.is_none() {
@@ -253,7 +263,7 @@ async fn handle_export_shapley(
         OutputFormat::Csv => {
             // CSV mode - write separate files to output_dir
             let dir = output_dir.expect("validated above");
-            write_csv_output(&dir, epoch, solana_epoch, &export_output)?;
+            write_csv_output(&dir, epoch, solana_epoch, &export_output, split_by_city)?;
         }
         OutputFormat::Json | OutputFormat::JsonPretty => {
             let output_options = OutputOptions {
@@ -302,6 +312,7 @@ fn write_csv_output(
     epoch: u64,
     solana_epoch: Option<u64>,
     output: &ShapleyExportOutput,
+    split_by_city: bool,
 ) -> Result<()> {
     create_dir_all(dir)?;
 
@@ -326,11 +337,35 @@ fn write_csv_output(
     File::create(&public_links_path)?.write_all(public_links_csv.as_bytes())?;
     info!("Exported public links to: {}", public_links_path.display());
 
-    // Write demands.csv
-    let demands_path = dir.join(format!("demands-epoch-{epoch}.csv"));
-    let demands_csv = collection_to_csv(&output.inputs.demands)?;
-    File::create(&demands_path)?.write_all(demands_csv.as_bytes())?;
-    info!("Exported demands to: {}", demands_path.display());
+    // Write demands.csv (either single file or split by origin city)
+    if split_by_city {
+        // Group demands by origin city (start field)
+        let mut demands_by_city: BTreeMap<String, Vec<&Demand>> = BTreeMap::new();
+        for demand in &output.inputs.demands {
+            demands_by_city
+                .entry(demand.start.clone())
+                .or_insert_with(Vec::new)
+                .push(demand);
+        }
+
+        // Write separate CSV file for each origin city
+        for (city, city_demands) in demands_by_city {
+            let demands_path = dir.join(format!("demand-{city}-epoch-{epoch}.csv"));
+            let demands_csv = collection_to_csv(&city_demands)?;
+            File::create(&demands_path)?.write_all(demands_csv.as_bytes())?;
+            info!(
+                "Exported demands for city {} to: {}",
+                city,
+                demands_path.display()
+            );
+        }
+    } else {
+        // Write single demands.csv file
+        let demands_path = dir.join(format!("demands-epoch-{epoch}.csv"));
+        let demands_csv = collection_to_csv(&output.inputs.demands)?;
+        File::create(&demands_path)?.write_all(demands_csv.as_bytes())?;
+        info!("Exported demands to: {}", demands_path.display());
+    }
 
     // Write city_stats.csv
     let city_stats_rows: Vec<CityStatRow> = output
