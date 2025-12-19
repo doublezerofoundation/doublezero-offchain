@@ -237,8 +237,8 @@ async fn handle_export_shapley(
             city_stats: shapley_inputs.city_stats,
             city_weights: shapley_inputs.city_weights,
         },
-        per_city_values: per_city_values.clone(),
-        aggregated_output: aggregated_output.clone(),
+        per_city_values,
+        aggregated_output,
     };
 
     // Get Solana epoch from snapshot (prefer leader_schedule, fallback to snapshot.solana_epoch)
