@@ -241,12 +241,19 @@ async fn handle_export_shapley(
         aggregated_output: aggregated_output.clone(),
     };
 
+    // Get Solana epoch from snapshot (prefer leader_schedule, fallback to snapshot.solana_epoch)
+    let solana_epoch = snapshot
+        .leader_schedule
+        .as_ref()
+        .map(|ls| ls.solana_epoch)
+        .or(snapshot.solana_epoch);
+
     // Handle output
     match output_format {
         OutputFormat::Csv => {
             // CSV mode - write separate files to output_dir
             let dir = output_dir.expect("validated above");
-            write_csv_output(&dir, epoch, &export_output)?;
+            write_csv_output(&dir, epoch, solana_epoch, &export_output)?;
         }
         OutputFormat::Json | OutputFormat::JsonPretty => {
             let output_options = OutputOptions {
@@ -290,7 +297,12 @@ async fn handle_export_shapley(
 }
 
 /// Write CSV output files to directory
-fn write_csv_output(dir: &Path, epoch: u64, output: &ShapleyExportOutput) -> Result<()> {
+fn write_csv_output(
+    dir: &Path,
+    epoch: u64,
+    solana_epoch: Option<u64>,
+    output: &ShapleyExportOutput,
+) -> Result<()> {
     create_dir_all(dir)?;
 
     // Write devices.csv
@@ -388,6 +400,22 @@ fn write_csv_output(dir: &Path, epoch: u64, output: &ShapleyExportOutput) -> Res
         aggregated_path.display()
     );
 
+    // Write info.csv with Solana epoch and summary statistics
+    let info_rows = vec![InfoRow {
+        doublezero_epoch: epoch,
+        solana_epoch: solana_epoch.unwrap_or(0),
+        cities_processed: output.per_city_values.len(),
+        operators: output.aggregated_output.len(),
+        devices: output.inputs.devices.len(),
+        private_links: output.inputs.private_links.len(),
+        public_links: output.inputs.public_links.len(),
+        demands: output.inputs.demands.len(),
+    }];
+    let info_path = dir.join(format!("info-epoch-{epoch}.csv"));
+    let info_csv = collection_to_csv(&info_rows)?;
+    File::create(&info_path)?.write_all(info_csv.as_bytes())?;
+    info!("Exported info to: {}", info_path.display());
+
     Ok(())
 }
 
@@ -412,4 +440,17 @@ struct ShapleySettingsRow {
     operator_uptime: f64,
     contiguity_bonus: f64,
     demand_multiplier: f64,
+}
+
+/// CSV row for info information
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct InfoRow {
+    doublezero_epoch: u64,
+    solana_epoch: u64,
+    cities_processed: usize,
+    operators: usize,
+    devices: usize,
+    private_links: usize,
+    public_links: usize,
+    demands: usize,
 }
