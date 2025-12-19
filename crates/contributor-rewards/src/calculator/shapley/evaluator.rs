@@ -263,7 +263,7 @@ mod tests {
             .sum();
 
         assert!(
-            (total_proportion - 1.0).abs() < 0.01,
+            (total_proportion - 1.0).abs() < 1e-9,
             "Proportions should sum to ~1.0, got {}",
             total_proportion
         );
