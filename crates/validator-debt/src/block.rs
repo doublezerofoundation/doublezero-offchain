@@ -3,9 +3,14 @@ use std::{collections::HashMap, time::Duration};
 use anyhow::{Result, bail};
 use backon::{ExponentialBuilder, Retryable};
 use futures::{StreamExt, TryStreamExt, stream};
-use solana_client::{client_error::ClientErrorKind, rpc_request::RpcError};
+use solana_client::{
+    client_error::ClientErrorKind,
+    rpc_custom_error::{
+        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED, JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+    },
+    rpc_request::RpcError,
+};
 use solana_sdk::{clock::DEFAULT_SLOTS_PER_EPOCH, reward_type::RewardType::Fee};
-use tracing::info;
 
 use crate::solana_debt_calculator::ValidatorRewards;
 
@@ -32,7 +37,7 @@ pub async fn get_block_rewards(
     let leader_schedule = api_provider.get_leader_schedule(Some(first_slot)).await?;
 
     // Build validator schedules
-    println!("Building validator schedules");
+    tracing::info!("Building validator schedules");
     let validator_schedules: HashMap<String, Vec<u64>> = validator_ids
         .iter()
         .filter_map(|validator_id| {
@@ -51,7 +56,7 @@ pub async fn get_block_rewards(
             validator_schedules
                 .into_iter()
                 .flat_map(|(validator_id, slots)| {
-                    println!("getting block rewards for {}", validator_id.clone());
+                    tracing::info!("getting block rewards for {}", validator_id.clone());
                     slots
                         .into_iter()
                         .map(move |slot| (validator_id.clone(), slot))
@@ -69,17 +74,23 @@ pub async fn get_block_rewards(
                 .when(|err| {
                     match err.kind() {
                         ClientErrorKind::RpcError(RpcError::RpcResponseError { code, .. }) => {
-                            // Don't retry if block isn't found
-                            println!("{validator_id}: {} for slot {slot}", *code);
-                            !matches!(*code, -32009 | -32007)
+                            tracing::info!("{validator_id}: {} for slot {slot}", *code);
+
+                            // Don't retry if block isn't found.
+                            !matches!(
+                                *code,
+                                JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED
+                                    | JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
+                            )
                         }
                         _ => true, // Retry on all other errors
                     }
                 })
                 .notify(|err, dur: Duration| {
-                    info!(
+                    tracing::info!(
                         "get_block_with_config call failed, retrying in {:?}: {}",
-                        dur, err
+                        dur,
+                        err
                     );
                 })
                 .await
