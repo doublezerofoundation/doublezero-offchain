@@ -344,7 +344,7 @@ fn write_csv_output(
         for demand in &output.inputs.demands {
             demands_by_city
                 .entry(demand.start.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(demand);
         }
 
