@@ -223,9 +223,9 @@ async fn async_post_debt_summary(
         "Total Insufficient Funds Count".to_string(),
     ];
     let table_values = vec![
-        (total_paid / 1_000_000_000).to_string(),
-        (total_debt / 1_000_000_000).to_string(),
-        ((total_debt - total_paid) / 1_000_000_000).to_string(),
+        format!("{:.9} SOL", total_paid as f64 * 1e-9),
+        format!("{:.9} SOL", total_debt as f64 * 1e-9),
+        format!("{:.9} SOL", (total_debt - total_paid) as f64 * 1e-9),
         insufficient_funds_count.to_string(),
     ];
     slack_notifier::validator_debt::post_to_slack(

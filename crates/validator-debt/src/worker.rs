@@ -653,10 +653,18 @@ pub async fn post_debt_collection_to_slack(
 
     let table_values = vec![
         debt_collection_results.dz_epoch.to_string(),
-        (debt_collection_results.total_paid / 1_000_000_000).to_string(),
-        ((debt_collection_results.total_debt - debt_collection_results.total_paid) / 1_000_000_000)
-            .to_string(),
-        (debt_collection_results.total_debt / 1_000_000_000).to_string(),
+        format!(
+            "{:.9} SOL",
+            debt_collection_results.total_paid as f64 * 1e-9
+        ),
+        format!(
+            "{:.9} SOL",
+            (debt_collection_results.total_debt - debt_collection_results.total_paid) as f64 * 1e-9
+        ),
+        format!(
+            "{:.9} SOL",
+            debt_collection_results.total_debt as f64 * 1e-9
+        ),
         format!("{:.2}%", percentage_paid * 100.0),
         total_attempted_transactions_count.to_string(),
         successful_transactions_count.to_string(),

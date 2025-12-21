@@ -299,27 +299,22 @@ impl Transaction {
 
         }).cloned().collect();
 
-        // 60 second time expiration for block hash
-        let recent_blockhash = solana_rpc_client.get_latest_blockhash().await?;
+        let start_index = distribution.processed_solana_validator_debt_start_index as usize;
+        let end_index = distribution.processed_solana_validator_debt_end_index as usize;
+        let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
 
         let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
-        let debt_clone = Arc::new(debt.clone());
+        let debt_clone = Arc::new(debt);
 
         let debt_collection_results: Vec<Result<DebtCollectionResult>> =
             stream::iter(debts_to_process)
                 .map(|debt| {
                     let semaphore = semaphore.clone();
                     let debt_clone = debt_clone.clone();
-                    let blockhash = recent_blockhash;
 
                     let debt_proof = debt_clone.find_debt_proof(&debt.node_id).unwrap();
                     let (_, proof) = debt_proof;
-
-                    let start_index =
-                        distribution.processed_solana_validator_debt_start_index as usize;
-                    let end_index = distribution.processed_solana_validator_debt_end_index as usize;
-                    let processed_leaf_data = &distribution.remaining_data[start_index..end_index];
-                    let leaf_index: usize = proof.leaf_index.unwrap() as usize;
+                    let leaf_index = proof.leaf_index.unwrap() as usize;
 
                     async move {
                         let _permit = semaphore
@@ -341,7 +336,6 @@ impl Transaction {
                                 &debt,
                                 proof,
                                 dz_epoch,
-                                blockhash,
                             )
                             .await
                         }
@@ -409,7 +403,6 @@ impl Transaction {
         debt: &ComputedSolanaValidatorDebt,
         proof: MerkleProof,
         dz_epoch: u64,
-        blockhash: Hash,
     ) -> Result<DebtCollectionResult> {
         let instruction = try_build_instruction(
             &ID,
@@ -421,9 +414,15 @@ impl Transaction {
         )
         .unwrap();
 
-        let message =
-            Message::try_compile(&transaction.signer.pubkey(), &[instruction], &[], blockhash)
-                .unwrap();
+        let recent_blockhash = solana_rpc_client.get_latest_blockhash().await?;
+
+        let message = Message::try_compile(
+            &transaction.signer.pubkey(),
+            &[instruction],
+            &[],
+            recent_blockhash,
+        )
+        .unwrap();
 
         let versioned_transaction =
             VersionedTransaction::try_new(VersionedMessage::V0(message), &[&transaction.signer])
