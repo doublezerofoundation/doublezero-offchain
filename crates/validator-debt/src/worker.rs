@@ -405,7 +405,7 @@ pub async fn pay_all_solana_validator_debt(
             async move {
                 let result =
                     pay_solana_validator_debt(wallet_ref, ledger_ref, dz_epoch, config_ref).await?;
-                println!("Finished debt collection for epoch {dz_epoch}");
+                tracing::info!("Finished debt collection for epoch {dz_epoch}");
                 Ok::<_, anyhow::Error>(result)
             }
         })

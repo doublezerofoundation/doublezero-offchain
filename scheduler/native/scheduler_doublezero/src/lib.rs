@@ -25,13 +25,13 @@ pub struct DebtCollections {
 #[derive(NifStruct)]
 #[module = "Scheduler.ValidatorDebt.DebtCollection"]
 pub struct DebtCollection {
-    pub dz_epoch: String,
-    pub total_paid: String,
-    pub total_debt: String,
-    pub already_paid: String,
-    pub outstanding_debt: String,
-    pub total_validators: String,
-    pub insufficient_funds_count: String,
+    pub dz_epoch: u64,
+    pub total_paid: u64,
+    pub total_debt: u64,
+    pub already_paid: u64,
+    pub outstanding_debt: u64,
+    pub total_validators: usize,
+    pub insufficient_funds_count: usize,
 }
 
 #[derive(NifStruct)]
@@ -86,13 +86,13 @@ pub fn pay_debt(
         .block_on(async { async_pay_debt(dz_epoch, ledger_rpc, solana_rpc).await })
         .map_err(display_to_nif_error)?;
     let debt_collection = DebtCollection {
-        dz_epoch: tx_results.dz_epoch.to_string(),
-        already_paid: tx_results.already_paid.to_string(),
-        total_debt: tx_results.total_debt.to_string(),
-        total_paid: tx_results.total_paid.to_string(),
-        outstanding_debt: (tx_results.total_debt - tx_results.total_paid).to_string(),
-        total_validators: tx_results.total_validators.to_string(),
-        insufficient_funds_count: tx_results.insufficient_funds_count.to_string(),
+        dz_epoch: tx_results.dz_epoch,
+        already_paid: tx_results.already_paid,
+        total_debt: tx_results.total_debt,
+        total_paid: tx_results.total_paid,
+        outstanding_debt: (tx_results.total_debt - tx_results.total_paid),
+        total_validators: tx_results.total_validators,
+        insufficient_funds_count: tx_results.insufficient_funds_count,
     };
 
     Ok(debt_collection)
@@ -152,13 +152,13 @@ pub fn pay_debt_for_all_epochs(
     let debt_collections: Vec<DebtCollection> = debt_collection_results
         .iter()
         .map(|dc| DebtCollection {
-            dz_epoch: dc.dz_epoch.to_string(),
-            already_paid: dc.already_paid.to_string(),
-            total_paid: dc.total_paid.to_string(),
-            total_debt: dc.total_debt.to_string(),
-            outstanding_debt: (dc.total_debt - dc.total_paid).to_string(),
-            total_validators: dc.total_validators.to_string(),
-            insufficient_funds_count: dc.insufficient_funds_count.to_string(),
+            dz_epoch: dc.dz_epoch,
+            already_paid: dc.already_paid,
+            total_paid: dc.total_paid,
+            total_debt: dc.total_debt,
+            outstanding_debt: (dc.total_debt - dc.total_paid),
+            total_validators: dc.total_validators,
+            insufficient_funds_count: dc.insufficient_funds_count,
         })
         .collect();
 
