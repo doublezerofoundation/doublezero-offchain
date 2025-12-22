@@ -43,8 +43,6 @@ use crate::{
     validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
 };
 
-const MAX_CONCURRENT_CONNECTIONS: usize = 2;
-
 #[derive(Debug, Default, Serialize)]
 pub struct WriteSummary {
     pub dz_epoch: u64,
@@ -411,7 +409,7 @@ pub async fn pay_all_solana_validator_debt(
                 Ok::<_, anyhow::Error>(result)
             }
         })
-        .buffer_unordered(MAX_CONCURRENT_CONNECTIONS)
+        .buffer_unordered(2)
         .try_collect()
         .await?;
 
