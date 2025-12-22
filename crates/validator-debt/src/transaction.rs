@@ -210,7 +210,7 @@ impl Transaction {
             "simulation verification failed"
         );
 
-        println!(
+        tracing::info!(
             "Verification Result: {:#?}",
             verification.value.logs.unwrap_or(Vec::new())
         );
@@ -260,8 +260,7 @@ impl Transaction {
             .send_or_simulate_transaction(ledger_rpc_client, &verified_transaction)
             .await?;
 
-        println!("{:#?}", tx);
-
+        tracing::info!("{:#?}", tx);
         Ok(())
     }
 
@@ -291,9 +290,10 @@ impl Transaction {
           let node_id_str = debt.node_id.to_string();
           let excluded = overrides.iter().any(|(key, epoch)| key == &node_id_str && *epoch == dz_epoch);
       if excluded {
-          println!(
-              "Validator {node_id_str} for epoch #{dz_epoch} excluded from debt collection"
-          );
+          tracing::info!(
+                            "Validator {node_id_str} for epoch #{dz_epoch} excluded from debt collection"
+                        );
+
       }
       !excluded
 

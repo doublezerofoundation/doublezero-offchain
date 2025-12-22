@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - update return value from pay_debt command ([#228](https://github.com/doublezerofoundation/doublezero-offchain/pull/228))
+
+## [0.3.1](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/doublezero-solana/v0.3.1) - 2025-12-18
 - uptick version to 0.3.1 ([#233](https://github.com/doublezerofoundation/doublezero-offchain/pull/233))
 - add memos to `relay distribute-rewards` and `validator-deposit` commands ([#232](https://github.com/doublezerofoundation/doublezero-offchain/pull/232))
 - add `--fund-outstanding-debt` to `revenue-distribution validator-deposit` ([#231](https://github.com/doublezerofoundation/doublezero-offchain/pull/231))
