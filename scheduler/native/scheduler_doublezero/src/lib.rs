@@ -17,12 +17,6 @@ use tokio::runtime::Runtime;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(NifStruct)]
-#[module = "Scheduler.ValidatorDebt.DebtCollections"]
-pub struct DebtCollections {
-    pub debt_collections: Vec<DebtCollection>,
-}
-
-#[derive(NifStruct)]
 #[module = "Scheduler.ValidatorDebt.DebtCollection"]
 pub struct DebtCollection {
     pub dz_epoch: u64,
@@ -58,24 +52,8 @@ pub fn initialize_tracing_subscriber() -> Result<(), NifError> {
     Ok(())
 }
 
-#[rustler::nif]
-pub fn post_debt_summary(
-    insufficient_funds_count: usize,
-    total_debt: u64,
-    total_paid: u64,
-) -> Result<(), NifError> {
-    Runtime::new()
-        .map_err(display_to_nif_error)?
-        .block_on(async {
-            async_post_debt_summary(insufficient_funds_count, total_debt, total_paid).await
-        })
-        .map_err(display_to_nif_error)?;
-
-    Ok(())
-}
-
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn pay_debt(
+pub fn collect_epoch_debt(
     dz_epoch: u64,
     ledger_rpc: String,
     solana_rpc: String,
@@ -126,14 +104,10 @@ pub fn initialize_distribution(solana_rpc: String) -> Result<(), NifError> {
 }
 
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn pay_debt_for_all_epochs(
-    ledger_rpc: String,
-    solana_rpc: String,
-) -> Result<DebtCollections, NifError> {
+pub fn collect_all_debt(ledger_rpc: String, solana_rpc: String) -> Result<(), NifError> {
     let ledger_rpc_client = DoubleZeroLedgerConnection::new(ledger_rpc);
 
-    // TODO: collect debt collection results for all epochs and put into a single slack message
-    let debt_collection_results = Runtime::new()
+    Runtime::new()
         .map_err(display_to_nif_error)?
         .block_on(async {
             let wallet = Wallet {
@@ -148,21 +122,7 @@ pub fn pay_debt_for_all_epochs(
             worker::pay_all_solana_validator_debt(wallet, ledger_rpc_client).await
         })
         .map_err(display_to_nif_error)?;
-
-    let debt_collections: Vec<DebtCollection> = debt_collection_results
-        .iter()
-        .map(|dc| DebtCollection {
-            dz_epoch: dc.dz_epoch,
-            already_paid: dc.already_paid,
-            total_paid: dc.total_paid,
-            total_debt: dc.total_debt,
-            outstanding_debt: (dc.total_debt - dc.total_paid),
-            total_validators: dc.total_validators,
-            insufficient_funds_count: dc.insufficient_funds_count,
-        })
-        .collect();
-
-    Ok(DebtCollections { debt_collections })
+    Ok(())
 }
 
 #[rustler::nif]
@@ -205,36 +165,6 @@ pub fn finalize_distribution(
     rt.block_on(async { async_finalize_distribution(dz_epoch, ledger_rpc, solana_rpc).await })
         .map_err(display_to_nif_error)?;
 
-    Ok(())
-}
-async fn async_post_debt_summary(
-    insufficient_funds_count: usize,
-    total_debt: u64,
-    total_paid: u64,
-) -> Result<()> {
-    let client = reqwest::Client::new();
-
-    let header = "Total Debt Collection";
-    let table_header = vec![
-        "Total Paid".to_string(),
-        "Total Debt".to_string(),
-        "Total Outstanding".to_string(),
-        "Total Insufficient Funds Count".to_string(),
-    ];
-    let table_values = vec![
-        format!("{:.9} SOL", total_paid as f64 * 1e-9),
-        format!("{:.9} SOL", total_debt as f64 * 1e-9),
-        format!("{:.9} SOL", (total_debt - total_paid) as f64 * 1e-9),
-        insufficient_funds_count.to_string(),
-    ];
-    slack_notifier::validator_debt::post_to_slack(
-        None,
-        &client,
-        header,
-        table_header,
-        table_values,
-    )
-    .await?;
     Ok(())
 }
 

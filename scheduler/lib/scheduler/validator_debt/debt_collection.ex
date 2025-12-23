@@ -1,7 +1,3 @@
-defmodule Scheduler.ValidatorDebt.DebtCollections do
-  defstruct debt_collections: []
-end
-
 defmodule Scheduler.ValidatorDebt.DebtCollection do
   defstruct total_paid: 0,
             already_paid: 0,

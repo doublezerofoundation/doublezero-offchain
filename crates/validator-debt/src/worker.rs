@@ -25,6 +25,7 @@ use doublezero_solana_sdk::{
 };
 use futures::{StreamExt, TryStreamExt, stream};
 use leaky_bucket::RateLimiter;
+use reqwest::Client;
 use serde::Serialize;
 use slack_notifier;
 use solana_client::nonblocking::rpc_client::RpcClient;
@@ -390,7 +391,7 @@ pub async fn calculate_distribution(
 pub async fn pay_all_solana_validator_debt(
     wallet: Wallet,
     dz_ledger: DoubleZeroLedgerConnection,
-) -> Result<Vec<DebtCollectionResults>> {
+) -> Result<()> {
     let (_, config) = try_fetch_config(&wallet.connection).await?;
     let dz_epoch_range = Vec::from_iter(
         GENESIS_DZ_EPOCH_MAINNET_BETA..(config.last_completed_epoch().unwrap().value()),
@@ -413,7 +414,12 @@ pub async fn pay_all_solana_validator_debt(
         .try_collect()
         .await?;
 
-    Ok(tasks)
+    let client = reqwest::Client::new();
+
+    post_debt_collection_summary_to_slack(&tasks, &client).await?;
+    post_debt_collections_to_slack(&tasks, false, &client).await?;
+
+    Ok(())
 }
 
 pub async fn pay_solana_validator_debt(
@@ -608,6 +614,104 @@ pub async fn try_initialize_distribution(
 
         wallet.print_verbose_output(&[tx_sig]).await?;
     }
+
+    Ok(())
+}
+
+pub async fn post_debt_collection_summary_to_slack(
+    debt_collection_results: &[DebtCollectionResults],
+    client: &Client,
+) -> Result<()> {
+    let total_paid: u64 = debt_collection_results.iter().map(|tp| tp.total_paid).sum();
+    let total_debt: u64 = debt_collection_results.iter().map(|td| td.total_debt).sum();
+    let insufficient_funds_count: usize = debt_collection_results
+        .iter()
+        .map(|ifc| ifc.insufficient_funds_count)
+        .sum();
+
+    let header = "Total Debt Collection";
+    let table_header = vec![
+        "Total Paid".to_string(),
+        "Total Debt".to_string(),
+        "Total Outstanding".to_string(),
+        "Total Insufficient Funds Count".to_string(),
+    ];
+    let table_values = vec![
+        format!("{:.9} SOL", total_paid as f64 * 1e-9),
+        format!("{:.9} SOL", total_debt as f64 * 1e-9),
+        format!("{:.9} SOL", (total_debt - total_paid) as f64 * 1e-9),
+        insufficient_funds_count.to_string(),
+    ];
+    slack_notifier::validator_debt::post_to_slack(
+        None,
+        &client,
+        header,
+        table_header,
+        table_values,
+    )
+    .await?;
+    Ok(())
+}
+
+pub async fn post_debt_collections_to_slack(
+    debt_collection_results: &Vec<DebtCollectionResults>,
+    dry_run: bool,
+    client: &Client,
+) -> Result<()> {
+    let header = if dry_run {
+        "DRY RUN Debt Collected DRY RUN"
+    } else {
+        "Debt Collected"
+    };
+
+    let table_header = vec![
+        "DoubleZero Epoch".to_string(),
+        "Total Paid".to_string(),
+        "Outstanding Debt".to_string(),
+        "Total Debt".to_string(),
+        "Percentage Paid".to_string(),
+        "Total Attempted Transactions".to_string(),
+        "Successful Transactions".to_string(),
+        "Insufficient Funds".to_string(),
+        "Already Paid".to_string(),
+    ];
+
+    let mut table_values: Vec<Vec<String>> = Vec::with_capacity(debt_collection_results.len());
+
+    for dcr in debt_collection_results {
+        let total_attempted_transactions_count: u64 = dcr.total_validators as u64;
+        let successful_transactions_count: u64 = dcr.successful_transactions_count as u64;
+        let already_paid_count: u64 = dcr.already_paid_count as u64;
+
+        let percentage_paid: f64 = if total_attempted_transactions_count == 0 {
+            0.0
+        } else {
+            (already_paid_count + successful_transactions_count) as f64
+                / total_attempted_transactions_count as f64
+        };
+
+        let row_values = vec![
+            dcr.dz_epoch.to_string(),
+            format!("{:.9} SOL", dcr.total_paid as f64 * 1e-9),
+            format!("{:.9} SOL", (dcr.total_debt - dcr.total_paid) as f64 * 1e-9),
+            format!("{:.9} SOL", dcr.total_debt as f64 * 1e-9),
+            format!("{:.2}%", percentage_paid * 100.0),
+            total_attempted_transactions_count.to_string(),
+            successful_transactions_count.to_string(),
+            dcr.insufficient_funds_count.to_string(),
+            already_paid_count.to_string(),
+        ];
+
+        table_values.push(row_values);
+    }
+
+    slack_notifier::validator_debt::post_debt_collections_to_slack(
+        client,
+        header,
+        table_header,
+        table_values,
+    )
+    .await?;
 
     Ok(())
 }
