@@ -644,7 +644,7 @@ pub async fn post_debt_collection_summary_to_slack(
     ];
     slack_notifier::validator_debt::post_to_slack(
         None,
-        &client,
+        client,
         header,
         table_header,
         table_values,
