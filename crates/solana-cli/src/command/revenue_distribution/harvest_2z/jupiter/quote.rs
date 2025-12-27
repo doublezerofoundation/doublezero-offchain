@@ -62,8 +62,6 @@ impl JupiterLegacyQuoteRequest {
             "Jupiter legacy quote request failed"
         );
 
-        println!("response: {:?}", response);
-
         response
             .json()
             .await
