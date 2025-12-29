@@ -66,10 +66,12 @@ struct Args {
     #[arg(long, hide = true)]
     god_mode: bool,
 
-    /// Rewind the DZ epoch to the specified epoch. This option can only be used
-    /// in combination with --god-mode.
+    /// Override the next completed DZ epoch to the specified epoch. This option
+    /// can only be used in combination with --god-mode and can only be less
+    /// than the forked next completed DZ epoch found in the Revenue
+    /// Distribution config account.
     #[arg(long, value_name = "EPOCH")]
-    rewind_dz_epoch: Option<u64>,
+    next_completed_dz_epoch_override: Option<u64>,
 
     #[command(flatten)]
     solana_connection_options: SolanaConnectionOptions,
@@ -91,13 +93,13 @@ async fn main() -> Result<()> {
         upgrade_authority: upgrade_authority_key,
         reset: should_reset,
         god_mode: should_god_mode,
-        rewind_dz_epoch,
+        next_completed_dz_epoch_override,
         solana_connection_options,
     } = Args::parse();
 
     ensure!(
-        rewind_dz_epoch.is_none() || should_god_mode,
-        "--rewind-dz-epoch can only be used in combination with --god-mode"
+        next_completed_dz_epoch_override.is_none() || should_god_mode,
+        "--next-completed-dz-epoch-override can only be used in combination with --god-mode"
     );
 
     let connection = SolanaConnection::from(solana_connection_options);
@@ -137,7 +139,7 @@ async fn main() -> Result<()> {
             network_env,
             upgrade_authority_key,
             should_god_mode,
-            rewind_dz_epoch,
+            next_completed_dz_epoch_override,
         )
         .await
         {
@@ -208,7 +210,7 @@ async fn try_fetch_and_write_accounts(
     network_env: NetworkEnvironment,
     upgrade_authority_key: Pubkey,
     should_god_mode: bool,
-    rewind_dz_epoch: Option<u64>,
+    next_completed_dz_epoch_override: Option<u64>,
 ) -> Result<()> {
     // Fetch 2Z mint account.
 
@@ -291,7 +293,7 @@ async fn try_fetch_and_write_accounts(
             &RevenueDistributionProgramConfig::find_address().0,
             TMP_ACCOUNTS_PATH,
             |config| {
-                let next_completed_dz_epoch = config.next_completed_dz_epoch.value();
+                let forked_next_completed_dz_epoch = config.next_completed_dz_epoch.value();
 
                 config.admin_key = upgrade_authority_key;
                 config.debt_accountant_key = upgrade_authority_key;
@@ -303,24 +305,24 @@ async fn try_fetch_and_write_accounts(
                 distribution_params.calculation_grace_period_minutes = 1;
                 distribution_params.initialization_grace_period_minutes = 1;
 
-                if let Some(rewind_dz_epoch) = rewind_dz_epoch {
-                    if rewind_dz_epoch > next_completed_dz_epoch {
+                if let Some(dz_epoch) = next_completed_dz_epoch_override {
+                    if dz_epoch > forked_next_completed_dz_epoch {
                         tracing::warn!(
-                            "Rewind DZ epoch {rewind_dz_epoch} cannot be greater than forked DZ epoch. Ignoring rewind"
+                            "DZ epoch {dz_epoch} override is greater than forked DZ epoch {forked_next_completed_dz_epoch}. Ignoring --next-completed-dz-epoch-override"
                         );
                     } else {
-                        tracing::info!("Rewinding DZ epoch to {rewind_dz_epoch}");
-                        config.next_completed_dz_epoch = DoubleZeroEpoch::new(rewind_dz_epoch);
+                        tracing::info!("Overriding next completed DZ epoch to {dz_epoch}");
+                        config.next_completed_dz_epoch = DoubleZeroEpoch::new(dz_epoch);
                     }
                 }
 
-                next_completed_dz_epoch
+                forked_next_completed_dz_epoch
             },
         )?;
         tracing::info!("Updated Revenue Distribution config authorities");
 
-        if let Some(rewind_dz_epoch) = rewind_dz_epoch {
-            for dz_epoch in (rewind_dz_epoch + 1)..forked_next_completed_dz_epoch {
+        if let Some(next_completed_dz_epoch_override) = next_completed_dz_epoch_override {
+            for dz_epoch in (next_completed_dz_epoch_override + 1)..forked_next_completed_dz_epoch {
                 let (distribution_key, _) =
                     Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
 
@@ -394,7 +396,12 @@ async fn try_fetch_and_write_accounts(
             TMP_ACCOUNTS_PATH,
         )?;
 
-    for epoch in 0..revenue_distribution_config.next_completed_dz_epoch.value() {
+    let forked_next_completed_dz_epoch =
+        revenue_distribution_config.next_completed_dz_epoch.value();
+    let next_completed_dz_epoch = next_completed_dz_epoch_override
+        .unwrap_or(forked_next_completed_dz_epoch)
+        .min(forked_next_completed_dz_epoch);
+    for epoch in 0..next_completed_dz_epoch {
         let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(epoch));
         token_pda_keys
             .push(revenue_distribution::state::find_2z_token_pda_address(&distribution_key).0);
