@@ -420,10 +420,11 @@ async fn try_fetch_and_write_accounts(
         }
     }
 
+    let token_pda_keys_len = token_pda_keys.len();
     tracing::info!(
         "Wrote {} 2Z token PDA account{} to {TMP_ACCOUNTS_PATH}/",
-        token_pda_keys.len(),
-        if token_pda_keys.len() == 1 { "" } else { "s" }
+        token_pda_keys_len,
+        if token_pda_keys_len == 1 { "" } else { "s" }
     );
 
     Ok(())
@@ -441,10 +442,9 @@ where
     let wrapper = serde_json::from_str::<WrittenAccount>(&json)?;
     let data = BASE64.decode(&wrapper.account.data.0)?;
 
-    let (mucked_data, remaining_data) =
-        zero_copy::checked_from_bytes_with_discriminator::<T>(&data)
-            .map(|data| (Box::new(*data.0), data.1))
-            .unwrap();
+    let (mucked_data, remaining_data) = zero_copy::checked_from_bytes_with_discriminator(&data)
+        .map(|data| (Box::new(*data.0), data.1))
+        .unwrap();
 
     Ok((wrapper, mucked_data, remaining_data.to_vec()))
 }
@@ -575,13 +575,14 @@ async fn try_fetch_and_write_program_accounts(
         try_write_account_to_file(key, account, accounts_dir)?;
     }
 
+    let accounts_len = accounts.len();
     tracing::info!(
         "Wrote {} {program_name} account{} to {accounts_dir}/",
-        accounts.len(),
-        if accounts.len() == 1 { "" } else { "s" },
+        accounts_len,
+        if accounts_len == 1 { "" } else { "s" },
     );
 
-    Ok(accounts.len())
+    Ok(accounts_len)
 }
 
 fn try_dump_program(
