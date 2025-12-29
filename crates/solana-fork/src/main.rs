@@ -65,6 +65,11 @@ struct Args {
     #[arg(long, hide = true)]
     god_mode: bool,
 
+    /// Rewind the DZ epoch to the specified epoch. This option can only be used
+    /// in combination with --god-mode.
+    #[arg(long, value_name = "EPOCH")]
+    rewind_dz_epoch: Option<u64>,
+
     #[command(flatten)]
     solana_connection_options: SolanaConnectionOptions,
 }
@@ -75,8 +80,14 @@ async fn main() -> Result<()> {
         upgrade_authority: upgrade_authority_key,
         reset: should_reset,
         god_mode: should_god_mode,
+        rewind_dz_epoch,
         solana_connection_options,
     } = Args::parse();
+
+    ensure!(
+        rewind_dz_epoch.is_none() || should_god_mode,
+        "--rewind-dz-epoch can only be used in combination with --god-mode"
+    );
 
     let connection = SolanaConnection::from(solana_connection_options);
     let network_env = connection.try_network_environment().await?;
@@ -115,6 +126,7 @@ async fn main() -> Result<()> {
             network_env,
             upgrade_authority_key,
             should_god_mode,
+            rewind_dz_epoch,
         )
         .await
         {
@@ -185,6 +197,7 @@ async fn try_fetch_and_write_accounts(
     network_env: NetworkEnvironment,
     upgrade_authority_key: Pubkey,
     should_god_mode: bool,
+    rewind_dz_epoch: Option<u64>,
 ) -> Result<()> {
     // Fetch 2Z mint account.
 
@@ -260,10 +273,15 @@ async fn try_fetch_and_write_accounts(
     if should_god_mode {
         eprintln!("God mode enabled");
 
-        try_modify_zero_copy_account::<RevenueDistributionProgramConfig>(
+        let forked_next_completed_dz_epoch = try_modify_zero_copy_account::<
+            RevenueDistributionProgramConfig,
+            _,
+        >(
             &RevenueDistributionProgramConfig::find_address().0,
             TMP_ACCOUNTS_PATH,
             |config| {
+                let next_completed_dz_epoch = config.next_completed_dz_epoch.value();
+
                 config.admin_key = upgrade_authority_key;
                 config.debt_accountant_key = upgrade_authority_key;
                 config.rewards_accountant_key = upgrade_authority_key;
@@ -273,11 +291,38 @@ async fn try_fetch_and_write_accounts(
                 let distribution_params = &mut config.distribution_parameters;
                 distribution_params.calculation_grace_period_minutes = 1;
                 distribution_params.initialization_grace_period_minutes = 1;
+
+                if let Some(rewind_dz_epoch) = rewind_dz_epoch {
+                    if rewind_dz_epoch > next_completed_dz_epoch {
+                        eprintln!(
+                            "Rewind DZ epoch {rewind_dz_epoch} cannot be greater than forked DZ epoch. Ignoring rewind"
+                        );
+                    } else {
+                        eprintln!("Rewinding DZ epoch to {rewind_dz_epoch}");
+                        config.next_completed_dz_epoch = DoubleZeroEpoch::new(rewind_dz_epoch);
+                    }
+                }
+
+                next_completed_dz_epoch
             },
         )?;
         eprintln!("Updated Revenue Distribution config authorities");
 
-        try_modify_zero_copy_account::<PassportProgramConfig>(
+        if let Some(rewind_dz_epoch) = rewind_dz_epoch {
+            for dz_epoch in (rewind_dz_epoch + 1)..forked_next_completed_dz_epoch {
+                let (distribution_key, _) =
+                    Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
+
+                // Remove the file representing this distribution key.
+                let path = format!("{TMP_ACCOUNTS_PATH}/{distribution_key}.json");
+                if fs::metadata(&path).is_ok() {
+                    fs::remove_file(&path)?;
+                    eprintln!("Removed distribution account for epoch {dz_epoch}");
+                }
+            }
+        }
+
+        try_modify_zero_copy_account::<PassportProgramConfig, _>(
             &PassportProgramConfig::find_address().0,
             TMP_ACCOUNTS_PATH,
             |config| {
@@ -385,18 +430,18 @@ where
     Ok((wrapper, mucked_data, remaining_data.to_vec()))
 }
 
-fn try_modify_zero_copy_account<T>(
+fn try_modify_zero_copy_account<T, U>(
     account_key: &Pubkey,
     accounts_dir: &str,
-    modify_fn: impl FnOnce(&mut T),
-) -> Result<()>
+    modify_fn: impl FnOnce(&mut T) -> U,
+) -> Result<U>
 where
     T: PrecomputedDiscriminator + bytemuck::Pod,
 {
     let (wrapper, mut mucked_data, remaining_data) =
         try_read_zero_copy_account::<T>(account_key, accounts_dir)?;
 
-    modify_fn(&mut mucked_data);
+    let out = modify_fn(&mut mucked_data);
 
     let mut modified_data = Vec::with_capacity(zero_copy::data_end::<T>() + remaining_data.len());
     modified_data.extend_from_slice(T::discriminator_slice());
@@ -411,7 +456,9 @@ where
         rent_epoch: wrapper.account.rent_epoch,
     };
 
-    try_write_account_to_file(account_key, &modified_account, accounts_dir)
+    try_write_account_to_file(account_key, &modified_account, accounts_dir)?;
+
+    Ok(out)
 }
 
 fn try_read_borsh_account<T>(
