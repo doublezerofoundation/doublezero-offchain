@@ -25,6 +25,7 @@ use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use solana_sdk::{account::Account, program_pack::Pack, pubkey::Pubkey, signer::Signer};
 use spl_token_interface::state::Mint;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 const ACCOUNTS_PATH: &str = "forked-accounts";
 const TMP_ACCOUNTS_PATH: &str = "forked-accounts.tmp";
@@ -76,6 +77,16 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_target(false)
+                .with_thread_ids(false)
+                .with_thread_names(false),
+        )
+        .init();
+
     let Args {
         upgrade_authority: upgrade_authority_key,
         reset: should_reset,
@@ -103,8 +114,8 @@ async fn main() -> Result<()> {
 
     // Warn if god mode is enabled but reset is not.
     if should_god_mode && !should_reset {
-        eprintln!(
-            "Warning: --god-mode was passed but --reset was not. God mode will not apply without resetting accounts"
+        tracing::warn!(
+            "--god-mode was passed but --reset was not. God mode will not apply without resetting accounts"
         );
     }
 
@@ -205,7 +216,7 @@ async fn try_fetch_and_write_accounts(
 
     let mint_account = connection.get_account(&token_2z_mint_key).await?;
     try_write_account_to_file(&token_2z_mint_key, &mint_account, TMP_ACCOUNTS_PATH)?;
-    println!("Wrote 2Z mint account to {TMP_ACCOUNTS_PATH}/");
+    tracing::info!("Wrote 2Z SPL mint account to {TMP_ACCOUNTS_PATH}/");
 
     // Fetch program accounts.
 
@@ -271,7 +282,7 @@ async fn try_fetch_and_write_accounts(
     )?;
 
     if should_god_mode {
-        eprintln!("God mode enabled");
+        tracing::info!("God mode enabled");
 
         let forked_next_completed_dz_epoch = try_modify_zero_copy_account::<
             RevenueDistributionProgramConfig,
@@ -294,11 +305,11 @@ async fn try_fetch_and_write_accounts(
 
                 if let Some(rewind_dz_epoch) = rewind_dz_epoch {
                     if rewind_dz_epoch > next_completed_dz_epoch {
-                        eprintln!(
+                        tracing::warn!(
                             "Rewind DZ epoch {rewind_dz_epoch} cannot be greater than forked DZ epoch. Ignoring rewind"
                         );
                     } else {
-                        eprintln!("Rewinding DZ epoch to {rewind_dz_epoch}");
+                        tracing::info!("Rewinding DZ epoch to {rewind_dz_epoch}");
                         config.next_completed_dz_epoch = DoubleZeroEpoch::new(rewind_dz_epoch);
                     }
                 }
@@ -306,7 +317,7 @@ async fn try_fetch_and_write_accounts(
                 next_completed_dz_epoch
             },
         )?;
-        eprintln!("Updated Revenue Distribution config authorities");
+        tracing::info!("Updated Revenue Distribution config authorities");
 
         if let Some(rewind_dz_epoch) = rewind_dz_epoch {
             for dz_epoch in (rewind_dz_epoch + 1)..forked_next_completed_dz_epoch {
@@ -317,7 +328,7 @@ async fn try_fetch_and_write_accounts(
                 let path = format!("{TMP_ACCOUNTS_PATH}/{distribution_key}.json");
                 if fs::metadata(&path).is_ok() {
                     fs::remove_file(&path)?;
-                    eprintln!("Removed distribution account for epoch {dz_epoch}");
+                    tracing::info!("Removed distribution account for epoch {dz_epoch}");
                 }
             }
         }
@@ -330,7 +341,7 @@ async fn try_fetch_and_write_accounts(
                 config.sentinel_key = upgrade_authority_key;
             },
         )?;
-        eprintln!("Updated Passport config authorities");
+        tracing::info!("Updated Passport config authorities");
 
         try_modify_borsh_account::<SolConversionProgramState>(
             &SolConversionProgramState::find_address().0,
@@ -341,7 +352,7 @@ async fn try_fetch_and_write_accounts(
                 config.deny_list_authority = upgrade_authority_key;
             },
         )?;
-        eprintln!("Updated SOL Conversion config authorities");
+        tracing::info!("Updated SOL Conversion config authorities");
 
         // Override mint authority.
 
@@ -402,9 +413,10 @@ async fn try_fetch_and_write_accounts(
         }
     }
 
-    println!(
-        "Wrote {} 2Z token PDA accounts to {TMP_ACCOUNTS_PATH}/",
-        token_pda_keys.len()
+    tracing::info!(
+        "Wrote {} 2Z token PDA account{} to {TMP_ACCOUNTS_PATH}/",
+        token_pda_keys.len(),
+        if token_pda_keys.len() == 1 { "" } else { "s" }
     );
 
     Ok(())
@@ -556,11 +568,10 @@ async fn try_fetch_and_write_program_accounts(
         try_write_account_to_file(key, account, accounts_dir)?;
     }
 
-    println!(
-        "Wrote {} {} accounts to {}/",
+    tracing::info!(
+        "Wrote {} {program_name} account{} to {accounts_dir}/",
         accounts.len(),
-        program_name,
-        accounts_dir
+        if accounts.len() == 1 { "" } else { "s" },
     );
 
     Ok(accounts.len())
@@ -572,7 +583,7 @@ fn try_dump_program(
     program_name: &str,
     output_path: &str,
 ) -> Result<()> {
-    println!("Dumping {} program to {}...", program_name, output_path);
+    tracing::info!("Dumping {} program to {}...", program_name, output_path);
 
     let dump_status = Command::new("solana")
         .arg("program")
@@ -589,6 +600,6 @@ fn try_dump_program(
         dump_status
     );
 
-    println!("{} program dumped successfully", program_name);
+    tracing::info!("{} program dumped successfully", program_name);
     Ok(())
 }
