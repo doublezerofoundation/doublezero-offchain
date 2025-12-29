@@ -322,7 +322,7 @@ async fn try_fetch_and_write_accounts(
         tracing::info!("Updated Revenue Distribution config authorities");
 
         if let Some(next_completed_dz_epoch_override) = next_completed_dz_epoch_override {
-            for dz_epoch in (next_completed_dz_epoch_override + 1)..forked_next_completed_dz_epoch {
+            for dz_epoch in next_completed_dz_epoch_override..forked_next_completed_dz_epoch {
                 let (distribution_key, _) =
                     Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
 
