@@ -33,7 +33,7 @@ defmodule Scheduler.Worker.CollectAllDebt do
         Logger.error("CollectAllDebt worker encountered an error: #{inspect(error)}")
     end
 
-    {:stop, :shutdown, state}
+    {:stop, :normal, state}
   end
 
   defp ledger_rpc do

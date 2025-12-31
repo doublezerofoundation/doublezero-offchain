@@ -642,14 +642,8 @@ pub async fn post_debt_collection_summary_to_slack(
         format!("{:.9} SOL", (total_debt - total_paid) as f64 * 1e-9),
         insufficient_funds_count.to_string(),
     ];
-    slack_notifier::validator_debt::post_to_slack(
-        None,
-        client,
-        header,
-        table_header,
-        table_values,
-    )
-    .await?;
+    slack_notifier::validator_debt::post_to_slack(None, client, header, table_header, table_values)
+        .await?;
     Ok(())
 }
 
@@ -1031,15 +1025,14 @@ async fn try_write_off_distribution_debt(
         let mut write_off_count = 0;
 
         for (leaf_index, debt) in computed_debt.debts.iter().enumerate() {
-            if rewards_distribution.checked_total_sol_debt().is_none() {
-                must_terminate_debt_write_offs = true;
-                break;
-            }
-
             if revenue_distribution::try_is_processed_leaf(processed_leaf_data, leaf_index).unwrap()
             {
                 continue;
             }
+
+            let remaining_sol_debt = rewards_distribution
+                .checked_total_sol_debt()
+                .unwrap_or_default();
 
             let node_id = debt.node_id;
             let (deposit_key, deposit_bump) = SolanaValidatorDeposit::find_address(&node_id);
@@ -1079,7 +1072,7 @@ async fn try_write_off_distribution_debt(
 
             let (_, proof) = computed_debt.find_debt_proof(&node_id).unwrap();
 
-            if *deposit_balance >= debt.amount {
+            if debt.amount == 0 || *deposit_balance >= debt.amount {
                 let compute_units =
                     revenue_distribution::compute_unit::pay_solana_validator_debt(&proof);
 
@@ -1099,7 +1092,14 @@ async fn try_write_off_distribution_debt(
                 tracing::debug!("Updated deposit balance for node {node_id} to {deposit_balance}");
 
                 pay_count += 1;
-            } else {
+            }
+            // Only write off debt if there is enough remaining SOL debt to
+            // cover the write-off.
+            else if debt.amount <= remaining_sol_debt {
+                tracing::info!(
+                    "Remaining {remaining_sol_debt} debt on rewards epoch {rewards_dz_epoch}. Writing off {} from epoch {dz_epoch}",
+                    debt.amount
+                );
                 if !distribution.is_solana_validator_debt_write_off_enabled()
                     && write_off_count == 0
                 {
@@ -1136,7 +1136,9 @@ async fn try_write_off_distribution_debt(
 
                 // Update the uncollectible debt locally.
                 rewards_distribution.mucked_data.uncollectible_sol_debt += debt.amount;
-            };
+            } else {
+                must_terminate_debt_write_offs = true;
+            }
         }
 
         if pay_count == 0 && write_off_count == 0 {

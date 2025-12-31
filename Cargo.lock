@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "doublezero-solana-cli"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2772,6 +2772,8 @@ dependencies = [
  "solana-sdk",
  "spl-token-interface",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
