@@ -674,15 +674,16 @@ pub async fn post_debt_collections_to_slack(
 
     for dcr in debt_collection_results {
         let total_attempted_transactions_count: u64 = dcr.total_validators as u64;
+
+        // skip overlapping DZ epochs since we don't collect fees
+        if total_attempted_transactions_count == 0 {
+            continue;
+        };
         let successful_transactions_count: u64 = dcr.successful_transactions_count as u64;
         let already_paid_count: u64 = dcr.already_paid_count as u64;
 
-        let percentage_paid: f64 = if total_attempted_transactions_count == 0 {
-            0.0
-        } else {
-            (already_paid_count + successful_transactions_count) as f64
-                / total_attempted_transactions_count as f64
-        };
+        let percentage_paid = (already_paid_count + successful_transactions_count) as f64
+            / total_attempted_transactions_count as f64;
 
         let row_values = vec![
             dcr.dz_epoch.to_string(),
