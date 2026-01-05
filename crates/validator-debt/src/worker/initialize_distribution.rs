@@ -92,8 +92,16 @@ pub async fn try_initialize_distribution(
     let minimum_epoch_duration_to_finalize_rewards = config
         .checked_minimum_epoch_duration_to_finalize_rewards()
         .context("Minimum epoch duration to finalize rewards not set")?;
+    let rewards_dz_epoch = DoubleZeroEpoch::new(
+        next_dz_epoch
+            .value()
+            .saturating_sub(minimum_epoch_duration_to_finalize_rewards.into())
+            .saturating_add(1),
+    );
 
     if config.is_debt_write_off_feature_activated() {
+        tracing::info!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
+
         // Try to write off distribution debt for the distribution that will have
         // rewards distributed to network contributors. If rewards were already
         // distributed or all debt is already accounted for, this is a no-op.
@@ -101,8 +109,7 @@ pub async fn try_initialize_distribution(
             &wallet,
             &dz_connection,
             &record_accountant_key,
-            next_dz_epoch,
-            minimum_epoch_duration_to_finalize_rewards,
+            rewards_dz_epoch,
         )
         .await?;
     } else {
@@ -152,21 +159,14 @@ async fn try_write_off_distribution_debt(
     wallet: &Wallet,
     dz_ledger_connection: &DoubleZeroLedgerConnection,
     record_accountant_key: &Pubkey,
-    next_dz_epoch: DoubleZeroEpoch,
-    minimum_epoch_duration_to_finalize_rewards: u32,
+    rewards_dz_epoch: DoubleZeroEpoch,
 ) -> Result<()> {
     let wallet_key = wallet.pubkey();
 
     // Track running deposit balances when we iterate through epochs.
     let mut deposit_balances = HashMap::new();
 
-    let rewards_dz_epoch = next_dz_epoch
-        .value()
-        .saturating_sub(minimum_epoch_duration_to_finalize_rewards.into())
-        .saturating_add(1);
-    tracing::info!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
-
-    let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(rewards_dz_epoch));
+    let (distribution_key, _) = Distribution::find_address(rewards_dz_epoch);
     let mut rewards_distribution = wallet
         .connection
         .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
@@ -193,7 +193,10 @@ async fn try_write_off_distribution_debt(
     // TODO: We should be able to terminate this loop early if we find that
     // all processed debt is already accounted for. But for now, we will just
     // iterate through all epochs.
-    for dz_epoch in (GENESIS_DZ_EPOCH_MAINNET_BETA..=rewards_dz_epoch).rev() {
+    for dz_epoch in (GENESIS_DZ_EPOCH_MAINNET_BETA..=rewards_dz_epoch.value())
+        .rev()
+        .map(DoubleZeroEpoch::new)
+    {
         if must_terminate_debt_write_offs {
             tracing::warn!(
                 "Terminating debt write-offs because uncollectible debt exceeds total debt"
@@ -201,7 +204,7 @@ async fn try_write_off_distribution_debt(
             break;
         }
 
-        let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
+        let (distribution_key, _) = Distribution::find_address(dz_epoch);
 
         let distribution = if dz_epoch == rewards_dz_epoch {
             rewards_distribution.clone()
@@ -222,7 +225,7 @@ async fn try_write_off_distribution_debt(
         let (_, computed_debt) = crate::ledger::try_fetch_debt_record(
             dz_ledger_connection,
             record_accountant_key,
-            dz_epoch,
+            dz_epoch.value(),
             dz_ledger_connection.commitment(),
         )
         .await?;
@@ -231,8 +234,6 @@ async fn try_write_off_distribution_debt(
             .connection
             .try_fetch_sysvar::<solana_sdk::rent::Rent>()
             .await?;
-
-        let dz_epoch = DoubleZeroEpoch::new(dz_epoch);
 
         let mut instructions_and_compute_units = Vec::new();
         let mut pay_count = 0;
@@ -336,7 +337,7 @@ async fn try_write_off_distribution_debt(
                         &wallet_key,
                         dz_epoch,
                         &node_id,
-                        DoubleZeroEpoch::new(rewards_dz_epoch),
+                        rewards_dz_epoch,
                     ),
                     &RevenueDistributionInstructionData::WriteOffSolanaValidatorDebt {
                         amount: debt.amount,
