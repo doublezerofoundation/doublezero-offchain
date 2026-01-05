@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - update return value from pay_debt command, add pay_debt_for_all_epochs, use :normal exit for GenServer ([#228](https://github.com/doublezerofoundation/doublezero-offchain/pull/228))
+- remove unnecessary private functions in lib.rs ([#238](https://github.com/doublezerofoundation/doublezero-offchain/pull/238))
 - update `initialize_distribution` call ([#237](https://github.com/doublezerofoundation/doublezero-offchain/pull/237))
 
 ## [v0.1.4](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/offchain-scheduler/v0.1.4)
