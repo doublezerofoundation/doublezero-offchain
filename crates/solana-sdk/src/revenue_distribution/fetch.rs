@@ -5,14 +5,13 @@ use doublezero_solana_client_tools::{
 };
 use solana_sdk::pubkey::Pubkey;
 
-use crate::sol_conversion::state::{
-    ConfigurationRegistry as SolConversionConfigurationRegistry, FillsRegistry,
-    ProgramState as SolConversionProgramState,
-};
-
 use super::{
     state::{Distribution, Journal, ProgramConfig},
     types::DoubleZeroEpoch,
+};
+use crate::sol_conversion::state::{
+    ConfigurationRegistry as SolConversionConfigurationRegistry, FillsRegistry,
+    ProgramState as SolConversionProgramState,
 };
 
 pub async fn try_fetch_config(
