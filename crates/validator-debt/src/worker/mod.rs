@@ -12,13 +12,12 @@ use doublezero_solana_client_tools::{
 use doublezero_solana_sdk::{
     revenue_distribution::{
         GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
-        fetch::try_fetch_config,
+        fetch::{try_fetch_config, try_fetch_distribution},
         instruction::{
-            RevenueDistributionInstructionData::{self, ConfigureDistributionDebt},
-            account::InitializeSolanaValidatorDepositAccounts,
+            RevenueDistributionInstructionData, account::InitializeSolanaValidatorDepositAccounts,
         },
-        state::{Distribution, ProgramConfig, SolanaValidatorDeposit},
-        types::{DoubleZeroEpoch, SolanaValidatorDebt},
+        state::{ProgramConfig, SolanaValidatorDeposit},
+        types::SolanaValidatorDebt,
     },
     try_build_instruction,
 };
@@ -425,32 +424,32 @@ pub async fn pay_all_solana_validator_debt(
 pub async fn pay_solana_validator_debt(
     wallet: &Wallet,
     dz_ledger: &DoubleZeroLedgerConnection,
-    dz_epoch: u64,
+    dz_epoch_value: u64,
     config: &ProgramConfig,
 ) -> Result<DebtCollectionResults> {
     let (_, computed_debt) = ledger::try_fetch_debt_record(
         dz_ledger,
         &config.debt_accountant_key,
-        dz_epoch,
+        dz_epoch_value,
         dz_ledger.commitment(),
     )
     .await?;
 
-    let (distribution_key, _) = Distribution::find_address(DoubleZeroEpoch::new(dz_epoch));
-    let distribution = wallet
-        .connection
-        .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
-        .await?;
+    let (_, distribution) = try_fetch_distribution(&wallet.connection, dz_epoch_value).await?;
 
     try_initialize_missing_deposit_accounts(wallet, &computed_debt).await?;
 
     let arc_signer = Arc::new(wallet.signer.insecure_clone());
     let transaction = Transaction::new(arc_signer, wallet.dry_run, false);
 
-    let tx_results = transaction
-        .pay_solana_validator_debt(&wallet.connection, computed_debt, dz_epoch, &distribution)
-        .await?;
-    Ok(tx_results)
+    transaction
+        .pay_solana_validator_debt(
+            &wallet.connection,
+            computed_debt,
+            dz_epoch_value,
+            &distribution,
+        )
+        .await
 }
 
 async fn write_transaction(
@@ -471,7 +470,7 @@ async fn write_transaction(
 
     tracing::info!("Writing total debt {total_debt} to solana for {total_validators} validators");
 
-    let debt = ConfigureDistributionDebt {
+    let debt = RevenueDistributionInstructionData::ConfigureDistributionDebt {
         total_validators,
         total_debt,
         merkle_root: merkle_root.unwrap(),
