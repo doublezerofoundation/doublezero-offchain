@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::{Context, Result, ensure};
 use doublezero_solana_client_tools::{
+    account::zero_copy::ZeroCopyAccountOwnedData,
     payer::{TransactionOutcome, Wallet},
     rpc::{DoubleZeroLedgerConnection, NetworkEnvironment},
 };
@@ -9,11 +10,13 @@ use doublezero_solana_sdk::{
     environment_2z_token_mint_key,
     revenue_distribution::{
         self, GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
+        fetch::SolConversionState,
         instruction::{
             RevenueDistributionInstructionData,
             account::{
-                EnableSolanaValidatorDebtWriteOffAccounts, InitializeDistributionAccounts,
-                InitializeSolanaValidatorDepositAccounts, PaySolanaValidatorDebtAccounts,
+                EnableSolanaValidatorDebtWriteOffAccounts, FinalizeDistributionRewardsAccounts,
+                InitializeDistributionAccounts, InitializeSolanaValidatorDepositAccounts,
+                PaySolanaValidatorDebtAccounts, SweepDistributionTokensAccounts,
                 WriteOffSolanaValidatorDebtAccounts,
             },
         },
@@ -25,7 +28,7 @@ use doublezero_solana_sdk::{
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer};
 
 pub async fn try_initialize_distribution(
-    wallet: Wallet,
+    wallet: &Wallet,
     dz_env_override: Option<NetworkEnvironment>,
     bypass_dz_epoch_check: bool,
     record_accountant_key: Option<Pubkey>,
@@ -99,6 +102,11 @@ pub async fn try_initialize_distribution(
             .saturating_add(1),
     );
 
+    let rewards_distribution = wallet
+        .connection
+        .try_fetch_zero_copy_data::<Distribution>(&Distribution::find_address(rewards_dz_epoch).0)
+        .await?;
+
     if config.is_debt_write_off_feature_activated() {
         tracing::info!("Processing debt write-offs affecting epoch {rewards_dz_epoch}");
 
@@ -106,10 +114,10 @@ pub async fn try_initialize_distribution(
         // rewards distributed to network contributors. If rewards were already
         // distributed or all debt is already accounted for, this is a no-op.
         try_write_off_distribution_debt(
-            &wallet,
+            wallet,
             &dz_connection,
             &record_accountant_key,
-            rewards_dz_epoch,
+            &rewards_distribution,
         )
         .await?;
     } else {
@@ -126,7 +134,7 @@ pub async fn try_initialize_distribution(
     )
     .unwrap();
 
-    let mut compute_unit_limit = 24_000;
+    let mut compute_unit_limit = 75_000;
 
     let (distribution_key, bump) = Distribution::find_address(next_dz_epoch);
     compute_unit_limit += Wallet::compute_units_for_bump_seed(bump);
@@ -134,10 +142,41 @@ pub async fn try_initialize_distribution(
     let (_, bump) = state::find_2z_token_pda_address(&distribution_key);
     compute_unit_limit += Wallet::compute_units_for_bump_seed(bump);
 
+    let finalize_rewards_ix = try_build_instruction(
+        &ID,
+        FinalizeDistributionRewardsAccounts::new(&wallet.pubkey(), rewards_dz_epoch),
+        &RevenueDistributionInstructionData::FinalizeDistributionRewards,
+    )?;
+
+    let SolConversionState {
+        program_state: (_, sol_conversion_program_state),
+        configuration_registry: _,
+        journal: _,
+        fixed_fill_quantity,
+    } = SolConversionState::try_fetch(&wallet.connection).await?;
+
+    let expected_fill_count =
+        rewards_distribution.checked_total_sol_debt().unwrap() / fixed_fill_quantity + 1;
+
+    let sweep_distribution_tokens_ix = try_build_instruction(
+        &ID,
+        SweepDistributionTokensAccounts::new(
+            rewards_dz_epoch,
+            &config.sol_2z_swap_program_id,
+            &sol_conversion_program_state.fills_registry_key,
+        ),
+        &RevenueDistributionInstructionData::SweepDistributionTokens,
+    )?;
+    compute_unit_limit += 80 * expected_fill_count as u32;
+
     let instructions = vec![
         initialize_distribution_ix,
+        finalize_rewards_ix,
+        sweep_distribution_tokens_ix,
         ComputeBudgetInstruction::set_compute_unit_limit(compute_unit_limit),
-        ComputeBudgetInstruction::set_compute_unit_price(1_000_000), // Land it.
+        // We intentionally ignore the --with-compute-unit-price flag here to
+        // ensure that we land the distribution initialization.
+        ComputeBudgetInstruction::set_compute_unit_price(100_000),
     ];
 
     let transaction = wallet.new_transaction(&instructions).await?;
@@ -149,6 +188,8 @@ pub async fn try_initialize_distribution(
         wallet.print_verbose_output(&[tx_sig]).await?;
     }
 
+    // TODO: Add the distribute-rewards calls here.
+
     Ok(())
 }
 
@@ -159,18 +200,13 @@ async fn try_write_off_distribution_debt(
     wallet: &Wallet,
     dz_ledger_connection: &DoubleZeroLedgerConnection,
     record_accountant_key: &Pubkey,
-    rewards_dz_epoch: DoubleZeroEpoch,
+    rewards_distribution: &ZeroCopyAccountOwnedData<Distribution>,
 ) -> Result<()> {
     let wallet_key = wallet.pubkey();
+    let rewards_dz_epoch = rewards_distribution.dz_epoch;
 
     // Track running deposit balances when we iterate through epochs.
     let mut deposit_balances = HashMap::new();
-
-    let (distribution_key, _) = Distribution::find_address(rewards_dz_epoch);
-    let mut rewards_distribution = wallet
-        .connection
-        .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
-        .await?;
 
     if rewards_distribution.is_rewards_calculation_finalized() {
         tracing::info!("Rewards already finalized for epoch {rewards_dz_epoch}");
@@ -181,6 +217,8 @@ async fn try_write_off_distribution_debt(
         tracing::info!("No debt found for epoch {rewards_dz_epoch}");
         return Ok(());
     }
+
+    let mut rewards_distribution = rewards_distribution.clone();
 
     // Write-offs will have to terminate if the uncollectible debt exceeds the
     // total debt. This boolean will never be false if the only debt written off
@@ -369,10 +407,14 @@ async fn try_write_off_distribution_debt(
             instructions_and_compute_units,
             &[wallet],
             &[],
-            false, // allow_compute_price_instruction
+            true, // allow_compute_price_instruction
         )?;
 
-        for instructions in instruction_batches {
+        for mut instructions in instruction_batches {
+            if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
+                instructions.push(compute_unit_price_ix.clone());
+            }
+
             let transaction = wallet.new_transaction(&instructions).await?;
             let tx_sig = wallet.send_or_simulate_transaction(&transaction).await?;
 
