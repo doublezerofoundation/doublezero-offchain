@@ -618,6 +618,11 @@ pub async fn post_debt_collection_to_slack(
     ];
 
     let total_attempted_transactions_count: u64 = debt_collection_results.total_validators as u64;
+
+    if total_attempted_transactions_count == 0 {
+        return Ok(());
+    };
+
     let successful_transactions_count: u64 =
         debt_collection_results.successful_transactions_count as u64;
     let already_paid_count: u64 = debt_collection_results.already_paid_count as u64;
