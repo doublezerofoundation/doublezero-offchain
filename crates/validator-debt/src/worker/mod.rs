@@ -1,13 +1,18 @@
 mod initialize_distribution;
 
-//
+use std::{
+    collections::HashMap,
+    str::FromStr,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
-use std::{collections::HashMap, str::FromStr, sync::Arc};
-
-use anyhow::{Result, bail, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use doublezero_solana_client_tools::{
     payer::{TransactionOutcome, Wallet},
-    rpc::DoubleZeroLedgerConnection,
+    rpc::{DoubleZeroLedgerConnection, try_fetch_zero_copy_data_with_commitment},
 };
 use doublezero_solana_sdk::{
     revenue_distribution::{
@@ -43,6 +48,53 @@ use crate::{
     validator_debt::{ComputedSolanaValidatorDebt, ComputedSolanaValidatorDebts},
 };
 
+/// Tracks whether we've already seen the paused state (to avoid WARN spam).
+static WAS_PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// Returns `true` if paused (caller should bail with Ok), `false` otherwise.
+fn handle_pause_check(is_paused: bool) -> bool {
+    if is_paused {
+        let was_previously_paused = WAS_PAUSED.swap(true, Ordering::SeqCst);
+        if !was_previously_paused {
+            tracing::warn!(
+                "Revenue Distribution program is PAUSED. Skipping validator debt operations."
+            );
+        } else {
+            tracing::debug!(
+                "Revenue Distribution program is still paused. Skipping validator debt operations."
+            );
+        }
+        true
+    } else {
+        let was_previously_paused = WAS_PAUSED.swap(false, Ordering::SeqCst);
+        if was_previously_paused {
+            tracing::info!(
+                "Revenue Distribution program has RESUMED. Proceeding with validator debt operations."
+            );
+        }
+        false
+    }
+}
+
+/// Check pause state. Returns `true` if paused (should skip)
+async fn is_program_paused_rpc(rpc_client: &RpcClient) -> Result<bool> {
+    let (program_config_key, _) = ProgramConfig::find_address();
+    let config = try_fetch_zero_copy_data_with_commitment::<ProgramConfig>(
+        rpc_client,
+        &program_config_key,
+        rpc_client.commitment(),
+    )
+    .await
+    .context("Revenue Distribution program not initialized")?;
+
+    Ok(handle_pause_check(config.is_paused()))
+}
+
+/// Check pause state using an already-fetched config
+pub(super) fn is_config_paused(config: &ProgramConfig) -> bool {
+    handle_pause_check(config.is_paused())
+}
+
 #[derive(Debug, Default, Serialize)]
 pub struct WriteSummary {
     pub dz_epoch: u64,
@@ -65,6 +117,10 @@ pub async fn finalize_distribution(
     transaction: Transaction,
     dz_epoch: u64,
 ) -> Result<()> {
+    if is_program_paused_rpc(solana_debt_calculator.solana_rpc_client()).await? {
+        return Ok(());
+    }
+
     let transaction_to_submit = transaction
         .finalize_distribution(
             solana_debt_calculator.solana_rpc_client(),
@@ -132,6 +188,15 @@ pub async fn calculate_distribution(
     dz_epoch: u64,
     post_to_ledger_only: bool,
 ) -> Result<WriteSummary> {
+    if is_program_paused_rpc(solana_debt_calculator.solana_rpc_client()).await? {
+        // Return an empty summary when paused (skip work).
+        return Ok(WriteSummary {
+            dz_epoch,
+            dry_run: transaction.dry_run,
+            ..Default::default()
+        });
+    }
+
     let fetched_dz_epoch_info = solana_debt_calculator
         .ledger_rpc_client()
         .get_epoch_info()
@@ -392,6 +457,11 @@ pub async fn pay_all_solana_validator_debt(
     dz_ledger: DoubleZeroLedgerConnection,
 ) -> Result<()> {
     let (_, config) = try_fetch_config(&wallet.connection).await?;
+
+    if is_config_paused(&config) {
+        return Ok(());
+    }
+
     let dz_epoch_range = Vec::from_iter(
         GENESIS_DZ_EPOCH_MAINNET_BETA..(config.last_completed_epoch().unwrap().value()),
     );
@@ -824,4 +894,47 @@ async fn try_initialize_missing_deposit_accounts(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod pause_gate_tests {
+    use super::*;
+
+    fn reset_pause_state() {
+        WAS_PAUSED.store(false, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_pause_transition_first_detection_triggers_warn_path() {
+        reset_pause_state();
+
+        let result = handle_pause_check(true);
+        assert!(result); // paused = should skip
+        assert!(WAS_PAUSED.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_pause_repeated_detection_does_not_retrigger() {
+        reset_pause_state();
+
+        let _ = handle_pause_check(true);
+        assert!(WAS_PAUSED.load(Ordering::SeqCst));
+
+        let was_before = WAS_PAUSED.load(Ordering::SeqCst);
+        let result = handle_pause_check(true);
+        assert!(result); // still paused
+        assert_eq!(was_before, WAS_PAUSED.load(Ordering::SeqCst)); // unchanged
+    }
+
+    #[test]
+    fn test_resume_transition_flips_state() {
+        reset_pause_state();
+
+        let _ = handle_pause_check(true);
+        assert!(WAS_PAUSED.load(Ordering::SeqCst));
+
+        let result = handle_pause_check(false);
+        assert!(!result); // not paused = proceed
+        assert!(!WAS_PAUSED.load(Ordering::SeqCst)); // state is now false
+    }
 }
