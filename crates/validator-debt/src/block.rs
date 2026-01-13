@@ -24,10 +24,6 @@ pub async fn get_block_rewards(
 
     let epoch_diff = epoch_info.epoch - epoch;
 
-    // TODO: Do we need this check?
-    if epoch_diff >= 5 {
-        bail!("Epoch diff is greater than 5")
-    }
     let first_slot = first_slot_in_current_epoch - (epoch_info.slots_in_epoch * epoch_diff);
 
     // Fetch the leader schedule

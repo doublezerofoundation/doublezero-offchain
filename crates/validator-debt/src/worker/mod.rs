@@ -5,7 +5,7 @@ mod pause_gate;
 
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, anyhow, bail, ensure};
 use doublezero_solana_client_tools::{
     payer::{TransactionOutcome, Wallet},
     rpc::{DoubleZeroLedgerConnection, SolanaConnection},
@@ -29,10 +29,10 @@ pub(super) use pause_gate::is_config_paused;
 use reqwest::Client;
 use serde::Serialize;
 use slack_notifier;
-use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_client::{nonblocking::rpc_client::RpcClient, rpc_config::RpcGetVoteAccountsConfig};
 use solana_sdk::{
-    clock::Clock, compute_budget::ComputeBudgetInstruction, pubkey::Pubkey, signer::Signer,
-    sysvar::clock,
+    clock::Clock, commitment_config::CommitmentConfig, compute_budget::ComputeBudgetInstruction,
+    pubkey::Pubkey, signer::Signer, sysvar::clock,
 };
 use tabled::Tabled;
 
@@ -299,11 +299,17 @@ pub async fn calculate_distribution(
         s3_validator_keys.len()
     );
 
-    // Convert to validator pubkey strings for rewards calculation
-    let mut validator_pubkeys: Vec<String> = s3_validator_keys
+    let validator_vote_pubkeys: Vec<String> = s3_validator_keys
         .iter()
-        .map(|vk| vk.pubkey.clone())
+        .map(|vk| vk.vote_account_pubkey.clone())
         .collect();
+
+    // Convert to validator pubkey strings for rewards calculation
+    let mut validator_pubkeys: Vec<String> = get_pubkey_from_votekey(
+        validator_vote_pubkeys,
+        solana_debt_calculator.solana_rpc_client(),
+    )
+    .await?;
 
     validator_pubkeys.sort();
 
@@ -854,4 +860,36 @@ async fn try_initialize_missing_deposit_accounts(
     }
 
     Ok(())
+}
+
+// TODO: backon for retries...
+async fn get_pubkey_from_votekey(
+    votekeys: Vec<String>,
+    rpc_client: &RpcClient,
+) -> Result<Vec<String>> {
+    let validator_pubkeys: Vec<String> = stream::iter(votekeys)
+        .map(|votekey| async move {
+            let vote_account = rpc_client
+                .get_vote_accounts_with_config(RpcGetVoteAccountsConfig {
+                    vote_pubkey: Some(votekey.clone()),
+                    commitment: Some(CommitmentConfig::finalized()),
+                    keep_unstaked_delinquents: None,
+                    delinquent_slot_distance: None,
+                })
+                .await?;
+
+            let node_pubkey = vote_account
+                .current
+                .first() // should be only one entry ever since only one can be active
+                .or_else(|| vote_account.delinquent.first())
+                .map(|v| v.node_pubkey.clone())
+                .ok_or_else(|| anyhow!("No vote account found for votekey {}", votekey))?;
+
+            Ok::<String, anyhow::Error>(node_pubkey)
+        })
+        .buffer_unordered(20)
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    Ok(validator_pubkeys)
 }

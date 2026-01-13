@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- use vote key instead of pubkey to calculate debt ([249](https://github.com/doublezerofoundation/doublezero-offchain/pull/249))
 - bail early when Revenue Distribution program is paused ([#244](https://github.com/doublezerofoundation/doublezero-offchain/pull/244))
 - finalize zero debt ([#248](https://github.com/doublezerofoundation/doublezero-offchain/pull/248))
 - filter out epochs with no successful debt collection ([#246](https://github.com/doublezerofoundation/doublezero-offchain/pull/246))
