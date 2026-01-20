@@ -3,12 +3,12 @@ use std::{collections::HashMap, fs::File, sync::Arc};
 use anyhow::{Result, anyhow};
 use doublezero_sdk::record::pubkey;
 use doublezero_solana_client_tools::{
-    account::zero_copy::ZeroCopyAccountOwnedData, payer::Wallet, rpc::DoubleZeroLedgerConnection,
+    account::zero_copy::ZeroCopyAccountOwnedData, rpc::DoubleZeroLedgerConnection,
 };
 use doublezero_solana_sdk::{
     merkle::MerkleProof,
     revenue_distribution::{
-        GENESIS_DZ_EPOCH_MAINNET_BETA, ID,
+        ID,
         instruction::{
             DistributionMerkleRootKind, RevenueDistributionInstructionData,
             account::{
@@ -16,7 +16,7 @@ use doublezero_solana_sdk::{
                 PaySolanaValidatorDebtAccounts, VerifyDistributionMerkleRootAccounts,
             },
         },
-        state::{Distribution, SolanaValidatorDeposit},
+        state::Distribution,
         try_is_processed_leaf,
         types::{DoubleZeroEpoch, SolanaValidatorDebt},
     },
@@ -275,72 +275,13 @@ impl Transaction {
         Ok(())
     }
 
-    pub async fn fetch_deposit_accounts(
-        &self,
-        last_completed_dz_epoch: &DoubleZeroEpoch,
-        dz_ledger: DoubleZeroLedgerConnection,
-        wallet: &Wallet,
-    ) -> Result<HashMap<Pubkey, u64>> {
-        let mut deposit_balances = HashMap::new();
-        for dz_epoch in (GENESIS_DZ_EPOCH_MAINNET_BETA..=last_completed_dz_epoch.value())
-            .map(DoubleZeroEpoch::new)
-        {
-            let (distribution_key, _) = Distribution::find_address(dz_epoch);
-
-            let distribution: ZeroCopyAccountOwnedData<Distribution> = wallet
-                .connection
-                .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
-                .await?;
-
-            if distribution.is_all_solana_validator_debt_processed() {
-                continue;
-            }
-
-            let (_, computed_debt) = ledger::try_fetch_debt_record(
-                &dz_ledger,
-                &wallet.pubkey(),
-                dz_epoch.value(),
-                dz_ledger.commitment(),
-            )
-            .await?;
-            let rent_sysvar = wallet
-                .connection
-                .try_fetch_sysvar::<solana_sdk::rent::Rent>()
-                .await?;
-
-            for (_leaf_index, debt) in computed_debt.debts.iter().enumerate() {
-                let node_id = debt.node_id;
-                let (deposit_key, _deposit_bump) = SolanaValidatorDeposit::find_address(&node_id);
-
-                if let std::collections::hash_map::Entry::Vacant(entry) =
-                    deposit_balances.entry(node_id)
-                {
-                    let deposit_account_info = wallet
-                        .connection
-                        .get_account(&deposit_key)
-                        .await
-                        .unwrap_or_default();
-
-                    let deposit_balance = doublezero_solana_client_tools::account::balance(
-                        &deposit_account_info,
-                        &rent_sysvar,
-                    );
-                    entry.insert(deposit_balance);
-                    tracing::debug!(
-                        "Fetched deposit balance for node {node_id}: {deposit_balance}"
-                    );
-                }
-            }
-        }
-        Ok(deposit_balances)
-    }
-
     pub async fn pay_solana_validator_debt(
         &self,
         solana_rpc_client: &RpcClient,
         debt: ComputedSolanaValidatorDebts,
         dz_epoch: u64,
         distribution: &ZeroCopyAccountOwnedData<Distribution>,
+        deposit_account_ref: &HashMap<Pubkey, u64>,
     ) -> Result<DebtCollectionResults> {
         let mut overrides = Vec::new();
         // TODO: This is a temporary fix to exclude a couple of validators
@@ -401,14 +342,25 @@ impl Transaction {
                                 success: false,
                             })
                         } else {
-                            Self::process_single_debt_payment(
-                                self,
-                                solana_rpc_client,
-                                &debt,
-                                proof,
-                                dz_epoch,
-                            )
-                            .await
+                            let deposit_account = deposit_account_ref.get(&debt.node_id).unwrap();
+
+                            if debt.amount > *deposit_account {
+                                Ok(DebtCollectionResult {
+                                    validator_id: debt.node_id.to_string(),
+                                    amount: debt.amount,
+                                    result: Some("Insufficient funds".to_string()),
+                                    success: false,
+                                })
+                            } else {
+                                Self::process_single_debt_payment(
+                                    self,
+                                    solana_rpc_client,
+                                    &debt,
+                                    proof,
+                                    dz_epoch,
+                                )
+                                .await
+                            }
                         }
                     }
                 })

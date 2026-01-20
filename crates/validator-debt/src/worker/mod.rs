@@ -7,6 +7,7 @@ use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use anyhow::{Result, bail, ensure};
 use doublezero_solana_client_tools::{
+    account::zero_copy::ZeroCopyAccountOwnedData,
     payer::{TransactionOutcome, Wallet},
     rpc::{DoubleZeroLedgerConnection, SolanaConnection},
 };
@@ -17,8 +18,8 @@ use doublezero_solana_sdk::{
         instruction::{
             RevenueDistributionInstructionData, account::InitializeSolanaValidatorDepositAccounts,
         },
-        state::{ProgramConfig, SolanaValidatorDeposit},
-        types::SolanaValidatorDebt,
+        state::{Distribution, ProgramConfig, SolanaValidatorDeposit},
+        types::{DoubleZeroEpoch, SolanaValidatorDebt},
     },
     try_build_instruction,
 };
@@ -422,6 +423,10 @@ pub async fn pay_all_solana_validator_debt(
         return Ok(());
     }
 
+    tracing::info!("fetching deposit accounts");
+    let deposit_accounts = fetch_deposit_accounts(&config.last_completed_epoch().unwrap(), &dz_ledger, &wallet).await?;
+
+
     let dz_epoch_range = Vec::from_iter(
         GENESIS_DZ_EPOCH_MAINNET_BETA..(config.last_completed_epoch().unwrap().value()),
     );
@@ -431,10 +436,11 @@ pub async fn pay_all_solana_validator_debt(
             let wallet_ref = &wallet;
             let ledger_ref = &dz_ledger;
             let config_ref = &config;
+            let deposit_account_ref = &deposit_accounts;
 
             async move {
                 let result =
-                    pay_solana_validator_debt(wallet_ref, ledger_ref, dz_epoch, config_ref).await?;
+                    pay_solana_validator_debt(wallet_ref, ledger_ref, dz_epoch, config_ref, deposit_account_ref).await?;
                 tracing::info!("Finished debt collection for epoch {dz_epoch}");
                 Ok::<_, anyhow::Error>(result)
             }
@@ -456,6 +462,7 @@ pub async fn pay_solana_validator_debt(
     dz_ledger: &DoubleZeroLedgerConnection,
     dz_epoch_value: u64,
     config: &ProgramConfig,
+    deposit_account_ref: &HashMap<Pubkey, u64>
 ) -> Result<DebtCollectionResults> {
     let (_, computed_debt) = ledger::try_fetch_debt_record(
         dz_ledger,
@@ -478,8 +485,67 @@ pub async fn pay_solana_validator_debt(
             computed_debt,
             dz_epoch_value,
             &distribution,
+            deposit_account_ref,
         )
         .await
+}
+
+pub async fn fetch_deposit_accounts(
+    last_completed_dz_epoch: &DoubleZeroEpoch,
+    dz_ledger: &DoubleZeroLedgerConnection,
+    wallet: &Wallet,
+) -> Result<HashMap<Pubkey, u64>> {
+    let mut deposit_balances = HashMap::new();
+    for dz_epoch in
+        (GENESIS_DZ_EPOCH_MAINNET_BETA..=last_completed_dz_epoch.value()).map(DoubleZeroEpoch::new)
+    {
+        tracing::info!("{:#?}", dz_epoch);
+        let (distribution_key, _) = Distribution::find_address(dz_epoch);
+
+        let distribution: ZeroCopyAccountOwnedData<Distribution> = wallet
+            .connection
+            .try_fetch_zero_copy_data::<Distribution>(&distribution_key)
+            .await?;
+
+        if distribution.is_all_solana_validator_debt_processed() {
+            continue;
+        }
+
+        let (_, computed_debt) = ledger::try_fetch_debt_record(
+            dz_ledger,
+            &wallet.pubkey(),
+            dz_epoch.value(),
+            dz_ledger.commitment(),
+        )
+        .await?;
+        let rent_sysvar = wallet
+            .connection
+            .try_fetch_sysvar::<solana_sdk::rent::Rent>()
+            .await?;
+
+        for (_leaf_index, debt) in computed_debt.debts.iter().enumerate() {
+            let node_id = debt.node_id;
+            let (deposit_key, _deposit_bump) = SolanaValidatorDeposit::find_address(&node_id);
+
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                deposit_balances.entry(node_id)
+            {
+                let deposit_account_info = wallet
+                    .connection
+                    .get_account(&deposit_key)
+                    .await
+                    .unwrap_or_default();
+
+                let deposit_balance = doublezero_solana_client_tools::account::balance(
+                    &deposit_account_info,
+                    &rent_sysvar,
+                );
+                entry.insert(deposit_balance);
+                tracing::debug!("Fetched deposit balance for node {node_id}: {deposit_balance}");
+            }
+        }
+    }
+    Ok(deposit_balances)
 }
 
 async fn write_transaction(
