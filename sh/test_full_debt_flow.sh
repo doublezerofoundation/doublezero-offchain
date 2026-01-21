@@ -21,11 +21,11 @@
 set -eu
 
 # Constants
-MAINNET_BETA_DEBT_ACCOUNTANT_KEY=acLisxTpNkoctPZoqssyo58pcdnHzJyRFhod7Wxkz5a
+TEST_DEBT_ACCOUNTANT_KEY=acLisxTpNkoctPZoqssyo58pcdnHzJyRFhod7Wxkz5a
 VALIDATOR_DEBT_CLI=target/debug/doublezero-solana-validator-debt
 ADMIN_CLI=target/debug/doublezero-revenue-distribution-admin
 SOLANA_CLI=target/debug/doublezero-solana
-
+TRANSACTION_CONFIRMATION_WAIT=5
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -68,7 +68,7 @@ wait_for_solana() {
         sleep 2
     done
 
-    log_error "Solana fork did not start within 60 seconds."
+    log_error "Solana fork did not start within 120 seconds"
     exit 1
 }
 
@@ -124,16 +124,16 @@ step_initialize() {
     fi
 
     log_info "Initializing distribution for DZ epoch: $DZ_EPOCH"
-    log_info "Using debt accountant: $MAINNET_BETA_DEBT_ACCOUNTANT_KEY"
+    log_info "Using debt accountant: $TEST_DEBT_ACCOUNTANT_KEY"
 
-    echo "$ $VALIDATOR_DEBT_CLI initialize-distribution -v -ul --dz-env mainnet-beta --bypass-dz-epoch-check --record-debt-accountant $MAINNET_BETA_DEBT_ACCOUNTANT_KEY --with-compute-unit-price 1000"
+    echo "$ $VALIDATOR_DEBT_CLI initialize-distribution -v -ul --dz-env mainnet-beta --bypass-dz-epoch-check --record-debt-accountant $TEST_DEBT_ACCOUNTANT_KEY --with-compute-unit-price 1000"
 
     $VALIDATOR_DEBT_CLI initialize-distribution \
         -v \
         -ul \
         --dz-env mainnet-beta \
         --bypass-dz-epoch-check \
-        --record-debt-accountant "$MAINNET_BETA_DEBT_ACCOUNTANT_KEY" \
+        --record-debt-accountant "$TEST_DEBT_ACCOUNTANT_KEY" \
         --with-compute-unit-price 1000
 
     log_success "Distribution initialized"
@@ -324,16 +324,13 @@ main() {
     # Configure debt write-off feature
     configure_debt_write_off "$CURRENT_EPOCH"
 
-    # In god-mode, we need to wait for a minute between initializations
-    # so let's run the steps
-
     # Run all steps
     step_initialize
 
     # If we just initialized, we might need to wait
     if [ "${SKIP_INITIALIZE:-0}" != "1" ]; then
-        log_info "Waiting 5 seconds for transaction to confirm..."
-        sleep 5
+        log_info "Waiting $TRANSACTION_CONFIRMATION_WAIT seconds for transaction to confirm..."
+        sleep TRANSACTION_CONFIRMATION_WAIT
     fi
 
     step_calculate
