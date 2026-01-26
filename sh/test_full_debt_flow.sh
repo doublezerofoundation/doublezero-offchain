@@ -4,9 +4,10 @@
 #
 # This script tests the full validator debt lifecycle on a local Solana fork.
 # It requires:
-#   - A running Solana local validator (via solana-test-validator or fork)
 #   - Built binaries in target/debug/
 #   - Forked mainnet accounts with revenue distribution program state
+#
+# The script will automatically start and stop the Solana fork.
 #
 # Usage:
 #   ./sh/test_full_debt_flow.sh
@@ -17,6 +18,7 @@
 #   SKIP_CALCULATE - Set to "1" to skip calculation step
 #   SKIP_FINALIZE - Set to "1" to skip finalization step
 #   SKIP_COLLECT - Set to "1" to skip debt collection step
+#   SKIP_FORK_START - Set to "1" to skip starting the fork (use existing)
 
 set -eu
 
@@ -25,7 +27,11 @@ TEST_DEBT_ACCOUNTANT_KEY=acLisxTpNkoctPZoqssyo58pcdnHzJyRFhod7Wxkz5a
 VALIDATOR_DEBT_CLI=target/debug/doublezero-solana-validator-debt
 ADMIN_CLI=target/debug/doublezero-revenue-distribution-admin
 SOLANA_CLI=target/debug/doublezero-solana
+SOLANA_FORK_CLI=target/debug/doublezero-solana-fork
 TRANSACTION_CONFIRMATION_WAIT=5
+
+# PID of the fork process (for cleanup)
+FORK_PID=""
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -55,6 +61,41 @@ log_step() {
     echo -e "${GREEN}  STEP: $1${NC}"
     echo -e "${GREEN}============================================${NC}"
     echo ""
+}
+
+# Cleanup function to stop the fork on exit
+cleanup() {
+    if [ -n "$FORK_PID" ] && kill -0 "$FORK_PID" 2>/dev/null; then
+        log_info "Stopping Solana fork (PID: $FORK_PID)..."
+        kill "$FORK_PID" 2>/dev/null || true
+        wait "$FORK_PID" 2>/dev/null || true
+        log_success "Solana fork stopped"
+    fi
+}
+
+# Set up trap to cleanup on exit
+trap cleanup EXIT INT TERM
+
+# Start the Solana fork
+start_solana_fork() {
+    if [ "${SKIP_FORK_START:-0}" = "1" ]; then
+        log_warning "Skipping fork start (SKIP_FORK_START=1)"
+        return 0
+    fi
+
+    log_info "Starting Solana fork..."
+
+    if [ ! -f "$SOLANA_FORK_CLI" ]; then
+        log_error "Solana fork CLI not found at $SOLANA_FORK_CLI"
+        log_info "Run 'cargo build' first"
+        exit 1
+    fi
+
+    # Start the fork in the background
+    $SOLANA_FORK_CLI --reset &
+    FORK_PID=$!
+
+    log_info "Solana fork started with PID: $FORK_PID"
 }
 
 # Wait for Solana fork to start
@@ -90,6 +131,12 @@ verify_binaries() {
 
     if [ ! -f "$SOLANA_CLI" ]; then
         log_error "Solana CLI not found at $SOLANA_CLI"
+        log_info "Run 'cargo build' first"
+        exit 1
+    fi
+
+    if [ ! -f "$SOLANA_FORK_CLI" ]; then
+        log_error "Solana fork CLI not found at $SOLANA_FORK_CLI"
         log_info "Run 'cargo build' first"
         exit 1
     fi
@@ -309,6 +356,11 @@ main() {
 
     # Verify environment
     verify_binaries
+
+    # Start the Solana fork
+    start_solana_fork
+
+    # Wait for it to be ready
     wait_for_solana
     sanity_check
 
