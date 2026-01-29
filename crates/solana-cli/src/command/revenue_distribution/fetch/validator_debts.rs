@@ -53,8 +53,7 @@ struct ValidatorDebtsNodeTableRow {
     dz_epoch: u64,
     solana_epoch: String,
     amount: String,
-    processed: &'static str,
-    written_off: &'static str,
+    status: &'static str,
 }
 
 impl ValidatorDebtsCommand {
@@ -149,15 +148,18 @@ async fn try_print_validator_debts_outstanding_table(
                 let bitmap_range = distribution.processed_solana_validator_debt_bitmap_range();
                 let processed_leaf_data = &distribution.remaining_data[bitmap_range];
 
-                let bitmap_range =
-                    distribution.processed_solana_validator_debt_write_off_bitmap_range();
-                let written_off_leaf_data = &distribution.remaining_data[bitmap_range];
+                let is_written_off = if distribution.is_solana_validator_debt_write_off_enabled() {
+                    let bitmap_range =
+                        distribution.processed_solana_validator_debt_write_off_bitmap_range();
+                    let written_off_leaf_data = &distribution.remaining_data[bitmap_range];
+                    try_is_processed_leaf(written_off_leaf_data, index).unwrap_or_default()
+                } else {
+                    false
+                };
 
                 // If the debt is not processed or if it is processed but
                 // written off, we should include it in the total debt.
-                if !try_is_processed_leaf(processed_leaf_data, index).unwrap()
-                    || try_is_processed_leaf(written_off_leaf_data, index).unwrap_or_default()
-                {
+                if !try_is_processed_leaf(processed_leaf_data, index).unwrap() || is_written_off {
                     total_debt += debt_record.data.debts[index].amount;
                 }
             }
@@ -243,8 +245,13 @@ fn try_print_validator_debts_node_table(
                 dz_epoch: distribution.dz_epoch.value(),
                 solana_epoch,
                 amount: format!("{:.9} SOL", debt.amount as f64 * 1e-9),
-                processed: if is_processed { "yes" } else { "no" },
-                written_off: if is_written_off { "yes" } else { "no" },
+                status: if !is_processed {
+                    "unpaid"
+                } else if is_written_off {
+                    "delinquent"
+                } else {
+                    "paid"
+                },
             });
         }
     }
