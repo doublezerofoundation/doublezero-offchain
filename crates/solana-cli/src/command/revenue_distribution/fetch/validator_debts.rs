@@ -261,7 +261,7 @@ fn try_print_validator_debts_node_table(
     super::print_table(
         outputs,
         super::TableOptions {
-            columns_aligned_right: Some(&[1, 2, 3, 4, 5]),
+            columns_aligned_right: Some(&[1, 2, 3, 4]),
         },
     );
 
