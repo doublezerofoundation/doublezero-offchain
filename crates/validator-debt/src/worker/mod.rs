@@ -149,7 +149,6 @@ pub async fn calculate_distribution(
 ) -> Result<WriteSummary> {
     let config = fetch_config_from_rpc(solana_debt_calculator.solana_rpc_client()).await?;
     let dz_epoch = config.last_completed_epoch().unwrap_or_default().value();
-    tracing::info!("---------{dz_epoch}");
     if is_config_paused(&config) {
         // Return an empty summary when paused (skip work).
         return Ok(WriteSummary {
