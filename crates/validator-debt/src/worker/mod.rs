@@ -149,6 +149,7 @@ pub async fn calculate_distribution(
 ) -> Result<WriteSummary> {
     let config = fetch_config_from_rpc(solana_debt_calculator.solana_rpc_client()).await?;
     let dz_epoch = config.last_completed_epoch().unwrap_or_default().value();
+    tracing::info!("---------{dz_epoch}");
     if is_config_paused(&config) {
         // Return an empty summary when paused (skip work).
         return Ok(WriteSummary {
@@ -424,7 +425,7 @@ pub async fn pay_all_solana_validator_debt(
     }
 
     let dz_epoch_range = Vec::from_iter(
-        GENESIS_DZ_EPOCH_MAINNET_BETA..(config.last_completed_epoch().unwrap().value()),
+        GENESIS_DZ_EPOCH_MAINNET_BETA..=(config.last_completed_epoch().unwrap().value()),
     );
 
     let tasks: Vec<DebtCollectionResults> = stream::iter(dz_epoch_range)
