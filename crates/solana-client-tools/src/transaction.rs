@@ -4,6 +4,7 @@ use solana_sdk::{
     hash::Hash,
     instruction::Instruction,
     message::{AddressLookupTableAccount, VersionedMessage, v0::Message},
+    packet::PACKET_DATA_SIZE,
     signature::Keypair,
     signer::Signer,
     transaction::VersionedTransaction,
@@ -15,9 +16,9 @@ pub(crate) const TRANSACTION_CU_BUFFER: u32 = 5_000;
 /// When `allow_compute_price_instruction` is true, an extra 9 bytes are reserved.
 pub(crate) fn transaction_size_limit(allow_compute_price_instruction: bool) -> usize {
     if allow_compute_price_instruction {
-        1_232 - 32 - 5 - 9
+        PACKET_DATA_SIZE - 32 - 5 - 9
     } else {
-        1_232 - 32 - 5
+        PACKET_DATA_SIZE - 32 - 5
     }
 }
 
@@ -169,10 +170,6 @@ mod tests {
         }
     }
 
-    /// MONEY-CRITICAL: Forces multiple batches and asserts:
-    /// (a) global order of user instructions preserved
-    /// (b) each batch serialized size <= transaction_size_limit(false)
-    /// (c) each batch has exactly one ComputeBudget CU-limit instruction
     #[test]
     fn batching_preserves_order_and_respects_size_limit() {
         // Random signer OK: pubkey only for Message::try_compile; assertions don't depend on it.
@@ -195,7 +192,7 @@ mod tests {
         );
 
         let limit = transaction_size_limit(false);
-        let mut prev_id: Option<u8> = None;
+        let mut observed_ids: Vec<u8> = Vec::new();
 
         for (i, batch) in batches.iter().enumerate() {
             // (b) size check
@@ -204,26 +201,30 @@ mod tests {
             assert!(size <= limit, "Batch {} size {} > limit {}", i, size, limit);
 
             // (c) exactly one CU-limit instruction
-            let cb_count = batch
+            let cu_limit_count = batch
                 .iter()
-                .filter(|ix| is_compute_budget_instruction(ix))
+                .filter(|ix| decode_cu_limit(ix).is_some())
                 .count();
             assert_eq!(
-                cb_count, 1,
-                "Batch {} should have exactly 1 ComputeBudget ix",
+                cu_limit_count, 1,
+                "Batch {} should have exactly 1 CU-limit ix",
                 i
             );
 
-            // (a) order check
+            // (a) collect user instruction ids
             for ix in batch {
                 if let Some(id) = instruction_id(ix) {
-                    if let Some(p) = prev_id {
-                        assert!(id > p, "Order violated: {} after {}", id, p);
-                    }
-                    prev_id = Some(id);
+                    observed_ids.push(id);
                 }
             }
         }
+
+        // (a) completeness check: all expected ids present
+        let expected_ids: Vec<u8> = (0u8..30).collect();
+        assert_eq!(
+            observed_ids, expected_ids,
+            "Not all user instructions present or order violated"
+        );
     }
 
     /// Asserts ComputeBudget CU value == TRANSACTION_CU_BUFFER + sum(batch CUs).
@@ -247,12 +248,10 @@ mod tests {
             "Expected single batch for small instructions"
         );
 
-        let cb_ix = batches[0]
+        let cu = batches[0]
             .iter()
-            .find(|ix| is_compute_budget_instruction(ix))
-            .expect("batch must have ComputeBudget ix");
-
-        let cu = decode_cu_limit(cb_ix).expect("ComputeBudget ix should have CU limit");
+            .find_map(decode_cu_limit)
+            .expect("batch must have CU-limit ix");
         let expected = TRANSACTION_CU_BUFFER + 3 * 100_000;
         assert_eq!(cu, expected, "CU limit should be buffer + sum");
     }
@@ -260,6 +259,11 @@ mod tests {
     /// With allow_compute_price_instruction=true, size limit is smaller and all batches respect it.
     #[test]
     fn compute_price_flag_uses_smaller_limit() {
+        assert!(
+            transaction_size_limit(true) < transaction_size_limit(false),
+            "price flag should reduce size limit"
+        );
+
         let signer = Keypair::new();
         let signers = vec![&signer];
 

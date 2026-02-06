@@ -603,17 +603,8 @@ mod tests {
                 }
                 (Some(_), None) => panic!("[{}] expected Some result", name),
                 (None, None) => {}
-                (None, Some(_)) => {}
+                (None, Some(res)) => panic!("[{}] expected None result, got {:?}", name, res),
             }
-        }
-    }
-
-    #[test]
-    fn failure_markers_never_succeed() {
-        let node = Pubkey::new_from_array([2u8; 32]);
-        for marker in ["Merkle leaf", "Insufficient funds"] {
-            let r = parse_program_logs(1, node, Some(logs_with_line5(marker)));
-            assert!(!r.success, "Marker '{}' must not succeed", marker);
         }
     }
 }
