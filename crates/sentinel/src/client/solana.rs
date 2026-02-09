@@ -31,6 +31,7 @@ use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     instruction::CompiledInstruction,
+    program_pack::Pack,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -72,6 +73,17 @@ pub trait SolRpcClientType {
     ) -> Result<bool>;
 
     async fn get_validator_ip(&self, validator_id: &Pubkey) -> Result<Option<Ipv4Addr>>;
+
+    async fn get_token_account_balance(&self, token_account: &Pubkey) -> Result<u64>;
+
+    async fn transfer_spl_token(
+        &self,
+        from: &Pubkey,
+        to: &Pubkey,
+        amount: u64,
+        mint: &Pubkey,
+        decimals: u8,
+    ) -> Result<Signature>;
 }
 
 pub struct SolRpcClient {
@@ -116,6 +128,22 @@ impl SolRpcClientType for SolRpcClient {
 
     async fn get_validator_ip(&self, validator_id: &Pubkey) -> Result<Option<Ipv4Addr>> {
         self.get_validator_ip(validator_id).await
+    }
+
+    async fn get_token_account_balance(&self, token_account: &Pubkey) -> Result<u64> {
+        self.get_token_account_balance(token_account).await
+    }
+
+    async fn transfer_spl_token(
+        &self,
+        from: &Pubkey,
+        to: &Pubkey,
+        amount: u64,
+        mint: &Pubkey,
+        decimals: u8,
+    ) -> Result<Signature> {
+        self.transfer_spl_token(from, to, amount, mint, decimals)
+            .await
     }
 }
 
@@ -331,6 +359,51 @@ impl SolRpcClient {
                 SocketAddr::V6(addr_v6) => addr_v6.ip().to_ipv4_mapped(),
             });
         Ok(address)
+    }
+
+    pub async fn get_token_account_balance(&self, token_account: &Pubkey) -> Result<u64> {
+        let account = self.client.get_account(token_account).await?;
+        let token_data = spl_token_interface::state::Account::unpack(&account.data)
+            .map_err(|e| Error::Deserialize(format!("failed to unpack token account: {e}")))?;
+        if token_data.owner != self.payer.pubkey() {
+            return Err(Error::Deserialize(format!(
+                "token account {} owner {} != sentinel {}",
+                token_account,
+                token_data.owner,
+                self.payer.pubkey()
+            )));
+        }
+        Ok(token_data.amount)
+    }
+
+    pub async fn transfer_spl_token(
+        &self,
+        from: &Pubkey,
+        to: &Pubkey,
+        amount: u64,
+        mint: &Pubkey,
+        decimals: u8,
+    ) -> Result<Signature> {
+        let signer = &self.payer;
+        let ix = spl_token_interface::instruction::transfer_checked(
+            &spl_token_interface::id(),
+            from,
+            mint,
+            to,
+            &signer.pubkey(),
+            &[],
+            amount,
+            decimals,
+        )
+        .map_err(|e| Error::Deserialize(format!("SPL transfer_checked instruction: {e}")))?;
+
+        let recent_blockhash = self.client.get_latest_blockhash().await?;
+        let transaction = new_transaction(&[ix], &[signer], recent_blockhash);
+
+        Ok(self
+            .client
+            .send_and_confirm_transaction(&transaction)
+            .await?)
     }
 }
 

@@ -1,4 +1,5 @@
 use doublezero_passport::{instruction::AccessMode, state::AccessRequest};
+use doublezero_serviceability::state::tenant::{TenantBillingConfig, TenantPaymentStatus};
 use solana_sdk::{
     hash::Hash,
     instruction::Instruction,
@@ -23,6 +24,14 @@ pub struct AccessId {
     request_pda: Pubkey,
     rent_beneficiary_key: Pubkey,
     mode: AccessMode,
+}
+
+#[derive(Debug, Clone)]
+pub struct TenantBillingInfo {
+    pub tenant_pda: Pubkey,
+    pub token_account: Pubkey,
+    pub current_payment_status: TenantPaymentStatus,
+    pub billing: TenantBillingConfig,
 }
 
 // Verify access request by and return validator_id (pubkey) if successful
