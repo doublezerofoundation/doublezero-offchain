@@ -368,6 +368,11 @@ main() {
 
     # Wait for it to be ready
     wait_for_solana
+
+    # Fund the test wallet on the fork
+    log_info "Airdropping SOL to test wallet..."
+    solana airdrop 100 -ul
+
     sanity_check
 
     # Get current epoch
