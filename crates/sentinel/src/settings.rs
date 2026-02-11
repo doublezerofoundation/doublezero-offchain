@@ -62,6 +62,11 @@ pub struct Settings {
     /// metrics listening endpoint
     #[serde(default = "default_metrics_addr")]
     metrics_addr: String,
+
+    /// Directory for persistent billing state (pending deduction markers).
+    /// Created automatically on startup if it does not exist.
+    #[serde(default = "default_billing_state_dir")]
+    billing_state_dir: PathBuf,
 }
 
 impl Settings {
@@ -124,6 +129,10 @@ impl Settings {
         }
     }
 
+    pub fn billing_state_dir(&self) -> &Path {
+        &self.billing_state_dir
+    }
+
     pub fn doublezero_mint(&self) -> Pubkey {
         match self.env.to_lowercase().as_str() {
             "mainnet" | "mainnet-beta" => {
@@ -140,4 +149,8 @@ fn default_log() -> String {
 
 fn default_metrics_addr() -> String {
     "127.0.0.1:2112".to_string()
+}
+
+fn default_billing_state_dir() -> PathBuf {
+    PathBuf::from("./billing-state")
 }

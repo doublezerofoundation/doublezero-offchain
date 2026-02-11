@@ -2,7 +2,7 @@ use clap::Parser;
 use doublezero_ledger_sentinel::{
     client::{doublezero_ledger::DzRpcClient, solana::SolRpcClient},
     constants::ENV_PREVIOUS_LEADER_EPOCHS,
-    sentinel::{BillingSentinel, PollingSentinel},
+    sentinel::{BillingConfig, BillingSentinel, PollingSentinel},
     settings::{AppArgs, Settings},
 };
 use doublezero_revenue_distribution::state::Journal;
@@ -60,16 +60,20 @@ async fn main() -> anyhow::Result<()> {
     let (journal_pda, _) = Journal::find_address();
     let journal_ata = get_associated_token_address(&journal_pda, &mint);
 
-    info!(%mint, %journal_ata, decimals, "billing: derived 2Z addresses");
+    let billing_state_dir = settings.billing_state_dir().to_path_buf();
+    info!(%mint, %journal_ata, decimals, ?billing_state_dir, "billing: derived 2Z addresses");
 
     let mut billing_sentinel = BillingSentinel::new(
         DzRpcClient::new(dz_rpc_url, keypair.clone(), serviceability_id),
         SolRpcClient::new(sol_rpc_url, keypair),
-        args.billing_poll_interval,
-        args.minimum_balance,
-        journal_ata,
-        mint,
-        decimals,
+        BillingConfig {
+            poll_interval_secs: args.billing_poll_interval,
+            minimum_balance: args.minimum_balance,
+            journal_ata,
+            mint,
+            decimals,
+            pending_dir: billing_state_dir,
+        },
     )
     .await;
 
