@@ -34,6 +34,9 @@ VALIDATOR_DEBT_CLI=target/debug/doublezero-solana-validator-debt
 ADMIN_CLI=target/debug/doublezero-revenue-distribution-admin
 SOLANA_CLI=target/debug/doublezero-solana
 SOLANA_FORK_CLI=target/debug/doublezero-solana-fork
+FORK_STARTUP_WAIT=${FORK_STARTUP_WAIT:-120}
+FORK_STARTUP_INTERVAL=${FORK_STARTUP_INTERVAL:-2}
+TRANSACTION_CONFIRMATION_WAIT=${TRANSACTION_CONFIRMATION_WAIT:-10}
 
 # PID of the fork process (for cleanup)
 FORK_PID=""
