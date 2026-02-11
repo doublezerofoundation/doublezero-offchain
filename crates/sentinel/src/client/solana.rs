@@ -1,6 +1,7 @@
 use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -45,6 +46,9 @@ use url::Url;
 use crate::{AccessId, Error, Result, new_transaction};
 
 const ACCESS_REQUEST_ACCOUNT_INDEX: usize = 2;
+/// Timeout for `send_and_confirm_transaction` calls to prevent the billing
+/// polling loop from stalling on slow RPC confirmations.
+const SEND_AND_CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
 
 const SLOTS_PER_EPOCH: u64 = 432_000;
 
@@ -366,12 +370,11 @@ impl SolRpcClient {
         let token_data = spl_token_interface::state::Account::unpack(&account.data)
             .map_err(|e| Error::Deserialize(format!("failed to unpack token account: {e}")))?;
         if token_data.owner != self.payer.pubkey() {
-            return Err(Error::Deserialize(format!(
-                "token account {} owner {} != sentinel {}",
-                token_account,
-                token_data.owner,
-                self.payer.pubkey()
-            )));
+            return Err(Error::TokenAccountOwnerMismatch {
+                account: *token_account,
+                owner: token_data.owner,
+                sentinel: self.payer.pubkey(),
+            });
         }
         Ok(token_data.amount)
     }
@@ -395,15 +398,26 @@ impl SolRpcClient {
             amount,
             decimals,
         )
-        .map_err(|e| Error::Deserialize(format!("SPL transfer_checked instruction: {e}")))?;
+        .map_err(|e| Error::SplInstruction(format!("transfer_checked: {e}")))?;
+
+        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(12_000);
+        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
 
         let recent_blockhash = self.client.get_latest_blockhash().await?;
-        let transaction = new_transaction(&[ix], &[signer], recent_blockhash);
+        let transaction = new_transaction(
+            &[compute_limit_ix, compute_price_ix, ix],
+            &[signer],
+            recent_blockhash,
+        );
 
-        Ok(self
-            .client
-            .send_and_confirm_transaction(&transaction)
-            .await?)
+        let signature = tokio::time::timeout(
+            SEND_AND_CONFIRM_TIMEOUT,
+            self.client.send_and_confirm_transaction(&transaction),
+        )
+        .await
+        .map_err(|_| Error::Deserialize("transfer_spl_token timed out".into()))??;
+
+        Ok(signature)
     }
 }
 

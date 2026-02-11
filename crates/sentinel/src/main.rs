@@ -65,13 +65,13 @@ async fn main() -> anyhow::Result<()> {
     let mut billing_sentinel = BillingSentinel::new(
         DzRpcClient::new(dz_rpc_url, keypair.clone(), serviceability_id),
         SolRpcClient::new(sol_rpc_url, keypair),
-        BillingConfig {
-            poll_interval_secs: args.billing_poll_interval,
-            minimum_balance: args.minimum_balance,
+        BillingConfig::new(
+            args.billing_poll_interval,
+            args.minimum_balance,
             journal_ata,
             mint,
             decimals,
-        },
+        ),
     )
     .await;
 

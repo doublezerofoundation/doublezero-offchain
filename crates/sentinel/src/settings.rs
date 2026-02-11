@@ -34,7 +34,7 @@ pub struct AppArgs {
     #[arg(long, default_value = "120")]
     pub billing_poll_interval: u64,
 
-    /// Minimum 2Z lamports for a tenant to be considered paid.
+    /// Minimum 2Z token amount (in smallest unit) for a tenant to be considered paid.
     /// Default: 1 (any nonzero balance = paid).
     #[arg(long)]
     pub minimum_balance: Option<u64>,

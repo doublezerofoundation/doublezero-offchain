@@ -1,8 +1,9 @@
-use std::{sync::Arc, time::Duration};
-
-use doublezero_serviceability::state::tenant::{
-    FlatPerEpochConfig, TenantBillingConfig, TenantPaymentStatus,
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
 };
+
+use doublezero_serviceability::state::tenant::{TenantBillingConfig, TenantPaymentStatus};
 use retainer::Cache;
 use solana_sdk::pubkey::Pubkey;
 use tokio::time::interval;
@@ -12,10 +13,12 @@ use tracing::{error, info, warn};
 use crate::{
     BillingReceipt, TenantBillingInfo,
     client::{doublezero_ledger::DzRpcClientType, solana::SolRpcClientType},
+    error::rpc_with_retry,
 };
 
-// cache ttl: 10 minutes
-const BILLING_CACHE_TTL: Duration = Duration::from_secs(600);
+// cache ttl: 1 hour (covers realistic DZ outage windows; refreshed on each
+// failed DZ tx attempt so effective TTL extends indefinitely during outages)
+const BILLING_CACHE_TTL: Duration = Duration::from_secs(3600);
 // cache monitoring interval, every 2 minutes
 const BILLING_CACHE_MONITOR_INTERVAL: Duration = Duration::from_secs(120);
 
@@ -27,6 +30,24 @@ pub struct BillingConfig {
     pub decimals: u8,
 }
 
+impl BillingConfig {
+    pub fn new(
+        poll_interval_secs: u64,
+        minimum_balance: Option<u64>,
+        journal_ata: Pubkey,
+        mint: Pubkey,
+        decimals: u8,
+    ) -> Self {
+        Self {
+            poll_interval_secs,
+            minimum_balance,
+            journal_ata,
+            mint,
+            decimals,
+        }
+    }
+}
+
 pub struct BillingSentinel<D: DzRpcClientType, S: SolRpcClientType> {
     dz_rpc_client: D,
     sol_rpc_client: S,
@@ -34,6 +55,7 @@ pub struct BillingSentinel<D: DzRpcClientType, S: SolRpcClientType> {
     /// In-process cache: tenant → (epoch, solana_signature_bytes).
     /// Prevents re-transferring when the DZ tx fails but the process is still running.
     transfer_cache: Arc<Cache<Pubkey, (u64, [u8; 64])>>,
+    monitor_handles: Vec<tokio::task::JoinHandle<()>>,
     poll_interval: Duration,
     minimum_balance: u64,
     journal_ata: Pubkey,
@@ -46,15 +68,19 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
         let status_cache = Arc::new(Cache::new());
         let transfer_cache = Arc::new(Cache::new());
 
-        // Spawn background tasks to monitor caches
+        // Spawn background tasks to evict expired cache entries.
+        // monitor(batch_size, sample_ratio, interval):
+        //   batch_size=5  — check up to 5 entries per sweep
+        //   sample_ratio=0.25 — sample 25% of the cache per sweep
+        //   interval — time between sweeps
         let status_clone = status_cache.clone();
-        tokio::spawn(async move {
+        let status_handle = tokio::spawn(async move {
             status_clone
                 .monitor(5, 0.25, BILLING_CACHE_MONITOR_INTERVAL)
                 .await;
         });
         let transfer_clone = transfer_cache.clone();
-        tokio::spawn(async move {
+        let transfer_handle = tokio::spawn(async move {
             transfer_clone
                 .monitor(5, 0.25, BILLING_CACHE_MONITOR_INTERVAL)
                 .await;
@@ -65,6 +91,7 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             sol_rpc_client,
             status_cache,
             transfer_cache,
+            monitor_handles: vec![status_handle, transfer_handle],
             poll_interval: Duration::from_secs(config.poll_interval_secs),
             minimum_balance: config.minimum_balance.unwrap_or(1),
             journal_ata: config.journal_ata,
@@ -92,15 +119,24 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             }
         }
 
+        for handle in &self.monitor_handles {
+            handle.abort();
+        }
+
         Ok(())
     }
 
     async fn poll_cycle(&self) -> crate::Result<()> {
-        let start = std::time::Instant::now();
+        let start = Instant::now();
 
         // Fetch current DZ epoch for deduction processing. If this fails,
         // we can still run legacy balance checks but skip deductions.
-        let current_epoch = match self.dz_rpc_client.get_current_dz_epoch().await {
+        let current_epoch = match rpc_with_retry(
+            || self.dz_rpc_client.get_current_dz_epoch(),
+            "billing_get_dz_epoch",
+        )
+        .await
+        {
             Ok(epoch) => Some(epoch),
             Err(err) => {
                 warn!(
@@ -111,17 +147,23 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             }
         };
 
-        let tenants = self.dz_rpc_client.get_tenants_with_token_accounts().await?;
+        let tenants = rpc_with_retry(
+            || self.dz_rpc_client.get_tenants_with_token_accounts(),
+            "billing_get_tenants",
+        )
+        .await?;
 
-        info!(count = tenants.len(), "billing: checking tenant balances");
-        metrics::gauge!("doublezero_sentinel_billing_tenants_checked").set(tenants.len() as f64);
+        let total = tenants.len();
+        info!(count = total, "billing: checking tenant balances");
+        metrics::gauge!("doublezero_sentinel_billing_tenants_checked").set(total as f64);
 
+        let mut failures = 0u64;
         for tenant in tenants {
             let TenantBillingConfig::FlatPerEpoch(ref config) = tenant.billing;
 
             let result = if config.rate > 0 {
                 if let Some(epoch) = current_epoch {
-                    self.deduct_tenant(&tenant, config, epoch).await
+                    self.deduct_tenant(&tenant, epoch).await
                 } else {
                     // Can't process deductions without knowing the current epoch
                     continue;
@@ -132,12 +174,21 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             };
 
             if let Err(err) = result {
+                failures += 1;
                 warn!(
                     tenant = %tenant.tenant_pda,
                     ?err,
                     "billing: failed to process tenant"
                 );
+                metrics::counter!("doublezero_sentinel_billing_tenant_error").increment(1);
             }
+        }
+
+        if failures > 0 {
+            warn!(
+                failures,
+                total, "billing: cycle completed with tenant failures"
+            );
         }
 
         let elapsed = start.elapsed();
@@ -150,9 +201,10 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
     async fn deduct_tenant(
         &self,
         tenant: &TenantBillingInfo,
-        config: &FlatPerEpochConfig,
         current_epoch: u64,
     ) -> crate::Result<()> {
+        let TenantBillingConfig::FlatPerEpoch(ref config) = tenant.billing;
+
         // Already current — nothing to deduct
         if config.last_deduction_dz_epoch >= current_epoch {
             return Ok(());
@@ -161,7 +213,9 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
         let target_epoch = config.last_deduction_dz_epoch + 1;
 
         // Check in-process transfer cache (fast path — avoids re-transferring
-        // when the DZ tx failed but process is still running)
+        // when the DZ tx failed but process is still running).
+        // A cached entry for epoch N is valid for deducting epoch N because the
+        // sentinel advances one epoch at a time.
         let cached = self.transfer_cache.get(&tenant.tenant_pda).await;
         let cached_hit = cached.as_ref().filter(|entry| entry.0 >= target_epoch);
 
@@ -169,10 +223,14 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             entry.1
         } else {
             // Check on-chain receipt on DZ Ledger
-            if self
-                .dz_rpc_client
-                .billing_receipt_exists(&tenant.tenant_pda, target_epoch)
-                .await?
+            if rpc_with_retry(
+                || {
+                    self.dz_rpc_client
+                        .billing_receipt_exists(&tenant.tenant_pda, target_epoch)
+                },
+                "billing_receipt_exists",
+            )
+            .await?
             {
                 info!(
                     tenant = %tenant.tenant_pda,
@@ -223,10 +281,14 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
                     );
 
                     // Check whether the failure is due to insufficient balance
-                    let balance = self
-                        .sol_rpc_client
-                        .get_token_account_balance(&tenant.token_account)
-                        .await?;
+                    let balance = rpc_with_retry(
+                        || {
+                            self.sol_rpc_client
+                                .get_token_account_balance(&tenant.token_account)
+                        },
+                        "billing_get_balance",
+                    )
+                    .await?;
 
                     if balance < config.rate {
                         info!(
@@ -235,12 +297,16 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
                             rate = config.rate,
                             "billing: insufficient balance, marking delinquent"
                         );
-                        self.dz_rpc_client
-                            .update_tenant_payment_status(
-                                &tenant.tenant_pda,
-                                TenantPaymentStatus::Delinquent,
-                            )
-                            .await?;
+                        rpc_with_retry(
+                            || {
+                                self.dz_rpc_client.update_tenant_payment_status(
+                                    &tenant.tenant_pda,
+                                    TenantPaymentStatus::Delinquent,
+                                )
+                            },
+                            "billing_update_status",
+                        )
+                        .await?;
                         self.status_cache
                             .insert(
                                 tenant.tenant_pda,
@@ -293,8 +359,33 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
                     tenant = %tenant.tenant_pda,
                     target_epoch,
                     ?err,
-                    "billing: DZ tx failed; will retry next cycle"
+                    "billing: DZ tx failed; checking if receipt landed"
                 );
+
+                // Check if receipt actually landed (ambiguous tx success /
+                // allocate-existing-account error)
+                if let Ok(true) = self
+                    .dz_rpc_client
+                    .billing_receipt_exists(&tenant.tenant_pda, target_epoch)
+                    .await
+                {
+                    info!(
+                        tenant = %tenant.tenant_pda,
+                        target_epoch,
+                        "billing: receipt exists despite tx error; treating as success"
+                    );
+                    self.transfer_cache.remove(&tenant.tenant_pda).await;
+                    self.status_cache
+                        .insert(
+                            tenant.tenant_pda,
+                            TenantPaymentStatus::Paid,
+                            BILLING_CACHE_TTL,
+                        )
+                        .await;
+                    metrics::counter!("doublezero_sentinel_billing_deduction_success").increment(1);
+                    return Ok(());
+                }
+
                 // Refresh transfer_cache TTL to survive prolonged DZ outages
                 self.transfer_cache
                     .insert(
@@ -310,10 +401,14 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
 
     /// Legacy balance-check path for tenants with rate == 0.
     async fn check_and_update_tenant(&self, tenant: &TenantBillingInfo) -> crate::Result<()> {
-        let balance = self
-            .sol_rpc_client
-            .get_token_account_balance(&tenant.token_account)
-            .await?;
+        let balance = rpc_with_retry(
+            || {
+                self.sol_rpc_client
+                    .get_token_account_balance(&tenant.token_account)
+            },
+            "billing_get_balance",
+        )
+        .await?;
 
         let new_status = self.derive_status(balance);
 
@@ -341,9 +436,14 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             "billing: updating tenant payment status"
         );
 
-        self.dz_rpc_client
-            .update_tenant_payment_status(&tenant.tenant_pda, new_status)
-            .await?;
+        rpc_with_retry(
+            || {
+                self.dz_rpc_client
+                    .update_tenant_payment_status(&tenant.tenant_pda, new_status)
+            },
+            "billing_update_status",
+        )
+        .await?;
 
         // Update cache
         self.status_cache
@@ -374,6 +474,7 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
 
 #[cfg(test)]
 mod tests {
+    use doublezero_serviceability::state::tenant::FlatPerEpochConfig;
     use mockall::predicate;
     use solana_sdk::signature::Signature;
 
@@ -384,14 +485,14 @@ mod tests {
     const TEST_JOURNAL_ATA: Pubkey = Pubkey::new_from_array([88; 32]);
     const TEST_DECIMALS: u8 = 8;
 
-    fn make_tenant(pda_byte: u8, token_byte: u8, status: u8) -> TenantBillingInfo {
+    fn make_tenant(pda_byte: u8, token_byte: u8, status: TenantPaymentStatus) -> TenantBillingInfo {
         make_tenant_with_billing(pda_byte, token_byte, status, TenantBillingConfig::default())
     }
 
     fn make_tenant_with_billing(
         pda_byte: u8,
         token_byte: u8,
-        status: u8,
+        status: TenantPaymentStatus,
         billing: TenantBillingConfig,
     ) -> TenantBillingInfo {
         let mut pda_bytes = [0u8; 32];
@@ -401,7 +502,7 @@ mod tests {
         TenantBillingInfo {
             tenant_pda: Pubkey::new_from_array(pda_bytes),
             token_account: Pubkey::new_from_array(token_bytes),
-            current_payment_status: status.into(),
+            current_payment_status: status,
             billing,
         }
     }
@@ -420,13 +521,7 @@ mod tests {
         BillingSentinel::new(
             dz,
             sol,
-            BillingConfig {
-                poll_interval_secs: 60,
-                minimum_balance: Some(1000),
-                journal_ata: TEST_JOURNAL_ATA,
-                mint: TEST_MINT,
-                decimals: TEST_DECIMALS,
-            },
+            BillingConfig::new(60, Some(1000), TEST_JOURNAL_ATA, TEST_MINT, TEST_DECIMALS),
         )
         .await
     }
@@ -455,7 +550,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_prevents_redundant_writes() {
-        let tenant = make_tenant(1, 2, 0); // current onchain = Unknown
+        let tenant = make_tenant(1, 2, TenantPaymentStatus::Delinquent);
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
@@ -463,7 +558,7 @@ mod tests {
         let mut sol = MockSolRpcClientType::new();
 
         dz.expect_get_tenants_with_token_accounts()
-            .returning(move || Ok(vec![make_tenant(1, 2, 0)]));
+            .returning(move || Ok(vec![make_tenant(1, 2, TenantPaymentStatus::Delinquent)]));
 
         // Balance check happens every call (cache only prevents DZ writes)
         sol.expect_get_token_account_balance()
@@ -493,7 +588,7 @@ mod tests {
     async fn test_onchain_status_matches_skips_write() {
         // Tenant already has Paid status onchain; balance still high.
         // Should NOT write to DZ Ledger, but should populate cache.
-        let tenant = make_tenant(1, 2, 1); // current onchain = Paid
+        let tenant = make_tenant(1, 2, TenantPaymentStatus::Paid);
         let token_account = tenant.token_account;
 
         let dz = MockDzRpcClientType::new();
@@ -514,7 +609,7 @@ mod tests {
     #[tokio::test]
     async fn test_paid_to_delinquent_transition() {
         // Tenant is Paid onchain but balance has dropped below threshold
-        let tenant = make_tenant(1, 2, 1); // current onchain = Paid
+        let tenant = make_tenant(1, 2, TenantPaymentStatus::Paid);
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
@@ -540,8 +635,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_tenants_tracked_independently() {
-        let tenant_a = make_tenant(1, 10, 0); // Delinquent -> should become Paid
-        let tenant_b = make_tenant(2, 20, 0); // Delinquent -> should remain Delinquent
+        let tenant_a = make_tenant(1, 10, TenantPaymentStatus::Delinquent);
+        let tenant_b = make_tenant(2, 20, TenantPaymentStatus::Delinquent);
 
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
@@ -578,7 +673,12 @@ mod tests {
     #[tokio::test]
     async fn test_deduction_happy_path() {
         // Tenant with rate > 0, epoch behind current → should deduct
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
@@ -610,17 +710,18 @@ mod tests {
             .returning(|_, _| Ok(Signature::new_unique()));
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_deduction_insufficient_balance() {
         // Transfer fails, balance < rate → Delinquent
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
@@ -652,34 +753,32 @@ mod tests {
             .returning(|_, _| Ok(Signature::new_unique()));
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_deduction_already_current() {
         // last_deduction_dz_epoch >= current_epoch → no calls
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 10));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 10),
+        );
 
         let dz = MockDzRpcClientType::new();
         let sol = MockSolRpcClientType::new();
         // No expectations — mockall panics if any method is called
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 10,
-        };
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_rate_zero_uses_legacy_path() {
         // rate == 0 → poll_cycle routes to check_and_update_tenant, NOT deduct_tenant
-        let tenant = make_tenant_with_billing(1, 2, 0, billing_config(0, 0));
+        let tenant =
+            make_tenant_with_billing(1, 2, TenantPaymentStatus::Delinquent, billing_config(0, 0));
         let token_account = tenant.token_account;
         let tenant_pda = tenant.tenant_pda;
 
@@ -693,7 +792,7 @@ mod tests {
                 Ok(vec![make_tenant_with_billing(
                     1,
                     2,
-                    0,
+                    TenantPaymentStatus::Delinquent,
                     billing_config(0, 0),
                 )])
             });
@@ -722,7 +821,12 @@ mod tests {
     async fn test_deduction_cache_prevents_duplicate() {
         // First call: receipt doesn't exist, transfer + DZ tx succeed.
         // Second call: receipt check returns true → skip entirely.
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
@@ -762,22 +866,23 @@ mod tests {
             .returning(|_, _| Ok(Signature::new_unique()));
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
 
         // First call — deducts
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
 
         // Second call — receipt exists, no deduction (mockall panics if transfer called again)
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_deduction_catches_up_one_epoch() {
         // Tenant is 3 epochs behind (last=5, current=8) → deducts only epoch 6
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let token_account = tenant.token_account;
         let tenant_pda = tenant.tenant_pda;
 
@@ -809,28 +914,32 @@ mod tests {
             .returning(|_, _| Ok(Signature::new_unique()));
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
-        sentinel.deduct_tenant(&tenant, &config, 8).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 8).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_transfer_not_retried_after_epoch_update_failure() {
         // Transfer succeeds but DZ tx fails → second call retries
         // only the DZ tx (via transfer_cache), NOT the SPL transfer
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
 
-        // Receipt check: only on first call (second call hits transfer_cache)
+        // Receipt checks:
+        // 1. Pre-transfer on first call → false
+        // 2. Post-DZ-failure on first call → false (receipt didn't land)
+        // Second call hits transfer_cache so no pre-transfer check.
         dz.expect_billing_receipt_exists()
             .with(predicate::eq(tenant_pda), predicate::eq(6))
-            .times(1)
+            .times(2)
             .returning(|_, _| Ok(false));
 
         // Transfer called exactly ONCE — must not be retried
@@ -861,23 +970,24 @@ mod tests {
             .returning(|_, _| Ok(Signature::new_unique()));
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
 
         // First call: transfer OK, DZ tx fails → error propagated
-        assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
+        assert!(sentinel.deduct_tenant(&tenant, 10).await.is_err());
 
         // Second call: transfer_cache hit → retries only DZ tx → succeeds
         // (mockall would panic if transfer_spl_token were called again)
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_deduction_transient_error_does_not_set_delinquent() {
         // Transfer fails but balance >= rate → transient error, no status change
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let token_account = tenant.token_account;
 
         let mut dz = MockDzRpcClientType::new();
@@ -902,17 +1012,18 @@ mod tests {
         // (mockall panics if it is)
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_receipt_exists_skips_deduction() {
         // Receipt already exists on DZ Ledger → no transfer, no DZ tx
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let tenant_pda = tenant.tenant_pda;
 
         let mut dz = MockDzRpcClientType::new();
@@ -927,28 +1038,33 @@ mod tests {
         // No transfer or DZ tx expected (mockall panics if called)
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_transfer_cached_retry_dz_tx_only() {
         // Validates transfer_cache prevents re-transfer when DZ tx fails
         // within the same process run
-        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
 
-        // Receipt check only on first call
+        // Receipt checks:
+        // 1. Pre-transfer on first call → false
+        // 2. Post-DZ-failure on first call → false
+        // 3. Post-DZ-failure on second call → false
+        // Third call succeeds so no post-failure check.
         dz.expect_billing_receipt_exists()
             .with(predicate::eq(tenant_pda), predicate::eq(6))
-            .times(1)
+            .times(3)
             .returning(|_, _| Ok(false));
 
         // Transfer only once
@@ -985,18 +1101,66 @@ mod tests {
             .returning(|_, _| Ok(Signature::new_unique()));
 
         let sentinel = new_sentinel(dz, sol).await;
-        let config = FlatPerEpochConfig {
-            rate: 1_000_000,
-            last_deduction_dz_epoch: 5,
-        };
 
         // First call: transfer OK, DZ tx fails
-        assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
+        assert!(sentinel.deduct_tenant(&tenant, 10).await.is_err());
 
         // Second call: transfer_cache hit, DZ tx fails again
-        assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
+        assert!(sentinel.deduct_tenant(&tenant, 10).await.is_err());
 
         // Third call: transfer_cache hit, DZ tx succeeds
-        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_ambiguous_dz_tx_success_treated_as_success() {
+        // DZ tx returns an error but the receipt actually landed on-chain
+        // (e.g. timeout or allocate-existing-account). Should treat as success.
+        let tenant = make_tenant_with_billing(
+            1,
+            2,
+            TenantPaymentStatus::Paid,
+            billing_config(1_000_000, 5),
+        );
+        let tenant_pda = tenant.tenant_pda;
+        let token_account = tenant.token_account;
+
+        let mut dz = MockDzRpcClientType::new();
+        let mut sol = MockSolRpcClientType::new();
+
+        // No receipt before transfer
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(false));
+
+        // Transfer succeeds
+        sol.expect_transfer_spl_token()
+            .with(
+                predicate::eq(token_account),
+                predicate::eq(TEST_JOURNAL_ATA),
+                predicate::eq(1_000_000),
+                predicate::eq(TEST_MINT),
+                predicate::eq(TEST_DECIMALS),
+            )
+            .times(1)
+            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+
+        // DZ tx fails with an error...
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
+            .times(1)
+            .returning(|_, _| Err(crate::Error::Deserialize("allocate: account exists".into())));
+
+        // ...but the post-failure receipt check finds it on-chain
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(true));
+
+        let sentinel = new_sentinel(dz, sol).await;
+
+        // Should succeed despite the DZ tx error
+        sentinel.deduct_tenant(&tenant, 10).await.unwrap();
     }
 }

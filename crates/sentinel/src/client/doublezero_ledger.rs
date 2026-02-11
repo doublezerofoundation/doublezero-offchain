@@ -1,4 +1,4 @@
-use std::{net::Ipv4Addr, sync::Arc};
+use std::{net::Ipv4Addr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use doublezero_program_tools::instruction::try_build_instruction;
@@ -11,6 +11,7 @@ use doublezero_serviceability::{
     },
     state::{
         accesspass::AccessPassType,
+        accounttype::AccountType,
         tenant::{Tenant, TenantPaymentStatus},
     },
 };
@@ -23,6 +24,7 @@ use solana_client::{
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction,
     instruction::AccountMeta,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
@@ -32,8 +34,12 @@ use tracing::info;
 use url::Url;
 
 use crate::{
-    BILLING_RECEIPT_SEED_PREFIX, BillingReceipt, Result, TenantBillingInfo, new_transaction,
+    BILLING_RECEIPT_SEED_PREFIX, BillingReceipt, Error, Result, TenantBillingInfo, new_transaction,
 };
+
+/// Timeout for `send_and_confirm_transaction` calls to prevent the polling
+/// loop from stalling on slow RPC confirmations.
+const SEND_AND_CONFIRM_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[automock]
 #[async_trait]
@@ -138,6 +144,9 @@ impl DzRpcClient {
             last_access_epoch: u64::MAX,
             // NOTE: Setting this to false by default
             allow_multiple_ip: false,
+            // Access passes created by the sentinel are not associated with a
+            // specific tenant; Pubkey::default() is treated as "no tenant" by
+            // the on-chain program.
             tenant: Pubkey::default(),
         });
         let accounts = vec![
@@ -166,7 +175,7 @@ impl DzRpcClient {
         let config = RpcProgramAccountsConfig {
             filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
                 0,
-                vec![13], // AccountType::Tenant
+                vec![AccountType::Tenant as u8],
             ))]),
             account_config: RpcAccountInfoConfig {
                 encoding: Some(UiAccountEncoding::Base64),
@@ -221,10 +230,12 @@ impl DzRpcClient {
         let recent_blockhash = self.client.get_latest_blockhash().await?;
         let transaction = new_transaction(&[ix], &[signer], recent_blockhash);
 
-        let signature = self
-            .client
-            .send_and_confirm_transaction(&transaction)
-            .await?;
+        let signature = tokio::time::timeout(
+            SEND_AND_CONFIRM_TIMEOUT,
+            self.client.send_and_confirm_transaction(&transaction),
+        )
+        .await
+        .map_err(|_| Error::Deserialize("update_payment_status timed out".into()))??;
         info!(tenant = %tenant_pda, ?status, %signature, "updated tenant payment status");
 
         Ok(signature)
@@ -291,10 +302,15 @@ impl DzRpcClient {
         ];
         let epoch_ix = try_build_instruction(&self.serviceability_id, accounts, &args)?;
 
+        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(50_000);
+        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
+
         let signer = &self.payer;
         let recent_blockhash = self.client.get_latest_blockhash().await?;
         let transaction = new_transaction(
             &[
+                compute_limit_ix,
+                compute_price_ix,
                 init.allocate,
                 init.assign,
                 transfer_ix,
@@ -306,10 +322,12 @@ impl DzRpcClient {
             recent_blockhash,
         );
 
-        let signature = self
-            .client
-            .send_and_confirm_transaction(&transaction)
-            .await?;
+        let signature = tokio::time::timeout(
+            SEND_AND_CONFIRM_TIMEOUT,
+            self.client.send_and_confirm_transaction(&transaction),
+        )
+        .await
+        .map_err(|_| Error::Deserialize("create_billing_receipt timed out".into()))??;
         info!(
             tenant = %tenant_pda,
             epoch = receipt.dz_epoch,
@@ -320,6 +338,14 @@ impl DzRpcClient {
         Ok(signature)
     }
 
+    /// Returns the last completed DZ epoch.
+    ///
+    /// Queries `getEpochInfo` on the **DZ Ledger RPC** (`self.client`), which
+    /// runs its own epoch schedule independent of Solana mainnet/testnet. The
+    /// billable epoch is `epoch - 1` because the current DZ Ledger epoch is
+    /// still in progress. This matches how revenue-distribution syncs via
+    /// `ProgramConfig.next_completed_dz_epoch` (see
+    /// validator-debt/worker/initialize_distribution.rs).
     pub async fn get_current_dz_epoch(&self) -> Result<u64> {
         let epoch_info = self.client.get_epoch_info().await?;
         Ok(epoch_info.epoch.saturating_sub(1))
