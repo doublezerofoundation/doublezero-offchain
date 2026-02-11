@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use doublezero_serviceability::state::tenant::{
     FlatPerEpochConfig, TenantBillingConfig, TenantPaymentStatus,
@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::{
-    TenantBillingInfo,
+    BillingReceipt, TenantBillingInfo,
     client::{doublezero_ledger::DzRpcClientType, solana::SolRpcClientType},
 };
 
@@ -19,47 +19,32 @@ const BILLING_CACHE_TTL: Duration = Duration::from_secs(600);
 // cache monitoring interval, every 2 minutes
 const BILLING_CACHE_MONITOR_INTERVAL: Duration = Duration::from_secs(120);
 
-/// Tracks the two-phase state of a billing deduction to prevent double-charges
-/// when the epoch update fails after a successful SPL transfer.
-#[derive(Clone, Debug)]
-enum DeductionState {
-    /// SPL transfer succeeded; epoch update still pending.
-    Transferred(u64),
-    /// Both transfer and epoch update completed.
-    Completed(u64),
-    /// Transfer failed; suppress retries until TTL expires.
-    Failed(u64),
-}
-
 pub struct BillingConfig {
     pub poll_interval_secs: u64,
     pub minimum_balance: Option<u64>,
     pub journal_ata: Pubkey,
     pub mint: Pubkey,
     pub decimals: u8,
-    pub pending_dir: PathBuf,
 }
 
 pub struct BillingSentinel<D: DzRpcClientType, S: SolRpcClientType> {
     dz_rpc_client: D,
     sol_rpc_client: S,
     status_cache: Arc<Cache<Pubkey, TenantPaymentStatus>>,
-    deduction_cache: Arc<Cache<Pubkey, DeductionState>>,
+    /// In-process cache: tenant → (epoch, solana_signature_bytes).
+    /// Prevents re-transferring when the DZ tx fails but the process is still running.
+    transfer_cache: Arc<Cache<Pubkey, (u64, [u8; 64])>>,
     poll_interval: Duration,
     minimum_balance: u64,
     journal_ata: Pubkey,
     mint: Pubkey,
     decimals: u8,
-    pending_dir: PathBuf,
 }
 
 impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
     pub async fn new(dz_rpc_client: D, sol_rpc_client: S, config: BillingConfig) -> Self {
-        std::fs::create_dir_all(&config.pending_dir)
-            .expect("failed to create billing state directory");
-
         let status_cache = Arc::new(Cache::new());
-        let deduction_cache = Arc::new(Cache::new());
+        let transfer_cache = Arc::new(Cache::new());
 
         // Spawn background tasks to monitor caches
         let status_clone = status_cache.clone();
@@ -68,9 +53,9 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
                 .monitor(5, 0.25, BILLING_CACHE_MONITOR_INTERVAL)
                 .await;
         });
-        let deduction_clone = deduction_cache.clone();
+        let transfer_clone = transfer_cache.clone();
         tokio::spawn(async move {
-            deduction_clone
+            transfer_clone
                 .monitor(5, 0.25, BILLING_CACHE_MONITOR_INTERVAL)
                 .await;
         });
@@ -79,13 +64,12 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             dz_rpc_client,
             sol_rpc_client,
             status_cache,
-            deduction_cache,
+            transfer_cache,
             poll_interval: Duration::from_secs(config.poll_interval_secs),
             minimum_balance: config.minimum_balance.unwrap_or(1),
             journal_ata: config.journal_ata,
             mint: config.mint,
             decimals: config.decimals,
-            pending_dir: config.pending_dir,
         }
     }
 
@@ -176,200 +160,152 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
 
         let target_epoch = config.last_deduction_dz_epoch + 1;
 
-        // Check in-memory deduction cache (fast path)
-        if let Some(state) = self.deduction_cache.get(&tenant.tenant_pda).await {
-            match *state {
-                DeductionState::Completed(epoch) if epoch >= target_epoch => return Ok(()),
-                DeductionState::Transferred(epoch) if epoch >= target_epoch => {
-                    // Transfer already succeeded — retry only the epoch update
-                    info!(
-                        tenant = %tenant.tenant_pda,
-                        target_epoch,
-                        "billing: retrying epoch update for completed transfer"
-                    );
-                    return self
-                        .complete_deduction(&tenant.tenant_pda, target_epoch)
-                        .await;
-                }
-                DeductionState::Failed(epoch) if epoch >= target_epoch => return Ok(()),
-                _ => {}
-            }
-        }
+        // Check in-process transfer cache (fast path — avoids re-transferring
+        // when the DZ tx failed but process is still running)
+        let cached = self.transfer_cache.get(&tenant.tenant_pda).await;
+        let cached_hit = cached.as_ref().filter(|entry| entry.0 >= target_epoch);
 
-        // Check persistent marker (survives restarts — guards against
-        // double-charge when the process crashed between transfer and epoch update)
-        if self.has_pending_transfer(&tenant.tenant_pda, target_epoch) {
+        let sig_bytes = if let Some(entry) = cached_hit {
+            entry.1
+        } else {
+            // Check on-chain receipt on DZ Ledger
+            if self
+                .dz_rpc_client
+                .billing_receipt_exists(&tenant.tenant_pda, target_epoch)
+                .await?
+            {
+                info!(
+                    tenant = %tenant.tenant_pda,
+                    target_epoch,
+                    "billing: receipt already exists, skipping"
+                );
+                return Ok(());
+            }
+
             info!(
                 tenant = %tenant.tenant_pda,
+                rate = config.rate,
                 target_epoch,
-                "billing: found pending transfer marker, retrying epoch update only"
+                current_epoch,
+                "billing: deducting tenant"
             );
-            return self
-                .complete_deduction(&tenant.tenant_pda, target_epoch)
-                .await;
-        }
 
-        info!(
-            tenant = %tenant.tenant_pda,
-            rate = config.rate,
-            target_epoch,
-            current_epoch,
-            "billing: deducting tenant"
-        );
-
-        // Attempt the SPL token transfer
-        match self
-            .sol_rpc_client
-            .transfer_spl_token(
-                &tenant.token_account,
-                &self.journal_ata,
-                config.rate,
-                &self.mint,
-                self.decimals,
-            )
-            .await
-        {
-            Ok(signature) => {
-                info!(
-                    tenant = %tenant.tenant_pda,
-                    %signature,
-                    target_epoch,
-                    "billing: transfer successful"
-                );
-                // Persist marker BEFORE epoch update so a crash between
-                // these two steps can be recovered on restart
-                self.mark_transfer_pending(&tenant.tenant_pda, target_epoch);
-                self.complete_deduction(&tenant.tenant_pda, target_epoch)
-                    .await
-            }
-            Err(err) => {
-                warn!(
-                    tenant = %tenant.tenant_pda,
-                    ?err,
-                    "billing: deduction transfer failed, checking balance"
-                );
-
-                // Cache to suppress retries until TTL expires
-                self.deduction_cache
-                    .insert(
-                        tenant.tenant_pda,
-                        DeductionState::Failed(target_epoch),
-                        BILLING_CACHE_TTL,
-                    )
-                    .await;
-
-                // Check whether the failure is due to insufficient balance
-                let balance = self
-                    .sol_rpc_client
-                    .get_token_account_balance(&tenant.token_account)
-                    .await?;
-
-                if balance < config.rate {
+            // Attempt the SPL token transfer on Solana
+            match self
+                .sol_rpc_client
+                .transfer_spl_token(
+                    &tenant.token_account,
+                    &self.journal_ata,
+                    config.rate,
+                    &self.mint,
+                    self.decimals,
+                )
+                .await
+            {
+                Ok(signature) => {
                     info!(
                         tenant = %tenant.tenant_pda,
-                        balance,
-                        rate = config.rate,
-                        "billing: insufficient balance, marking delinquent"
+                        %signature,
+                        target_epoch,
+                        "billing: transfer successful"
                     );
-                    self.dz_rpc_client
-                        .update_tenant_payment_status(
-                            &tenant.tenant_pda,
-                            TenantPaymentStatus::Delinquent,
-                        )
-                        .await?;
-                    self.status_cache
-                        .insert(
-                            tenant.tenant_pda,
-                            TenantPaymentStatus::Delinquent,
-                            BILLING_CACHE_TTL,
-                        )
+                    let bytes: [u8; 64] = signature.into();
+                    self.transfer_cache
+                        .insert(tenant.tenant_pda, (target_epoch, bytes), BILLING_CACHE_TTL)
                         .await;
-                    metrics::counter!("doublezero_sentinel_billing_status_delinquent").increment(1);
+                    bytes
                 }
-                // If balance >= rate, it was a transient error — will retry next cycle
-                Ok(())
-            }
-        }
-    }
+                Err(err) => {
+                    warn!(
+                        tenant = %tenant.tenant_pda,
+                        ?err,
+                        "billing: deduction transfer failed, checking balance"
+                    );
 
-    /// Attempt to bump the tenant's billing epoch on-chain. On success, caches
-    /// `Completed`. On failure, caches/refreshes `Transferred` so the next cycle
-    /// retries only this step — never re-submitting the SPL transfer.
-    async fn complete_deduction(
-        &self,
-        tenant_pda: &Pubkey,
-        target_epoch: u64,
-    ) -> crate::Result<()> {
+                    // Check whether the failure is due to insufficient balance
+                    let balance = self
+                        .sol_rpc_client
+                        .get_token_account_balance(&tenant.token_account)
+                        .await?;
+
+                    if balance < config.rate {
+                        info!(
+                            tenant = %tenant.tenant_pda,
+                            balance,
+                            rate = config.rate,
+                            "billing: insufficient balance, marking delinquent"
+                        );
+                        self.dz_rpc_client
+                            .update_tenant_payment_status(
+                                &tenant.tenant_pda,
+                                TenantPaymentStatus::Delinquent,
+                            )
+                            .await?;
+                        self.status_cache
+                            .insert(
+                                tenant.tenant_pda,
+                                TenantPaymentStatus::Delinquent,
+                                BILLING_CACHE_TTL,
+                            )
+                            .await;
+                        metrics::counter!("doublezero_sentinel_billing_status_delinquent")
+                            .increment(1);
+                    }
+                    // If balance >= rate, it was a transient error — will retry next cycle
+                    return Ok(());
+                }
+            }
+        };
+
+        // Create billing receipt and update epoch in a single atomic DZ Ledger tx
+        let receipt = BillingReceipt {
+            tenant: tenant.tenant_pda,
+            dz_epoch: target_epoch,
+            amount: config.rate,
+            sol_tx_sig: sig_bytes,
+        };
+
         match self
             .dz_rpc_client
-            .update_tenant_billing_epoch(tenant_pda, target_epoch)
+            .create_billing_receipt_and_update_epoch(&tenant.tenant_pda, &receipt)
             .await
         {
             Ok(signature) => {
                 info!(
-                    tenant = %tenant_pda,
+                    tenant = %tenant.tenant_pda,
                     %signature,
                     target_epoch,
-                    "billing: epoch update successful"
+                    "billing: receipt created and epoch updated"
                 );
-                self.deduction_cache
+                self.transfer_cache.remove(&tenant.tenant_pda).await;
+                self.status_cache
                     .insert(
-                        *tenant_pda,
-                        DeductionState::Completed(target_epoch),
+                        tenant.tenant_pda,
+                        TenantPaymentStatus::Paid,
                         BILLING_CACHE_TTL,
                     )
                     .await;
-                self.status_cache
-                    .insert(*tenant_pda, TenantPaymentStatus::Paid, BILLING_CACHE_TTL)
-                    .await;
-                self.clear_pending_transfer(tenant_pda, target_epoch);
                 metrics::counter!("doublezero_sentinel_billing_deduction_success").increment(1);
                 Ok(())
             }
             Err(err) => {
                 warn!(
-                    tenant = %tenant_pda,
+                    tenant = %tenant.tenant_pda,
                     target_epoch,
                     ?err,
-                    "billing: epoch update failed; will retry next cycle"
+                    "billing: DZ tx failed; will retry next cycle"
                 );
-                // Refresh Transferred state to extend TTL — prevents cache
-                // expiry from causing a double-transfer during prolonged outages
-                self.deduction_cache
+                // Refresh transfer_cache TTL to survive prolonged DZ outages
+                self.transfer_cache
                     .insert(
-                        *tenant_pda,
-                        DeductionState::Transferred(target_epoch),
+                        tenant.tenant_pda,
+                        (target_epoch, sig_bytes),
                         BILLING_CACHE_TTL,
                     )
                     .await;
                 Err(err)
             }
         }
-    }
-
-    // ── Persistent marker helpers ──────────────────────────────────────
-
-    fn pending_path(&self, tenant_pda: &Pubkey, epoch: u64) -> PathBuf {
-        self.pending_dir.join(format!("{tenant_pda}_{epoch}"))
-    }
-
-    fn has_pending_transfer(&self, tenant_pda: &Pubkey, epoch: u64) -> bool {
-        self.pending_path(tenant_pda, epoch).exists()
-    }
-
-    fn mark_transfer_pending(&self, tenant_pda: &Pubkey, epoch: u64) {
-        if let Err(e) = std::fs::write(self.pending_path(tenant_pda, epoch), []) {
-            warn!(
-                tenant = %tenant_pda,
-                epoch,
-                ?e,
-                "billing: failed to persist pending deduction marker"
-            );
-        }
-    }
-
-    fn clear_pending_transfer(&self, tenant_pda: &Pubkey, epoch: u64) {
-        let _ = std::fs::remove_file(self.pending_path(tenant_pda, epoch));
     }
 
     /// Legacy balance-check path for tenants with rate == 0.
@@ -477,21 +413,9 @@ mod tests {
         })
     }
 
-    fn test_pending_dir() -> PathBuf {
-        std::env::temp_dir().join("sentinel-billing-test")
-    }
-
     async fn new_sentinel(
         dz: MockDzRpcClientType,
         sol: MockSolRpcClientType,
-    ) -> BillingSentinel<MockDzRpcClientType, MockSolRpcClientType> {
-        new_sentinel_with_dir(dz, sol, test_pending_dir()).await
-    }
-
-    async fn new_sentinel_with_dir(
-        dz: MockDzRpcClientType,
-        sol: MockSolRpcClientType,
-        pending_dir: PathBuf,
     ) -> BillingSentinel<MockDzRpcClientType, MockSolRpcClientType> {
         BillingSentinel::new(
             dz,
@@ -502,7 +426,6 @@ mod tests {
                 journal_ata: TEST_JOURNAL_ATA,
                 mint: TEST_MINT,
                 decimals: TEST_DECIMALS,
-                pending_dir,
             },
         )
         .await
@@ -662,6 +585,12 @@ mod tests {
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
 
+        // No receipt exists yet
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(false));
+
         // Transfer succeeds
         sol.expect_transfer_spl_token()
             .with(
@@ -674,9 +603,9 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
 
-        // Epoch bump (also sets Paid)
-        dz.expect_update_tenant_billing_epoch()
-            .with(predicate::eq(tenant_pda), predicate::eq(6))
+        // Atomic receipt creation + epoch update
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
             .times(1)
             .returning(|_, _| Ok(Signature::new_unique()));
 
@@ -697,6 +626,10 @@ mod tests {
 
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
+
+        // No receipt exists
+        dz.expect_billing_receipt_exists()
+            .returning(|_, _| Ok(false));
 
         // Transfer fails
         sol.expect_transfer_spl_token()
@@ -787,13 +720,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_deduction_cache_prevents_duplicate() {
-        // Second call for the same epoch → deduction not re-attempted
+        // First call: receipt doesn't exist, transfer + DZ tx succeed.
+        // Second call: receipt check returns true → skip entirely.
         let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
+
+        // First call: no receipt
+        // Second call: receipt exists on-chain (covers the "already deducted" path)
+        let mut receipt_seq = mockall::Sequence::new();
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .in_sequence(&mut receipt_seq)
+            .returning(|_, _| Ok(false));
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .in_sequence(&mut receipt_seq)
+            .returning(|_, _| Ok(true));
 
         // Transfer succeeds ONCE
         sol.expect_transfer_spl_token()
@@ -807,9 +755,9 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
 
-        // Epoch bump called ONCE
-        dz.expect_update_tenant_billing_epoch()
-            .with(predicate::eq(tenant_pda), predicate::eq(6))
+        // DZ tx called ONCE
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
             .times(1)
             .returning(|_, _| Ok(Signature::new_unique()));
 
@@ -822,7 +770,7 @@ mod tests {
         // First call — deducts
         sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
 
-        // Second call — cache hit, no deduction (mockall panics if transfer called again)
+        // Second call — receipt exists, no deduction (mockall panics if transfer called again)
         sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
     }
 
@@ -836,6 +784,12 @@ mod tests {
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
 
+        // No receipt for epoch 6
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(false));
+
         // Should transfer for epoch 6 only (last + 1)
         sol.expect_transfer_spl_token()
             .with(
@@ -848,9 +802,9 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
 
-        // Should bump to epoch 6, NOT 7 or 8
-        dz.expect_update_tenant_billing_epoch()
-            .with(predicate::eq(tenant_pda), predicate::eq(6))
+        // Should create receipt + bump to epoch 6, NOT 7 or 8
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
             .times(1)
             .returning(|_, _| Ok(Signature::new_unique()));
 
@@ -864,14 +818,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_transfer_not_retried_after_epoch_update_failure() {
-        // Transfer succeeds but epoch update fails → second call retries
-        // only the epoch update, NOT the transfer (prevents double-charge)
+        // Transfer succeeds but DZ tx fails → second call retries
+        // only the DZ tx (via transfer_cache), NOT the SPL transfer
         let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
         let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
+
+        // Receipt check: only on first call (second call hits transfer_cache)
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(false));
 
         // Transfer called exactly ONCE — must not be retried
         sol.expect_transfer_spl_token()
@@ -885,17 +845,17 @@ mod tests {
             .times(1)
             .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
 
-        // Epoch update: first call fails, second succeeds
+        // DZ tx: first call fails, second succeeds
         let mut seq = mockall::Sequence::new();
 
-        dz.expect_update_tenant_billing_epoch()
-            .with(predicate::eq(tenant_pda), predicate::eq(6))
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| Err(crate::Error::Deserialize("network error".into())));
 
-        dz.expect_update_tenant_billing_epoch()
-            .with(predicate::eq(tenant_pda), predicate::eq(6))
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
             .times(1)
             .in_sequence(&mut seq)
             .returning(|_, _| Ok(Signature::new_unique()));
@@ -906,10 +866,10 @@ mod tests {
             last_deduction_dz_epoch: 5,
         };
 
-        // First call: transfer OK, epoch update fails → error propagated
+        // First call: transfer OK, DZ tx fails → error propagated
         assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
 
-        // Second call: cache has Transferred(6) → retries only epoch update → succeeds
+        // Second call: transfer_cache hit → retries only DZ tx → succeeds
         // (mockall would panic if transfer_spl_token were called again)
         sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
     }
@@ -920,8 +880,12 @@ mod tests {
         let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
         let token_account = tenant.token_account;
 
-        let dz = MockDzRpcClientType::new();
+        let mut dz = MockDzRpcClientType::new();
         let mut sol = MockSolRpcClientType::new();
+
+        // No receipt exists
+        dz.expect_billing_receipt_exists()
+            .returning(|_, _| Ok(false));
 
         // Transfer fails
         sol.expect_transfer_spl_token()
@@ -946,72 +910,93 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pending_marker_prevents_double_transfer_after_restart() {
-        // Simulates: transfer OK → epoch update fails → process restart
-        // (fresh sentinel, no cache) → should NOT re-transfer
-        let dir = std::env::temp_dir().join("sentinel-test-restart");
+    async fn test_receipt_exists_skips_deduction() {
+        // Receipt already exists on DZ Ledger → no transfer, no DZ tx
+        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
+        let tenant_pda = tenant.tenant_pda;
 
-        // Use unique tenant bytes (3, 4) to avoid collision with other tests
-        let tenant = make_tenant_with_billing(3, 4, 1, billing_config(1_000_000, 5));
+        let mut dz = MockDzRpcClientType::new();
+        let sol = MockSolRpcClientType::new();
+
+        // Receipt exists
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(true));
+
+        // No transfer or DZ tx expected (mockall panics if called)
+
+        let sentinel = new_sentinel(dz, sol).await;
+        let config = FlatPerEpochConfig {
+            rate: 1_000_000,
+            last_deduction_dz_epoch: 5,
+        };
+        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transfer_cached_retry_dz_tx_only() {
+        // Validates transfer_cache prevents re-transfer when DZ tx fails
+        // within the same process run
+        let tenant = make_tenant_with_billing(1, 2, 1, billing_config(1_000_000, 5));
         let tenant_pda = tenant.tenant_pda;
         let token_account = tenant.token_account;
 
-        // --- First "run": transfer OK, epoch update fails ---
-        {
-            let mut dz = MockDzRpcClientType::new();
-            let mut sol = MockSolRpcClientType::new();
+        let mut dz = MockDzRpcClientType::new();
+        let mut sol = MockSolRpcClientType::new();
 
-            sol.expect_transfer_spl_token()
-                .with(
-                    predicate::eq(token_account),
-                    predicate::eq(TEST_JOURNAL_ATA),
-                    predicate::eq(1_000_000),
-                    predicate::eq(TEST_MINT),
-                    predicate::eq(TEST_DECIMALS),
-                )
-                .times(1)
-                .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+        // Receipt check only on first call
+        dz.expect_billing_receipt_exists()
+            .with(predicate::eq(tenant_pda), predicate::eq(6))
+            .times(1)
+            .returning(|_, _| Ok(false));
 
-            dz.expect_update_tenant_billing_epoch()
-                .with(predicate::eq(tenant_pda), predicate::eq(6))
-                .times(1)
-                .returning(|_, _| Err(crate::Error::Deserialize("network error".into())));
+        // Transfer only once
+        sol.expect_transfer_spl_token()
+            .with(
+                predicate::eq(token_account),
+                predicate::eq(TEST_JOURNAL_ATA),
+                predicate::eq(1_000_000),
+                predicate::eq(TEST_MINT),
+                predicate::eq(TEST_DECIMALS),
+            )
+            .times(1)
+            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
 
-            let sentinel = new_sentinel_with_dir(dz, sol, dir.clone()).await;
-            let config = FlatPerEpochConfig {
-                rate: 1_000_000,
-                last_deduction_dz_epoch: 5,
-            };
-            assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
-        }
-        // sentinel dropped — cache gone, but marker file persists
+        // DZ tx fails twice, succeeds third time
+        let mut seq = mockall::Sequence::new();
 
-        // --- Second "run" (simulating restart): fresh sentinel, same dir ---
-        {
-            let mut dz = MockDzRpcClientType::new();
-            let sol = MockSolRpcClientType::new();
-            // NO transfer expected — mockall panics if transfer_spl_token is called
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Err(crate::Error::Deserialize("DZ outage".into())));
 
-            dz.expect_update_tenant_billing_epoch()
-                .with(predicate::eq(tenant_pda), predicate::eq(6))
-                .times(1)
-                .returning(|_, _| Ok(Signature::new_unique()));
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Err(crate::Error::Deserialize("DZ outage".into())));
 
-            let sentinel = new_sentinel_with_dir(dz, sol, dir.clone()).await;
-            let config = FlatPerEpochConfig {
-                rate: 1_000_000,
-                last_deduction_dz_epoch: 5,
-            };
-            sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
-        }
+        dz.expect_create_billing_receipt_and_update_epoch()
+            .with(predicate::eq(tenant_pda), predicate::always())
+            .times(1)
+            .in_sequence(&mut seq)
+            .returning(|_, _| Ok(Signature::new_unique()));
 
-        // Verify marker was cleaned up after successful epoch update
-        let marker = dir.join(format!("{tenant_pda}_6"));
-        assert!(
-            !marker.exists(),
-            "marker file should be removed after success"
-        );
+        let sentinel = new_sentinel(dz, sol).await;
+        let config = FlatPerEpochConfig {
+            rate: 1_000_000,
+            last_deduction_dz_epoch: 5,
+        };
 
-        let _ = std::fs::remove_dir_all(&dir);
+        // First call: transfer OK, DZ tx fails
+        assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
+
+        // Second call: transfer_cache hit, DZ tx fails again
+        assert!(sentinel.deduct_tenant(&tenant, &config, 10).await.is_err());
+
+        // Third call: transfer_cache hit, DZ tx succeeds
+        sentinel.deduct_tenant(&tenant, &config, 10).await.unwrap();
     }
 }

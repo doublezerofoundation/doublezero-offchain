@@ -60,8 +60,7 @@ async fn main() -> anyhow::Result<()> {
     let (journal_pda, _) = Journal::find_address();
     let journal_ata = get_associated_token_address(&journal_pda, &mint);
 
-    let billing_state_dir = settings.billing_state_dir().to_path_buf();
-    info!(%mint, %journal_ata, decimals, ?billing_state_dir, "billing: derived 2Z addresses");
+    info!(%mint, %journal_ata, decimals, "billing: derived 2Z addresses");
 
     let mut billing_sentinel = BillingSentinel::new(
         DzRpcClient::new(dz_rpc_url, keypair.clone(), serviceability_id),
@@ -72,7 +71,6 @@ async fn main() -> anyhow::Result<()> {
             journal_ata,
             mint,
             decimals,
-            pending_dir: billing_state_dir,
         },
     )
     .await;

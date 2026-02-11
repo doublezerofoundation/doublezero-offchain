@@ -1,3 +1,4 @@
+use borsh::{BorshDeserialize, BorshSerialize};
 use doublezero_passport::{instruction::AccessMode, state::AccessRequest};
 use doublezero_serviceability::state::tenant::{TenantBillingConfig, TenantPaymentStatus};
 use solana_sdk::{
@@ -18,6 +19,16 @@ pub mod sentinel;
 pub mod settings;
 
 pub use error::{Error, Result};
+
+pub const BILLING_RECEIPT_SEED_PREFIX: &[u8] = b"billing_receipt";
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct BillingReceipt {
+    pub tenant: Pubkey,
+    pub dz_epoch: u64,
+    pub amount: u64,
+    pub sol_tx_sig: [u8; 64],
+}
 
 #[derive(Debug, Clone)]
 pub struct AccessId {

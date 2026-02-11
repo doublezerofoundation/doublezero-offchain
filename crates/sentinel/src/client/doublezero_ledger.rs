@@ -2,6 +2,7 @@ use std::{net::Ipv4Addr, sync::Arc};
 
 use async_trait::async_trait;
 use doublezero_program_tools::instruction::try_build_instruction;
+use doublezero_record::instruction as record_instruction;
 use doublezero_serviceability::{
     instructions::DoubleZeroInstruction,
     pda::{get_accesspass_pda, get_globalstate_pda},
@@ -26,11 +27,13 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
 };
-use solana_system_interface::program as system_program;
+use solana_system_interface::{instruction as system_instruction, program as system_program};
 use tracing::info;
 use url::Url;
 
-use crate::{Result, TenantBillingInfo, new_transaction};
+use crate::{
+    BILLING_RECEIPT_SEED_PREFIX, BillingReceipt, Result, TenantBillingInfo, new_transaction,
+};
 
 #[automock]
 #[async_trait]
@@ -50,10 +53,12 @@ pub trait DzRpcClientType {
         status: TenantPaymentStatus,
     ) -> Result<Signature>;
 
-    async fn update_tenant_billing_epoch(
+    async fn billing_receipt_exists(&self, tenant_pda: &Pubkey, epoch: u64) -> Result<bool>;
+
+    async fn create_billing_receipt_and_update_epoch(
         &self,
         tenant_pda: &Pubkey,
-        last_deduction_dz_epoch: u64,
+        receipt: &BillingReceipt,
     ) -> Result<Signature>;
 
     async fn get_current_dz_epoch(&self) -> Result<u64>;
@@ -89,12 +94,16 @@ impl DzRpcClientType for DzRpcClient {
         self.update_tenant_payment_status(tenant_pda, status).await
     }
 
-    async fn update_tenant_billing_epoch(
+    async fn billing_receipt_exists(&self, tenant_pda: &Pubkey, epoch: u64) -> Result<bool> {
+        self.billing_receipt_exists(tenant_pda, epoch).await
+    }
+
+    async fn create_billing_receipt_and_update_epoch(
         &self,
         tenant_pda: &Pubkey,
-        last_deduction_dz_epoch: u64,
+        receipt: &BillingReceipt,
     ) -> Result<Signature> {
-        self.update_tenant_billing_epoch(tenant_pda, last_deduction_dz_epoch)
+        self.create_billing_receipt_and_update_epoch(tenant_pda, receipt)
             .await
     }
 
@@ -221,27 +230,81 @@ impl DzRpcClient {
         Ok(signature)
     }
 
-    pub async fn update_tenant_billing_epoch(
+    pub async fn billing_receipt_exists(&self, tenant_pda: &Pubkey, epoch: u64) -> Result<bool> {
+        let seeds: &[&[u8]] = &[
+            BILLING_RECEIPT_SEED_PREFIX,
+            tenant_pda.as_ref(),
+            &epoch.to_le_bytes(),
+        ];
+        let record_key =
+            doublezero_sdk::record::pubkey::create_record_key(&self.payer.pubkey(), seeds);
+        let account = self
+            .client
+            .get_account_with_commitment(&record_key, CommitmentConfig::confirmed())
+            .await?;
+        Ok(account.value.is_some())
+    }
+
+    pub async fn create_billing_receipt_and_update_epoch(
         &self,
         tenant_pda: &Pubkey,
-        last_deduction_dz_epoch: u64,
+        receipt: &BillingReceipt,
     ) -> Result<Signature> {
+        let epoch_bytes = receipt.dz_epoch.to_le_bytes();
+        let seeds: &[&[u8]] = &[
+            BILLING_RECEIPT_SEED_PREFIX,
+            tenant_pda.as_ref(),
+            &epoch_bytes,
+        ];
+        let payer_key = self.payer.pubkey();
+        let serialized = borsh::to_vec(receipt)?;
+
+        // Record account creation instructions (allocate, assign, initialize)
+        let init = doublezero_sdk::record::instruction::InitializeRecordInstructions::new(
+            &payer_key,
+            seeds,
+            serialized.len(),
+        );
+
+        // Transfer rent lamports
+        let record_key = doublezero_sdk::record::pubkey::create_record_key(&payer_key, seeds);
+        let rent_lamports = self
+            .client
+            .get_minimum_balance_for_rent_exemption(init.total_space)
+            .await?;
+        let transfer_ix = system_instruction::transfer(&payer_key, &record_key, rent_lamports);
+
+        // Write receipt data
+        let write_ix = record_instruction::write(&record_key, &payer_key, 0, &serialized);
+
+        // Update epoch (UpdatePaymentStatus with last_deduction_dz_epoch)
         let (globalstate_pk, _) = get_globalstate_pda(&self.serviceability_id);
         let args = DoubleZeroInstruction::UpdatePaymentStatus(UpdatePaymentStatusArgs {
             payment_status: TenantPaymentStatus::Paid as u8,
-            last_deduction_dz_epoch: Some(last_deduction_dz_epoch),
+            last_deduction_dz_epoch: Some(receipt.dz_epoch),
         });
         let accounts = vec![
             AccountMeta::new(*tenant_pda, false),
             AccountMeta::new_readonly(globalstate_pk, false),
-            AccountMeta::new(self.payer.pubkey(), true),
+            AccountMeta::new(payer_key, true),
             AccountMeta::new_readonly(system_program::id(), false),
         ];
+        let epoch_ix = try_build_instruction(&self.serviceability_id, accounts, &args)?;
 
-        let ix = try_build_instruction(&self.serviceability_id, accounts, &args)?;
         let signer = &self.payer;
         let recent_blockhash = self.client.get_latest_blockhash().await?;
-        let transaction = new_transaction(&[ix], &[signer], recent_blockhash);
+        let transaction = new_transaction(
+            &[
+                init.allocate,
+                init.assign,
+                transfer_ix,
+                init.initialize,
+                write_ix,
+                epoch_ix,
+            ],
+            &[signer],
+            recent_blockhash,
+        );
 
         let signature = self
             .client
@@ -249,9 +312,9 @@ impl DzRpcClient {
             .await?;
         info!(
             tenant = %tenant_pda,
-            epoch = last_deduction_dz_epoch,
+            epoch = receipt.dz_epoch,
             %signature,
-            "updated tenant billing epoch"
+            "created billing receipt and updated epoch"
         );
 
         Ok(signature)
