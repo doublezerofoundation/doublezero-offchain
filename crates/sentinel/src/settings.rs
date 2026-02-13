@@ -129,7 +129,16 @@ impl Settings {
             "mainnet" | "mainnet-beta" => {
                 doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
             }
-            _ => doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY,
+            "testnet" | "devnet" | "local" | "localhost" => {
+                doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
+            }
+            other => {
+                tracing::warn!(
+                    env = other,
+                    "unknown environment for mint; defaulting to development key"
+                );
+                doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
+            }
         }
     }
 }

@@ -85,8 +85,6 @@ pub trait SolRpcClientType {
         from: &Pubkey,
         to: &Pubkey,
         amount: u64,
-        mint: &Pubkey,
-        decimals: u8,
     ) -> Result<Signature>;
 }
 
@@ -143,11 +141,8 @@ impl SolRpcClientType for SolRpcClient {
         from: &Pubkey,
         to: &Pubkey,
         amount: u64,
-        mint: &Pubkey,
-        decimals: u8,
     ) -> Result<Signature> {
-        self.transfer_spl_token(from, to, amount, mint, decimals)
-            .await
+        self.transfer_spl_token(from, to, amount).await
     }
 }
 
@@ -384,31 +379,20 @@ impl SolRpcClient {
         from: &Pubkey,
         to: &Pubkey,
         amount: u64,
-        mint: &Pubkey,
-        decimals: u8,
     ) -> Result<Signature> {
         let signer = &self.payer;
-        let ix = spl_token_interface::instruction::transfer_checked(
+        let ix = spl_token_interface::instruction::transfer(
             &spl_token_interface::id(),
             from,
-            mint,
             to,
             &signer.pubkey(),
             &[],
             amount,
-            decimals,
         )
-        .map_err(|e| Error::SplInstruction(format!("transfer_checked: {e}")))?;
-
-        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(12_000);
-        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
+        .map_err(|e| Error::SplInstruction(format!("transfer: {e}")))?;
 
         let recent_blockhash = self.client.get_latest_blockhash().await?;
-        let transaction = new_transaction(
-            &[compute_limit_ix, compute_price_ix, ix],
-            &[signer],
-            recent_blockhash,
-        );
+        let transaction = new_transaction(&[ix], &[signer], recent_blockhash);
 
         let signature = tokio::time::timeout(
             SEND_AND_CONFIRM_TIMEOUT,

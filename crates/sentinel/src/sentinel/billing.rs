@@ -26,24 +26,14 @@ pub struct BillingConfig {
     pub poll_interval_secs: u64,
     pub minimum_balance: Option<u64>,
     pub journal_ata: Pubkey,
-    pub mint: Pubkey,
-    pub decimals: u8,
 }
 
 impl BillingConfig {
-    pub fn new(
-        poll_interval_secs: u64,
-        minimum_balance: Option<u64>,
-        journal_ata: Pubkey,
-        mint: Pubkey,
-        decimals: u8,
-    ) -> Self {
+    pub fn new(poll_interval_secs: u64, minimum_balance: Option<u64>, journal_ata: Pubkey) -> Self {
         Self {
             poll_interval_secs,
             minimum_balance,
             journal_ata,
-            mint,
-            decimals,
         }
     }
 }
@@ -59,8 +49,6 @@ pub struct BillingSentinel<D: DzRpcClientType, S: SolRpcClientType> {
     poll_interval: Duration,
     minimum_balance: u64,
     journal_ata: Pubkey,
-    mint: Pubkey,
-    decimals: u8,
 }
 
 impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
@@ -95,8 +83,6 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             poll_interval: Duration::from_secs(config.poll_interval_secs),
             minimum_balance: config.minimum_balance.unwrap_or(1),
             journal_ata: config.journal_ata,
-            mint: config.mint,
-            decimals: config.decimals,
         }
     }
 
@@ -159,7 +145,19 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
 
         let mut failures = 0u64;
         for tenant in tenants {
-            let TenantBillingConfig::FlatPerEpoch(ref config) = tenant.billing;
+            // Currently only one variant exists, but guard against future
+            // upstream additions so the sentinel degrades gracefully.
+            #[allow(unreachable_patterns)]
+            let config = match tenant.billing {
+                TenantBillingConfig::FlatPerEpoch(ref c) => c,
+                _ => {
+                    warn!(
+                        tenant = %tenant.tenant_pda,
+                        "billing: unknown billing config variant; skipping"
+                    );
+                    continue;
+                }
+            };
 
             let result = if config.rate > 0 {
                 if let Some(epoch) = current_epoch {
@@ -203,7 +201,18 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
         tenant: &TenantBillingInfo,
         current_epoch: u64,
     ) -> crate::Result<()> {
-        let TenantBillingConfig::FlatPerEpoch(ref config) = tenant.billing;
+        // See poll_cycle — guard against future upstream variants.
+        #[allow(unreachable_patterns)]
+        let config = match tenant.billing {
+            TenantBillingConfig::FlatPerEpoch(ref c) => c,
+            _ => {
+                warn!(
+                    tenant = %tenant.tenant_pda,
+                    "billing: unknown billing config variant; skipping deduction"
+                );
+                return Ok(());
+            }
+        };
 
         // Already current — nothing to deduct
         if config.last_deduction_dz_epoch >= current_epoch {
@@ -251,13 +260,7 @@ impl<D: DzRpcClientType, S: SolRpcClientType> BillingSentinel<D, S> {
             // Attempt the SPL token transfer on Solana
             match self
                 .sol_rpc_client
-                .transfer_spl_token(
-                    &tenant.token_account,
-                    &self.journal_ata,
-                    config.rate,
-                    &self.mint,
-                    self.decimals,
-                )
+                .transfer_spl_token(&tenant.token_account, &self.journal_ata, config.rate)
                 .await
             {
                 Ok(signature) => {
@@ -481,9 +484,7 @@ mod tests {
     use super::*;
     use crate::client::{doublezero_ledger::MockDzRpcClientType, solana::MockSolRpcClientType};
 
-    const TEST_MINT: Pubkey = Pubkey::new_from_array([99; 32]);
     const TEST_JOURNAL_ATA: Pubkey = Pubkey::new_from_array([88; 32]);
-    const TEST_DECIMALS: u8 = 8;
 
     fn make_tenant(pda_byte: u8, token_byte: u8, status: TenantPaymentStatus) -> TenantBillingInfo {
         make_tenant_with_billing(pda_byte, token_byte, status, TenantBillingConfig::default())
@@ -521,7 +522,7 @@ mod tests {
         BillingSentinel::new(
             dz,
             sol,
-            BillingConfig::new(60, Some(1000), TEST_JOURNAL_ATA, TEST_MINT, TEST_DECIMALS),
+            BillingConfig::new(60, Some(1000), TEST_JOURNAL_ATA),
         )
         .await
     }
@@ -697,11 +698,9 @@ mod tests {
                 predicate::eq(token_account),
                 predicate::eq(TEST_JOURNAL_ATA),
                 predicate::eq(1_000_000),
-                predicate::eq(TEST_MINT),
-                predicate::eq(TEST_DECIMALS),
             )
             .times(1)
-            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+            .returning(|_, _, _| Ok(Signature::new_unique()));
 
         // Atomic receipt creation + epoch update
         dz.expect_create_billing_receipt_and_update_epoch()
@@ -735,7 +734,7 @@ mod tests {
         // Transfer fails
         sol.expect_transfer_spl_token()
             .times(1)
-            .returning(|_, _, _, _, _| Err(crate::Error::Deserialize("insufficient funds".into())));
+            .returning(|_, _, _| Err(crate::Error::Deserialize("insufficient funds".into())));
 
         // Balance check reveals insufficient funds
         sol.expect_get_token_account_balance()
@@ -853,11 +852,9 @@ mod tests {
                 predicate::eq(token_account),
                 predicate::eq(TEST_JOURNAL_ATA),
                 predicate::eq(1_000_000),
-                predicate::eq(TEST_MINT),
-                predicate::eq(TEST_DECIMALS),
             )
             .times(1)
-            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+            .returning(|_, _, _| Ok(Signature::new_unique()));
 
         // DZ tx called ONCE
         dz.expect_create_billing_receipt_and_update_epoch()
@@ -901,11 +898,9 @@ mod tests {
                 predicate::eq(token_account),
                 predicate::eq(TEST_JOURNAL_ATA),
                 predicate::eq(1_000_000),
-                predicate::eq(TEST_MINT),
-                predicate::eq(TEST_DECIMALS),
             )
             .times(1)
-            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+            .returning(|_, _, _| Ok(Signature::new_unique()));
 
         // Should create receipt + bump to epoch 6, NOT 7 or 8
         dz.expect_create_billing_receipt_and_update_epoch()
@@ -948,11 +943,9 @@ mod tests {
                 predicate::eq(token_account),
                 predicate::eq(TEST_JOURNAL_ATA),
                 predicate::eq(1_000_000),
-                predicate::eq(TEST_MINT),
-                predicate::eq(TEST_DECIMALS),
             )
             .times(1)
-            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+            .returning(|_, _, _| Ok(Signature::new_unique()));
 
         // DZ tx: first call fails, second succeeds
         let mut seq = mockall::Sequence::new();
@@ -1000,7 +993,7 @@ mod tests {
         // Transfer fails
         sol.expect_transfer_spl_token()
             .times(1)
-            .returning(|_, _, _, _, _| Err(crate::Error::Deserialize("timeout".into())));
+            .returning(|_, _, _| Err(crate::Error::Deserialize("timeout".into())));
 
         // Balance is sufficient — transient error
         sol.expect_get_token_account_balance()
@@ -1073,11 +1066,9 @@ mod tests {
                 predicate::eq(token_account),
                 predicate::eq(TEST_JOURNAL_ATA),
                 predicate::eq(1_000_000),
-                predicate::eq(TEST_MINT),
-                predicate::eq(TEST_DECIMALS),
             )
             .times(1)
-            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+            .returning(|_, _, _| Ok(Signature::new_unique()));
 
         // DZ tx fails twice, succeeds third time
         let mut seq = mockall::Sequence::new();
@@ -1140,11 +1131,9 @@ mod tests {
                 predicate::eq(token_account),
                 predicate::eq(TEST_JOURNAL_ATA),
                 predicate::eq(1_000_000),
-                predicate::eq(TEST_MINT),
-                predicate::eq(TEST_DECIMALS),
             )
             .times(1)
-            .returning(|_, _, _, _, _| Ok(Signature::new_unique()));
+            .returning(|_, _, _| Ok(Signature::new_unique()));
 
         // DZ tx fails with an error...
         dz.expect_create_billing_receipt_and_update_epoch()

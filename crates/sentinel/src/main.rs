@@ -56,11 +56,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Derive billing addresses
     let mint = settings.doublezero_mint();
-    let decimals = doublezero_revenue_distribution::DOUBLEZERO_MINT_DECIMALS;
     let (journal_pda, _) = Journal::find_address();
     let journal_ata = get_associated_token_address(&journal_pda, &mint);
 
-    info!(%mint, %journal_ata, decimals, "billing: derived 2Z addresses");
+    info!(%mint, %journal_ata, "billing: derived 2Z addresses");
 
     let mut billing_sentinel = BillingSentinel::new(
         DzRpcClient::new(dz_rpc_url, keypair.clone(), serviceability_id),
@@ -69,8 +68,6 @@ async fn main() -> anyhow::Result<()> {
             args.billing_poll_interval,
             args.minimum_balance,
             journal_ata,
-            mint,
-            decimals,
         ),
     )
     .await;

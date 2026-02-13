@@ -24,7 +24,6 @@ use solana_client::{
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction,
     instruction::AccountMeta,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
@@ -302,15 +301,10 @@ impl DzRpcClient {
         ];
         let epoch_ix = try_build_instruction(&self.serviceability_id, accounts, &args)?;
 
-        let compute_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(50_000);
-        let compute_price_ix = ComputeBudgetInstruction::set_compute_unit_price(100_000);
-
         let signer = &self.payer;
         let recent_blockhash = self.client.get_latest_blockhash().await?;
         let transaction = new_transaction(
             &[
-                compute_limit_ix,
-                compute_price_ix,
                 init.allocate,
                 init.assign,
                 transfer_ix,
