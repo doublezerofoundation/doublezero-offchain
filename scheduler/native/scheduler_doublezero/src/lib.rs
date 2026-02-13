@@ -77,6 +77,7 @@ pub fn collect_epoch_debt(
 
             if !distribution.is_debt_calculation_finalized() {
                 tracing::warn!("{dz_epoch} is not finalized, skipping");
+                return Ok(Default::default());
             }
             let tx_results = worker::pay_solana_validator_debt(
                 &wallet,

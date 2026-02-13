@@ -83,6 +83,7 @@ async fn execute_pay_solana_validator_debt(
 
     if !distribution.is_debt_calculation_finalized() {
         tracing::warn!("{epoch} is not finalized, skipping");
+        return Ok(());
     }
 
     let tx_results =
