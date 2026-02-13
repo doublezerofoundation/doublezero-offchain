@@ -126,10 +126,11 @@ impl Settings {
 
     pub fn doublezero_mint(&self) -> Pubkey {
         match self.env.to_lowercase().as_str() {
-            "mainnet" | "mainnet-beta" => {
+            "mainnet" | "mainnet-beta" | "local" | "localhost" => {
+                // NOTE: local|localhost are forked off of mn-beta
                 doublezero_revenue_distribution::env::mainnet::DOUBLEZERO_MINT_KEY
             }
-            "testnet" | "devnet" | "local" | "localhost" => {
+            "testnet" | "devnet" => {
                 doublezero_revenue_distribution::env::development::DOUBLEZERO_MINT_KEY
             }
             other => {
