@@ -6625,6 +6625,7 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status-client-types",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 
