@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Utc;
 use doublezero_program_tools::zero_copy;
@@ -17,7 +17,11 @@ use doublezero_revenue_distribution::{
     types::DoubleZeroEpoch,
 };
 use doublezero_sdk::record::pubkey::create_record_key;
-use doublezero_solana_client_tools::rpc::try_fetch_zero_copy_data_with_commitment;
+use doublezero_solana_client_tools::{
+    payer::Wallet,
+    rpc::{DoubleZeroLedgerConnection, SolanaConnection, try_fetch_zero_copy_data_with_commitment},
+};
+use doublezero_solana_sdk::revenue_distribution::fetch::try_fetch_config;
 use slack_notifier::contributor_rewards::{WriteResultInfo, post_detailed_completion};
 use solana_client::client_error::ClientError as SolanaClientError;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
@@ -30,7 +34,10 @@ use tokio::{
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    calculator::{WriteConfig, ledger_operations::WriteResult, orchestrator::Orchestrator},
+    calculator::{
+        WriteConfig, distribute, keypair_loader::load_keypair, ledger_operations::WriteResult,
+        orchestrator::Orchestrator,
+    },
     cli::snapshot::{CompleteSnapshot, SnapshotMetadata},
     ingestor::{epoch::EpochFinder, fetcher::Fetcher},
     scheduler::state::SchedulerState,
@@ -153,9 +160,69 @@ impl ScheduleWorker {
                     }
                 }
             }
+
+            // Try to distribute rewards for the eligible epoch.
+            match self.try_distribute_rewards().await {
+                Ok(true) => {
+                    info!("Distributed rewards successfully");
+                    metrics::counter!("doublezero_contributor_rewards_distribution_success")
+                        .increment(1);
+                }
+                Ok(false) => debug!("No rewards to distribute"),
+                Err(e) => {
+                    warn!("Failed to distribute rewards: {e}");
+                    metrics::counter!("doublezero_contributor_rewards_distribution_failure")
+                        .increment(1);
+                }
+            }
         }
 
         Ok(())
+    }
+
+    /// Attempt to distribute rewards for the eligible epoch.
+    async fn try_distribute_rewards(&self) -> Result<bool> {
+        if self.dry_run {
+            debug!("Dry run mode, skipping reward distribution");
+            return Ok(false);
+        }
+
+        let signer = load_keypair(&self.keypair_path)?;
+        let connection =
+            SolanaConnection::new(self.orchestrator.settings.rpc.solana_write_url.clone());
+        let dz_connection =
+            DoubleZeroLedgerConnection::new(self.orchestrator.settings.rpc.dz_url.clone());
+
+        let wallet = Wallet {
+            connection,
+            signer,
+            compute_unit_price_ix: None,
+            verbose: false,
+            fee_payer: None,
+            dry_run: false,
+        };
+
+        let (_, config) = try_fetch_config(&wallet.connection).await?;
+
+        let deferral_period = config
+            .checked_minimum_epoch_duration_to_finalize_rewards()
+            .context("Minimum epoch duration to finalize rewards not set")?;
+
+        let dz_epoch_value = config
+            .next_completed_dz_epoch
+            .value()
+            .saturating_sub(deferral_period.into());
+
+        let shapley_prefix = self.orchestrator.settings.get_contributor_rewards_prefix();
+
+        distribute::try_distribute_epoch_rewards(
+            &wallet,
+            &dz_connection,
+            &config.rewards_accountant_key,
+            dz_epoch_value,
+            &shapley_prefix,
+        )
+        .await
     }
 
     /// Process rewards for the current epoch if needed

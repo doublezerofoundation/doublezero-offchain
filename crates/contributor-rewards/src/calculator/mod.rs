@@ -1,5 +1,6 @@
 pub mod constants;
 pub mod data_prep;
+pub mod distribute;
 pub mod input;
 pub mod keypair_loader;
 pub mod ledger_operations;

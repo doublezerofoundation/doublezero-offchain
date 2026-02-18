@@ -283,6 +283,40 @@ pub enum RewardsCommands {
         )]
         keypair: Option<PathBuf>,
     },
+    #[command(
+        about = "Distribute rewards to contributors for a finalized epoch",
+        long_about = "Runs in dry-run (simulate) mode by default. Pass --execute to send real transactions.",
+        after_help = r#"Examples:
+    # Check distribution readiness for the current eligible epoch (dry-run, no keypair needed)
+    distribute-rewards
+
+    # Check a specific epoch
+    distribute-rewards -e 27
+
+    # Actually execute distribution
+    distribute-rewards --execute -k keypair.json
+
+    # Execute for a specific epoch
+    distribute-rewards --execute -e 27 -k keypair.json"#
+    )]
+    DistributeRewards {
+        /// DZ epoch to distribute rewards for (defaults to current eligible epoch)
+        #[arg(short = 'e', long, value_name = "EPOCH")]
+        dz_epoch: Option<u64>,
+
+        /// Actually send transactions (default is dry-run/simulate)
+        #[arg(long)]
+        execute: bool,
+
+        /// Path to keypair file for signing transactions
+        #[arg(
+            short = 'k',
+            long,
+            value_name = "FILE",
+            required_if_eq("execute", "true")
+        )]
+        keypair: Option<PathBuf>,
+    },
 }
 
 /// Handle rewards commands
@@ -455,6 +489,79 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             orchestrator
                 .write_telemetry_aggregates(epoch, keypair, dry_run, r#type)
                 .await
+        }
+        RewardsCommands::DistributeRewards {
+            dz_epoch,
+            execute,
+            keypair,
+        } => {
+            use anyhow::Context;
+            use doublezero_solana_client_tools::{
+                payer::Wallet,
+                rpc::{DoubleZeroLedgerConnection, SolanaConnection},
+            };
+            use doublezero_solana_sdk::revenue_distribution::fetch::try_fetch_config;
+            use solana_sdk::signature::Keypair;
+
+            use crate::calculator::{distribute, keypair_loader::load_keypair};
+
+            let dry_run = !execute;
+
+            let signer = if let Some(ref path) = keypair {
+                load_keypair(&Some(path.clone()))?
+            } else {
+                Keypair::new()
+            };
+
+            let connection =
+                SolanaConnection::new(orchestrator.settings.rpc.solana_write_url.clone());
+            let dz_connection =
+                DoubleZeroLedgerConnection::new(orchestrator.settings.rpc.dz_url.clone());
+
+            let wallet = Wallet {
+                connection,
+                signer,
+                compute_unit_price_ix: None,
+                verbose: false,
+                fee_payer: None,
+                dry_run,
+            };
+
+            let (_, config) = try_fetch_config(&wallet.connection).await?;
+
+            let dz_epoch_value = match dz_epoch {
+                Some(epoch) => epoch,
+                None => {
+                    let deferral_period = config
+                        .checked_minimum_epoch_duration_to_finalize_rewards()
+                        .context("Minimum epoch duration to finalize rewards not set")?;
+                    config
+                        .next_completed_dz_epoch
+                        .value()
+                        .saturating_sub(deferral_period.into())
+                }
+            };
+
+            info!("Distributing rewards for epoch {dz_epoch_value}");
+
+            let shapley_prefix = orchestrator.settings.get_contributor_rewards_prefix();
+
+            let distributed = distribute::try_distribute_epoch_rewards(
+                &wallet,
+                &dz_connection,
+                &config.rewards_accountant_key,
+                dz_epoch_value,
+                &shapley_prefix,
+            )
+            .await?;
+
+            if distributed {
+                info!("Rewards distributed for epoch {dz_epoch_value}");
+            } else {
+                info!("No rewards to distribute for epoch {dz_epoch_value}");
+            }
+
+            Ok(())
         }
     }
 }
