@@ -212,7 +212,13 @@ impl ScheduleWorker {
                             }
                         }
                     }
-                    Err(e) => warn!("Failed to fetch distribution epoch: {e}"),
+                    Err(e) => {
+                        warn!("Failed to fetch distribution epoch: {e}");
+                        metrics::counter!(
+                            "doublezero_contributor_rewards_distribution_fetch_failure"
+                        )
+                        .increment(1);
+                    }
                 }
             }
         }
