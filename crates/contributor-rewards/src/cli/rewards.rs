@@ -546,7 +546,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
 
             let shapley_prefix = orchestrator.settings.get_contributor_rewards_prefix();
 
-            let distributed = distribute::try_distribute_epoch_rewards(
+            let outcome = distribute::try_distribute_epoch_rewards(
                 &wallet,
                 &dz_connection,
                 &config.rewards_accountant_key,
@@ -555,10 +555,16 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             )
             .await?;
 
-            if distributed {
-                info!("Rewards distributed for epoch {dz_epoch_value}");
-            } else {
-                info!("No rewards to distribute for epoch {dz_epoch_value}");
+            match outcome {
+                distribute::DistributionOutcome::AlreadyComplete => {
+                    info!("All contributors already distributed for epoch {dz_epoch_value}");
+                }
+                distribute::DistributionOutcome::Distributed(n) => {
+                    info!("Distributed {n} contributors for epoch {dz_epoch_value}");
+                }
+                distribute::DistributionOutcome::NotReady => {
+                    info!("Distribution not ready for epoch {dz_epoch_value}");
+                }
             }
 
             Ok(())

@@ -12,5 +12,6 @@ pub mod shapley;
 pub mod util;
 pub mod write_config;
 
-// Re-export WriteConfig for access
+// Re-export for access
+pub use distribute::DistributionOutcome;
 pub use write_config::WriteConfig;

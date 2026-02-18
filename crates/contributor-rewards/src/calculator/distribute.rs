@@ -27,17 +27,25 @@ use crate::calculator::{ledger_operations::try_fetch_shapley_output, proof::Shap
 
 const RELAY_MEMO_CU: u32 = 5_000;
 
+/// Outcome of a distribution attempt.
+#[derive(Debug)]
+pub enum DistributionOutcome {
+    /// Finalization or sweep guards not met.
+    NotReady,
+    /// All contributors have already been distributed.
+    AlreadyComplete,
+    /// N contributors were distributed this run (may be a partial batch).
+    Distributed(usize),
+}
+
 /// Attempt to distribute rewards for the current eligible epoch.
-///
-/// Returns `Ok(true)` if any distributions were made, `Ok(false)` if nothing
-/// to distribute (not ready or all done), or an error on failure.
 pub async fn try_distribute_epoch_rewards(
     wallet: &Wallet,
     dz_connection: &DoubleZeroLedgerConnection,
     rewards_accountant_key: &Pubkey,
     dz_epoch_value: u64,
     shapley_prefix: &[u8],
-) -> Result<bool> {
+) -> Result<DistributionOutcome> {
     // Fetch the distribution for this epoch.
     let (_, distribution) = try_fetch_distribution(&wallet.connection, dz_epoch_value).await?;
 
@@ -47,7 +55,7 @@ pub async fn try_distribute_epoch_rewards(
             "Distribution for epoch {} is not finalized yet, skipping",
             dz_epoch_value
         );
-        return Ok(false);
+        return Ok(DistributionOutcome::NotReady);
     }
 
     if !distribution.has_swept_2z_tokens() {
@@ -55,7 +63,7 @@ pub async fn try_distribute_epoch_rewards(
             "Distribution for epoch {} has not swept 2Z tokens yet, skipping",
             dz_epoch_value
         );
-        return Ok(false);
+        return Ok(DistributionOutcome::NotReady);
     }
 
     // Check if all contributors are already distributed.
@@ -64,7 +72,7 @@ pub async fn try_distribute_epoch_rewards(
             "All {} contributors already distributed for epoch {}, skipping",
             distribution.total_contributors, dz_epoch_value
         );
-        return Ok(false);
+        return Ok(DistributionOutcome::AlreadyComplete);
     }
 
     info!(
@@ -84,7 +92,7 @@ pub async fn try_distribute_epoch_rewards(
     )
     .await?;
 
-    let mut distributed_any = false;
+    let mut distributed_count = 0usize;
 
     for (leaf_index, reward_share, is_processed) in
         try_distribution_rewards_iter(&distribution, &shapley_output)?
@@ -108,10 +116,10 @@ pub async fn try_distribute_epoch_rewards(
         )
         .await?;
 
-        distributed_any = true;
+        distributed_count += 1;
     }
 
-    Ok(distributed_any)
+    Ok(DistributionOutcome::Distributed(distributed_count))
 }
 
 /// Iterate over distribution rewards, yielding (leaf_index, reward_share, is_processed)
@@ -409,6 +417,20 @@ mod tests {
             err.to_string().contains("Insufficient"),
             "error should mention insufficient bitmap"
         );
+    }
+
+    #[test]
+    fn test_outcome_all_processed_maps_to_already_complete() {
+        let shapley = create_test_shapley_output(3);
+        let storage = ShapleyOutputStorage::new(42, &shapley).unwrap();
+        let distribution = make_distribution(42, vec![0xFF], 3);
+
+        let unprocessed_count = try_distribution_rewards_iter(&distribution, &storage)
+            .unwrap()
+            .filter(|(_, _, is_processed)| !is_processed)
+            .count();
+
+        assert_eq!(unprocessed_count, 0);
     }
 
     #[test]
