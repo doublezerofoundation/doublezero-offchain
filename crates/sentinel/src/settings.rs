@@ -62,6 +62,11 @@ pub struct Settings {
     /// metrics listening endpoint
     #[serde(default = "default_metrics_addr")]
     metrics_addr: String,
+
+    /// Comma-separated multicast group codes for publisher allowlisting on
+    /// validator onboarding. When empty (default), allowlisting is disabled.
+    #[serde(default)]
+    multicast_group_codes: Option<String>,
 }
 
 impl Settings {
@@ -109,6 +114,18 @@ impl Settings {
         self.metrics_addr
             .parse()
             .expect("invalid metrics network address and port")
+    }
+
+    pub fn multicast_group_codes(&self) -> Vec<String> {
+        self.multicast_group_codes
+            .as_deref()
+            .map(|s| {
+                s.split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn serviceability_program_id(

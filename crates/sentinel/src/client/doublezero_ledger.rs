@@ -7,11 +7,14 @@ use doublezero_serviceability::{
     instructions::DoubleZeroInstruction,
     pda::{get_accesspass_pda, get_globalstate_pda},
     processors::{
-        accesspass::set::SetAccessPassArgs, tenant::update_payment_status::UpdatePaymentStatusArgs,
+        accesspass::set::SetAccessPassArgs,
+        multicastgroup::allowlist::publisher::add::AddMulticastGroupPubAllowlistArgs,
+        tenant::update_payment_status::UpdatePaymentStatusArgs,
     },
     state::{
         accesspass::AccessPassType,
         accounttype::AccountType,
+        multicastgroup::MulticastGroup,
         tenant::{Tenant, TenantPaymentStatus},
     },
 };
@@ -50,6 +53,13 @@ pub trait DzRpcClientType {
         validator_id: &Pubkey,
     ) -> Result<Signature>;
 
+    async fn add_multicast_publisher_allowlist(
+        &self,
+        multicast_group_pda: &Pubkey,
+        service_key: &Pubkey,
+        client_ip: &Ipv4Addr,
+    ) -> Result<Signature>;
+
     async fn get_tenants_with_token_accounts(&self) -> Result<Vec<TenantBillingInfo>>;
 
     async fn update_tenant_payment_status(
@@ -84,6 +94,16 @@ impl DzRpcClientType for DzRpcClient {
         validator_id: &Pubkey,
     ) -> Result<Signature> {
         self.issue_access_pass(service_key, client_ip, validator_id)
+            .await
+    }
+
+    async fn add_multicast_publisher_allowlist(
+        &self,
+        multicast_group_pda: &Pubkey,
+        service_key: &Pubkey,
+        client_ip: &Ipv4Addr,
+    ) -> Result<Signature> {
+        self.add_multicast_publisher_allowlist(multicast_group_pda, service_key, client_ip)
             .await
     }
 
@@ -166,6 +186,51 @@ impl DzRpcClient {
             .send_and_confirm_transaction(&transaction)
             .await?;
         info!(validator = %service_key, %signature, "issued validator access pass");
+
+        Ok(signature)
+    }
+
+    pub async fn add_multicast_publisher_allowlist(
+        &self,
+        multicast_group_pda: &Pubkey,
+        service_key: &Pubkey,
+        client_ip: &Ipv4Addr,
+    ) -> Result<Signature> {
+        let (globalstate_pk, _) = get_globalstate_pda(&self.serviceability_id);
+        let (accesspass_pk, _) =
+            get_accesspass_pda(&self.serviceability_id, client_ip, service_key);
+
+        let args = DoubleZeroInstruction::AddMulticastGroupPubAllowlist(
+            AddMulticastGroupPubAllowlistArgs {
+                client_ip: *client_ip,
+                user_payer: *service_key,
+            },
+        );
+
+        let accounts = vec![
+            AccountMeta::new(*multicast_group_pda, false),
+            AccountMeta::new(accesspass_pk, false),
+            AccountMeta::new_readonly(globalstate_pk, false),
+            AccountMeta::new(self.payer.pubkey(), true),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ];
+
+        let ix = try_build_instruction(&self.serviceability_id, accounts, &args)?;
+        let signer = &self.payer;
+        let recent_blockhash = self.client.get_latest_blockhash().await?;
+        let transaction = new_transaction(&[ix], &[signer], recent_blockhash);
+
+        let signature = self
+            .client
+            .send_and_confirm_transaction(&transaction)
+            .await?;
+        info!(
+            validator = %service_key,
+            %multicast_group_pda,
+            %client_ip,
+            %signature,
+            "added to multicast publisher allowlist"
+        );
 
         Ok(signature)
     }
@@ -343,5 +408,61 @@ impl DzRpcClient {
     pub async fn get_current_dz_epoch(&self) -> Result<u64> {
         let epoch_info = self.client.get_epoch_info().await?;
         Ok(epoch_info.epoch.saturating_sub(1))
+    }
+
+    /// Resolves multicast group codes to their on-chain PDAs by fetching all
+    /// MulticastGroup accounts and filtering by code. Intended to be called
+    /// once at startup, not in the hot loop.
+    pub async fn resolve_multicast_group_codes(
+        &self,
+        codes: &[String],
+    ) -> Result<Vec<(String, Pubkey)>> {
+        if codes.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let config = RpcProgramAccountsConfig {
+            filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                0,
+                vec![AccountType::MulticastGroup as u8],
+            ))]),
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let accounts = self
+            .client
+            .get_program_accounts_with_config(&self.serviceability_id, config)
+            .await?;
+
+        let mut resolved = Vec::new();
+        for code in codes {
+            let found = accounts.iter().find_map(|(pubkey, account)| {
+                let group = MulticastGroup::try_from(&account.data[..]).ok()?;
+                if group.code == *code {
+                    Some(*pubkey)
+                } else {
+                    None
+                }
+            });
+
+            match found {
+                Some(pda) => {
+                    info!(code, %pda, "resolved multicast group code");
+                    resolved.push((code.clone(), pda));
+                }
+                None => {
+                    return Err(Error::Deserialize(format!(
+                        "multicast group code '{}' not found on DZ Ledger",
+                        code
+                    )));
+                }
+            }
+        }
+
+        Ok(resolved)
     }
 }

@@ -30,6 +30,7 @@ pub struct PollingSentinel {
     processed_cache: Arc<Cache<Pubkey, Instant>>,
     poll_interval: Duration,
     previous_leader_epochs: u8,
+    multicast_group_pdas: Vec<Pubkey>,
 }
 
 impl PollingSentinel {
@@ -40,6 +41,7 @@ impl PollingSentinel {
         serviceability_id: Pubkey,
         poll_interval_secs: u64,
         previous_leader_epochs: u8,
+        multicast_group_pdas: Vec<Pubkey>,
     ) -> Result<Self> {
         // Create cache with automatic background cleanup
         let processed_cache = Arc::new(Cache::new());
@@ -57,6 +59,7 @@ impl PollingSentinel {
             processed_cache,
             poll_interval: Duration::from_secs(poll_interval_secs),
             previous_leader_epochs,
+            multicast_group_pdas,
         })
     }
 
@@ -152,6 +155,40 @@ impl PollingSentinel {
                 )
                 .await?;
                 info!(%validator_id, %validator_ip, user = %service_key, "access pass issued");
+
+                for mgroup_pda in &self.multicast_group_pdas {
+                    match rpc_with_retry(
+                        || async {
+                            self.dz_rpc_client
+                                .add_multicast_publisher_allowlist(
+                                    mgroup_pda,
+                                    &service_key,
+                                    &validator_ip,
+                                )
+                                .await
+                        },
+                        "add_multicast_publisher_allowlist",
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                %validator_id, %validator_ip, %mgroup_pda,
+                                "multicast publisher allowlist added"
+                            );
+                            metrics::counter!("doublezero_sentinel_multicast_allowlist_success")
+                                .increment(1);
+                        }
+                        Err(err) => {
+                            error!(
+                                ?err, %validator_id, %validator_ip, %mgroup_pda,
+                                "multicast allowlist failed; continuing"
+                            );
+                            metrics::counter!("doublezero_sentinel_multicast_allowlist_failed")
+                                .increment(1);
+                        }
+                    }
+                }
             }
 
             let signature = rpc_with_retry(
@@ -277,6 +314,7 @@ mod tests {
             processed_cache: Arc::new(Cache::new()),
             poll_interval: Duration::from_secs(15),
             previous_leader_epochs: 0,
+            multicast_group_pdas: vec![],
         };
 
         // Invalid signature -> verify_access_request(...) should return Error::SignatureVerify
