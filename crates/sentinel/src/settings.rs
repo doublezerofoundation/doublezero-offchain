@@ -161,10 +161,63 @@ impl Settings {
     }
 }
 
+/// Helper to build a `Settings` with only `multicast_group_codes` set.
+/// All other fields use placeholder values (not relevant for the test).
+#[cfg(test)]
+fn settings_with_mcast_codes(codes: Option<&str>) -> Settings {
+    Settings {
+        log: default_log(),
+        env: "devnet".into(),
+        dz_rpc: "http://localhost:1234".into(),
+        sol_rpc: "localhost".into(),
+        keypair: "/dev/null".into(),
+        metrics_addr: default_metrics_addr(),
+        multicast_group_codes: codes.map(String::from),
+    }
+}
+
 fn default_log() -> String {
     "doublezero_ledger_sentinel=info".to_string()
 }
 
 fn default_metrics_addr() -> String {
     "127.0.0.1:2112".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multicast_group_codes_none() {
+        let settings = settings_with_mcast_codes(None);
+        assert!(settings.multicast_group_codes().is_empty());
+    }
+
+    #[test]
+    fn multicast_group_codes_empty_string() {
+        let settings = settings_with_mcast_codes(Some(""));
+        assert!(settings.multicast_group_codes().is_empty());
+    }
+
+    #[test]
+    fn multicast_group_codes_single() {
+        let settings = settings_with_mcast_codes(Some("ALPHA"));
+        assert_eq!(settings.multicast_group_codes(), vec!["ALPHA"]);
+    }
+
+    #[test]
+    fn multicast_group_codes_multiple_with_whitespace() {
+        let settings = settings_with_mcast_codes(Some(" ALPHA , BETA , GAMMA "));
+        assert_eq!(
+            settings.multicast_group_codes(),
+            vec!["ALPHA", "BETA", "GAMMA"]
+        );
+    }
+
+    #[test]
+    fn multicast_group_codes_trailing_comma() {
+        let settings = settings_with_mcast_codes(Some("ALPHA,BETA,"));
+        assert_eq!(settings.multicast_group_codes(), vec!["ALPHA", "BETA"]);
+    }
 }
