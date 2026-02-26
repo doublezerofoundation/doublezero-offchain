@@ -438,19 +438,18 @@ impl DzRpcClient {
             .get_program_accounts_with_config(&self.serviceability_id, config)
             .await?;
 
+        let code_to_pda: std::collections::HashMap<String, Pubkey> = accounts
+            .iter()
+            .filter_map(|(pubkey, account)| {
+                let group = MulticastGroup::try_from(&account.data[..]).ok()?;
+                Some((group.code.clone(), *pubkey))
+            })
+            .collect();
+
         let mut resolved = Vec::new();
         for code in codes {
-            let found = accounts.iter().find_map(|(pubkey, account)| {
-                let group = MulticastGroup::try_from(&account.data[..]).ok()?;
-                if group.code == *code {
-                    Some(*pubkey)
-                } else {
-                    None
-                }
-            });
-
-            match found {
-                Some(pda) => {
+            match code_to_pda.get(code.as_str()) {
+                Some(&pda) => {
                     info!(code, %pda, "resolved multicast group code");
                     resolved.push((code.clone(), pda));
                 }
