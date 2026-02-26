@@ -484,31 +484,35 @@ impl DzRpcClient {
     }
 }
 
-/// Pure resolution logic extracted for testability. Filters to only
-/// `Activated` groups, detects duplicate activated codes, and looks up
-/// each requested code.
+/// Pure resolution logic extracted for testability. Detects duplicate
+/// codes across **all** groups (regardless of status), then resolves
+/// requested codes against `Activated`-only groups.
 fn resolve_codes_from_accounts(
     accounts: &[(Pubkey, MulticastGroup)],
     codes: &[String],
 ) -> Result<Vec<(String, Pubkey)>> {
-    let mut code_to_pda: HashMap<&str, Pubkey> = HashMap::new();
-
+    // First pass: detect duplicate codes across all statuses.
+    let mut seen: HashMap<&str, Pubkey> = HashMap::new();
     for (pda, group) in accounts {
-        if group.status != MulticastGroupStatus::Activated {
-            continue;
-        }
-        if let Some(existing_pda) = code_to_pda.insert(group.code.as_str(), *pda) {
+        if let Some(existing_pda) = seen.insert(group.code.as_str(), *pda) {
             return Err(Error::Deserialize(format!(
-                "duplicate activated multicast group code '{}': PDAs {} and {}",
+                "duplicate multicast group code '{}': PDAs {} and {}",
                 group.code, existing_pda, pda
             )));
         }
     }
 
+    // Second pass: build lookup from Activated groups only.
+    let activated: HashMap<&str, Pubkey> = accounts
+        .iter()
+        .filter(|(_, group)| group.status == MulticastGroupStatus::Activated)
+        .map(|(pda, group)| (group.code.as_str(), *pda))
+        .collect();
+
     codes
         .iter()
         .map(|code| {
-            code_to_pda
+            activated
                 .get(code.as_str())
                 .map(|&pda| (code.clone(), pda))
                 .ok_or_else(|| {
@@ -576,11 +580,8 @@ mod tests {
     }
 
     #[test]
-    fn filters_non_activated_groups() {
+    fn same_code_across_statuses_is_duplicate_error() {
         let pda_pending = Pubkey::new_unique();
-        let pda_suspended = Pubkey::new_unique();
-        let pda_deleting = Pubkey::new_unique();
-        let pda_rejected = Pubkey::new_unique();
         let pda_activated = Pubkey::new_unique();
         let accounts = vec![
             (
@@ -588,25 +589,46 @@ mod tests {
                 make_group("ALPHA", MulticastGroupStatus::Pending),
             ),
             (
-                pda_suspended,
-                make_group("ALPHA", MulticastGroupStatus::Suspended),
-            ),
-            (
-                pda_deleting,
-                make_group("ALPHA", MulticastGroupStatus::Deleting),
-            ),
-            (
-                pda_rejected,
-                make_group("ALPHA", MulticastGroupStatus::Rejected),
-            ),
-            (
                 pda_activated,
                 make_group("ALPHA", MulticastGroupStatus::Activated),
             ),
         ];
         let codes = vec!["ALPHA".into()];
-        let result = resolve_codes_from_accounts(&accounts, &codes).unwrap();
-        assert_eq!(result, vec![("ALPHA".into(), pda_activated)]);
+        let err = resolve_codes_from_accounts(&accounts, &codes).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate multicast group code 'ALPHA'"),
+            "{}",
+            err
+        );
+    }
+
+    #[test]
+    fn non_activated_groups_not_resolvable() {
+        let accounts = vec![
+            (
+                Pubkey::new_unique(),
+                make_group("PENDING", MulticastGroupStatus::Pending),
+            ),
+            (
+                Pubkey::new_unique(),
+                make_group("SUSPENDED", MulticastGroupStatus::Suspended),
+            ),
+            (
+                Pubkey::new_unique(),
+                make_group("DELETING", MulticastGroupStatus::Deleting),
+            ),
+            (
+                Pubkey::new_unique(),
+                make_group("REJECTED", MulticastGroupStatus::Rejected),
+            ),
+        ];
+        let err = resolve_codes_from_accounts(&accounts, &["PENDING".into()]).unwrap_err();
+        assert!(
+            err.to_string().contains("not found (or not activated)"),
+            "{}",
+            err
+        );
     }
 
     #[test]
@@ -621,30 +643,11 @@ mod tests {
         let err = resolve_codes_from_accounts(&accounts, &codes).unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("duplicate activated multicast group code 'ALPHA'"),
+            msg.contains("duplicate multicast group code 'ALPHA'"),
             "{msg}"
         );
         assert!(msg.contains(&pda_1.to_string()), "{msg}");
         assert!(msg.contains(&pda_2.to_string()), "{msg}");
-    }
-
-    #[test]
-    fn pending_and_activated_same_code_no_conflict() {
-        let pda_pending = Pubkey::new_unique();
-        let pda_activated = Pubkey::new_unique();
-        let accounts = vec![
-            (
-                pda_pending,
-                make_group("ALPHA", MulticastGroupStatus::Pending),
-            ),
-            (
-                pda_activated,
-                make_group("ALPHA", MulticastGroupStatus::Activated),
-            ),
-        ];
-        let codes = vec!["ALPHA".into()];
-        let result = resolve_codes_from_accounts(&accounts, &codes).unwrap();
-        assert_eq!(result, vec![("ALPHA".into(), pda_activated)]);
     }
 
     #[test]
