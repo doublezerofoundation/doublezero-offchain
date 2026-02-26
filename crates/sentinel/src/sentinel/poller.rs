@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     net::Ipv4Addr,
     sync::Arc,
     time::{Duration, Instant},
@@ -9,7 +10,7 @@ use retainer::Cache;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use tokio::time::interval;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use url::Url;
 
 use crate::{
@@ -156,7 +157,38 @@ impl PollingSentinel {
                 .await?;
                 info!(%validator_id, %validator_ip, user = %service_key, "access pass issued");
 
+                let existing_mgroup_pubs: HashSet<Pubkey> = match rpc_with_retry(
+                    || async {
+                        self.dz_rpc_client
+                            .get_access_pass(&service_key, &validator_ip)
+                            .await
+                    },
+                    "get_access_pass",
+                )
+                .await
+                {
+                    Ok(access_pass) => access_pass.mgroup_pub_allowlist.into_iter().collect(),
+                    Err(err) => {
+                        warn!(
+                            ?err, %validator_id, %validator_ip,
+                            "failed to fetch access pass for idempotency check; \
+                             will attempt all multicast allowlist additions"
+                        );
+                        HashSet::new()
+                    }
+                };
+
                 for mgroup_pda in &self.multicast_group_pdas {
+                    if existing_mgroup_pubs.contains(mgroup_pda) {
+                        info!(
+                            %validator_id, %validator_ip, %mgroup_pda,
+                            "validator already in multicast publisher allowlist; skipping"
+                        );
+                        metrics::counter!("doublezero_sentinel_multicast_allowlist_skipped")
+                            .increment(1);
+                        continue;
+                    }
+
                     match rpc_with_retry(
                         || async {
                             self.dz_rpc_client
