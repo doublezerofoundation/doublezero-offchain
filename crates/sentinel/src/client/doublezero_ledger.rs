@@ -12,7 +12,7 @@ use doublezero_serviceability::{
         tenant::update_payment_status::UpdatePaymentStatusArgs,
     },
     state::{
-        accesspass::AccessPassType,
+        accesspass::{AccessPass, AccessPassType},
         accounttype::AccountType,
         multicastgroup::MulticastGroup,
         tenant::{Tenant, TenantPaymentStatus},
@@ -60,6 +60,12 @@ pub trait DzRpcClientType {
         client_ip: &Ipv4Addr,
     ) -> Result<Signature>;
 
+    async fn get_access_pass(
+        &self,
+        service_key: &Pubkey,
+        client_ip: &Ipv4Addr,
+    ) -> Result<AccessPass>;
+
     async fn get_tenants_with_token_accounts(&self) -> Result<Vec<TenantBillingInfo>>;
 
     async fn update_tenant_payment_status(
@@ -105,6 +111,14 @@ impl DzRpcClientType for DzRpcClient {
     ) -> Result<Signature> {
         self.add_multicast_publisher_allowlist(multicast_group_pda, service_key, client_ip)
             .await
+    }
+
+    async fn get_access_pass(
+        &self,
+        service_key: &Pubkey,
+        client_ip: &Ipv4Addr,
+    ) -> Result<AccessPass> {
+        self.get_access_pass(service_key, client_ip).await
     }
 
     async fn get_tenants_with_token_accounts(&self) -> Result<Vec<TenantBillingInfo>> {
@@ -233,6 +247,19 @@ impl DzRpcClient {
         );
 
         Ok(signature)
+    }
+
+    pub async fn get_access_pass(
+        &self,
+        service_key: &Pubkey,
+        client_ip: &Ipv4Addr,
+    ) -> Result<AccessPass> {
+        let (accesspass_pk, _) =
+            get_accesspass_pda(&self.serviceability_id, client_ip, service_key);
+        let account_data = self.client.get_account_data(&accesspass_pk).await?;
+        let access_pass = AccessPass::try_from(&account_data[..])
+            .map_err(|e| Error::Deserialize(format!("AccessPass deserialization failed: {e}")))?;
+        Ok(access_pass)
     }
 
     pub async fn get_tenants_with_token_accounts(&self) -> Result<Vec<TenantBillingInfo>> {
