@@ -1,0 +1,57 @@
+# Mock on-chain program used by integration tests (doublezero-solana-sdk).
+#
+# This is a renamed fork of the private on-chain reservation program with all
+# internal naming sanitized for the public repo.
+#
+# Why a standalone workspace?
+#   The main workspace uses edition 2024, but the Solana SBF toolchain (Agave
+#   2.3.x) bundles Cargo 1.84 which doesn't support that edition. Making this
+#   crate its own workspace lets `cargo build-sbf` work without touching the
+#   rest of the repo. The main workspace Cargo.toml excludes this directory.
+#
+# Why a committed Cargo.lock?
+#   Without a lockfile, Cargo resolves doublezero-program-tools' transitive
+#   Solana deps to v3.x, which conflicts with our v2.x direct deps (duplicate
+#   crate errors). The lockfile — bootstrapped from the private repo — pins
+#   everything to compatible 2.x versions.
+#
+# Build:  cargo build-sbf --manifest-path programs/mock-reservation-program/Cargo.toml
+# Test:   SBF_OUT_DIR=programs/mock-reservation-program/target/deploy cargo test -p doublezero-solana-sdk
+
+[workspace]
+
+[package]
+name = "mock-reservation-program"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+borsh = "1"
+bytemuck = { version = "1", features = ["derive", "min_const_generics"] }
+ruint = { version = "<=1.16", features = ["bytemuck"] }
+solana-account-info = ">=2.2, <3"
+solana-cpi = ">=2.2, <3"
+solana-instruction = { version = ">=2.2, <3", features = ["syscalls"] }
+solana-msg = ">=2.2, <3"
+solana-program-entrypoint = ">=2.2, <3"
+solana-program-error = ">=2.2, <3"
+solana-program-memory = ">=2.2, <3"
+solana-program-pack = ">=2.2, <3"
+solana-pubkey = { version = ">=2.2, <3", features = ["borsh", "bytemuck"] }
+solana-system-interface = ">=1, <2"
+solana-sysvar = ">=2.2, <3"
+spl-associated-token-account-interface = ">=1, <2"
+spl-token-interface = ">=1, <2"
+svm-hash = { version = ">=0.1, <1", features = ["borsh", "bytemuck"] }
+
+[dependencies.doublezero-program-tools]
+features = ["entrypoint"]
+git = "https://github.com/doublezerofoundation/doublezero-solana"
+tag = "revenue-distribution/v0.3.1"
+
+[dependencies.doublezero-revenue-distribution]
+git = "https://github.com/doublezerofoundation/doublezero-solana"
+tag = "revenue-distribution/v0.3.1"
+
+[lib]
+crate-type = ["cdylib", "lib"]
