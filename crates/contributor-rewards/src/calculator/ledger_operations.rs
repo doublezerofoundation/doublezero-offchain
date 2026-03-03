@@ -621,7 +621,10 @@ pub struct AllRewardsOutput {
 }
 
 /// Print a rewards summary table (epoch, merkle root, contributors, unit shares)
-pub fn print_rewards_summary(shapley_storage: &ShapleyOutputStorage, merkle_root: &solana_sdk::hash::Hash) {
+pub fn print_rewards_summary(
+    shapley_storage: &ShapleyOutputStorage,
+    merkle_root: &solana_sdk::hash::Hash,
+) {
     #[derive(Tabled)]
     struct SummaryRow {
         #[tabled(rename = "Field")]
@@ -631,10 +634,22 @@ pub fn print_rewards_summary(shapley_storage: &ShapleyOutputStorage, merkle_root
     }
 
     let summary_data = vec![
-        SummaryRow { field: "Epoch".to_string(), value: shapley_storage.epoch.to_string() },
-        SummaryRow { field: "Merkle Root".to_string(), value: format!("{merkle_root:?}") },
-        SummaryRow { field: "Total Contributors".to_string(), value: shapley_storage.rewards.len().to_string() },
-        SummaryRow { field: "Total Units".to_string(), value: shapley_storage.total_unit_shares.to_string() },
+        SummaryRow {
+            field: "Epoch".to_string(),
+            value: shapley_storage.epoch.to_string(),
+        },
+        SummaryRow {
+            field: "Merkle Root".to_string(),
+            value: format!("{merkle_root:?}"),
+        },
+        SummaryRow {
+            field: "Total Contributors".to_string(),
+            value: shapley_storage.rewards.len().to_string(),
+        },
+        SummaryRow {
+            field: "Total Units".to_string(),
+            value: shapley_storage.total_unit_shares.to_string(),
+        },
     ];
 
     println!(
