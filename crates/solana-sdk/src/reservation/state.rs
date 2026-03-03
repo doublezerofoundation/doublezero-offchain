@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, sync::LazyLock};
 
 use doublezero_program_tools::{DISCRIMINATOR_LEN, Discriminator};
 use solana_sdk::pubkey::Pubkey;
@@ -11,9 +11,17 @@ pub const METRO_HISTORY_SEED_PREFIX: &[u8] = b"metro_history";
 pub const TOKEN_PDA_SEED_PREFIX: &[u8] = b"token";
 pub const PAYMENT_ESCROW_SEED_PREFIX: &[u8] = b"payment_escrow";
 
-/// Mainnet USDC mint address (hardcoded to match on-chain program).
-pub const USDC_MINT_KEY: Pubkey =
+/// Mainnet USDC mint address.
+const DEFAULT_USDC_MINT_KEY: Pubkey =
     solana_sdk::pubkey!("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+
+/// USDC mint address.
+pub static USDC_MINT_KEY: LazyLock<Pubkey> = LazyLock::new(|| {
+    std::env::var("RESERVATION_USDC_MINT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(DEFAULT_USDC_MINT_KEY)
+});
 
 pub fn find_program_config_address() -> (Pubkey, u8) {
     Pubkey::find_program_address(&[PROGRAM_CONFIG_SEED_PREFIX], &crate::reservation::ID)
