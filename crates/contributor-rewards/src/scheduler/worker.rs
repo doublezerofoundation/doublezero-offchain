@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail, ensure};
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Utc;
 use doublezero_program_tools::zero_copy;
@@ -21,7 +21,7 @@ use doublezero_solana_client_tools::{
     payer::Wallet,
     rpc::{DoubleZeroLedgerConnection, SolanaConnection, try_fetch_zero_copy_data_with_commitment},
 };
-use doublezero_solana_sdk::revenue_distribution::fetch::try_fetch_config;
+use doublezero_solana_sdk::revenue_distribution::fetch::{SolConversionState, try_fetch_config};
 use slack_notifier::contributor_rewards::{WriteResultInfo, post_detailed_completion};
 use solana_client::client_error::ClientError as SolanaClientError;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
@@ -232,14 +232,14 @@ impl ScheduleWorker {
             SolanaConnection::new(self.orchestrator.settings.rpc.solana_write_url.clone());
         let (_, config) = try_fetch_config(&connection).await?;
 
-        let deferral_period = config
-            .checked_minimum_epoch_duration_to_finalize_rewards()
-            .context("Minimum epoch duration to finalize rewards not set")?;
-
-        let dz_epoch_value = config
-            .next_completed_dz_epoch
-            .value()
-            .saturating_sub(deferral_period.into());
+        let sol_conversion_state = SolConversionState::try_fetch(&connection).await?;
+        let next_sweep = sol_conversion_state
+            .journal
+            .1
+            .next_dz_epoch_to_sweep_tokens
+            .value();
+        ensure!(next_sweep > 0, "No epochs have been swept yet");
+        let dz_epoch_value = next_sweep - 1;
 
         Ok((dz_epoch_value, config.rewards_accountant_key))
     }
