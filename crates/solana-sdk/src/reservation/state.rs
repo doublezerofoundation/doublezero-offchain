@@ -91,9 +91,10 @@ pub fn find_payment_escrow_address(
 //   [44)      bump_seed: u8
 //   [45)      usdc_token_pda_bump_seed: u8
 //   [46..48)  tenure_epochs: u16
-//   [48..56)  requested_epoch: u64
-//   [56..88)  usdc_funding_account_key: Pubkey
-//   [88..120) StorageGap<4>
+//   [48..56)  _flags: Flags (u64)
+//   [56..64)  funded_epoch: u64
+//   [64..72)  active_epoch: u64
+//   [72..80)  funding_index: u64
 // ---------------------------------------------------------------------------
 
 pub const CLIENT_SEAT_DISCRIMINATOR: Discriminator<DISCRIMINATOR_LEN> =
@@ -104,13 +105,14 @@ pub const CLIENT_SEAT_CLIENT_IP_OFFSET: usize = DISCRIMINATOR_LEN + 32;
 pub const CLIENT_SEAT_BUMP_OFFSET: usize = DISCRIMINATOR_LEN + 36;
 pub const CLIENT_SEAT_TOKEN_PDA_BUMP_OFFSET: usize = DISCRIMINATOR_LEN + 37;
 pub const CLIENT_SEAT_TENURE_OFFSET: usize = DISCRIMINATOR_LEN + 38;
-pub const CLIENT_SEAT_EPOCH_OFFSET: usize = DISCRIMINATOR_LEN + 40;
-pub const CLIENT_SEAT_FUNDING_ACCOUNT_OFFSET: usize = DISCRIMINATOR_LEN + 48;
+pub const CLIENT_SEAT_FUNDED_EPOCH_OFFSET: usize = DISCRIMINATOR_LEN + 48;
+pub const CLIENT_SEAT_ACTIVE_EPOCH_OFFSET: usize = DISCRIMINATOR_LEN + 56;
+pub const CLIENT_SEAT_FUNDING_INDEX_OFFSET: usize = DISCRIMINATOR_LEN + 64;
 
 /// Parse a `ClientSeat` from raw account data. Returns
-/// `(device_key, client_ip, tenure_epochs, requested_epoch, funding_account_key)`.
-pub fn parse_client_seat(data: &[u8]) -> Option<(Pubkey, Ipv4Addr, u16, u64, Pubkey)> {
-    if data.len() < CLIENT_SEAT_FUNDING_ACCOUNT_OFFSET + 32 {
+/// `(device_key, client_ip, tenure_epochs, funded_epoch, active_epoch)`.
+pub fn parse_client_seat(data: &[u8]) -> Option<(Pubkey, Ipv4Addr, u16, u64, u64)> {
+    if data.len() < CLIENT_SEAT_ACTIVE_EPOCH_OFFSET + 8 {
         return None;
     }
     let device_key = Pubkey::new_from_array(
@@ -128,13 +130,13 @@ pub fn parse_client_seat(data: &[u8]) -> Option<(Pubkey, Ipv4Addr, u16, u64, Pub
             .try_into()
             .ok()?,
     );
-    let requested_epoch = u64::from_le_bytes(
-        data[CLIENT_SEAT_EPOCH_OFFSET..CLIENT_SEAT_EPOCH_OFFSET + 8]
+    let funded_epoch = u64::from_le_bytes(
+        data[CLIENT_SEAT_FUNDED_EPOCH_OFFSET..CLIENT_SEAT_FUNDED_EPOCH_OFFSET + 8]
             .try_into()
             .ok()?,
     );
-    let funding_account_key = Pubkey::new_from_array(
-        data[CLIENT_SEAT_FUNDING_ACCOUNT_OFFSET..CLIENT_SEAT_FUNDING_ACCOUNT_OFFSET + 32]
+    let active_epoch = u64::from_le_bytes(
+        data[CLIENT_SEAT_ACTIVE_EPOCH_OFFSET..CLIENT_SEAT_ACTIVE_EPOCH_OFFSET + 8]
             .try_into()
             .ok()?,
     );
@@ -142,8 +144,8 @@ pub fn parse_client_seat(data: &[u8]) -> Option<(Pubkey, Ipv4Addr, u16, u64, Pub
         device_key,
         Ipv4Addr::from(client_ip_bits),
         tenure_epochs,
-        requested_epoch,
-        funding_account_key,
+        funded_epoch,
+        active_epoch,
     ))
 }
 

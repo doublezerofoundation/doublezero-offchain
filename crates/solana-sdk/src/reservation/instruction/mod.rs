@@ -13,6 +13,8 @@ pub enum ReservationInstructionData {
     InitializePaymentEscrow,
     /// Close a payment escrow and refund any remaining USDC.
     ClosePaymentEscrow,
+    /// Fund a payment escrow with USDC.
+    FundPaymentEscrowUsdc(u64),
 }
 
 impl ReservationInstructionData {
@@ -22,6 +24,8 @@ impl ReservationInstructionData {
         Discriminator::new_sha2(b"dz::ix::initialize_payment_escrow");
     pub const CLOSE_PAYMENT_ESCROW: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::close_payment_escrow");
+    pub const FUND_PAYMENT_ESCROW_USDC: Discriminator<DISCRIMINATOR_LEN> =
+        Discriminator::new_sha2(b"dz::ix::fund_payment_escrow_usdc");
 }
 
 impl BorshSerialize for ReservationInstructionData {
@@ -33,6 +37,10 @@ impl BorshSerialize for ReservationInstructionData {
             }
             Self::InitializePaymentEscrow => Self::INITIALIZE_PAYMENT_ESCROW.serialize(writer),
             Self::ClosePaymentEscrow => Self::CLOSE_PAYMENT_ESCROW.serialize(writer),
+            Self::FundPaymentEscrowUsdc(amount) => {
+                Self::FUND_PAYMENT_ESCROW_USDC.serialize(writer)?;
+                amount.serialize(writer)
+            }
         }
     }
 }
@@ -46,6 +54,10 @@ impl BorshDeserialize for ReservationInstructionData {
             }
             Self::INITIALIZE_PAYMENT_ESCROW => Ok(Self::InitializePaymentEscrow),
             Self::CLOSE_PAYMENT_ESCROW => Ok(Self::ClosePaymentEscrow),
+            Self::FUND_PAYMENT_ESCROW_USDC => {
+                let amount = u64::deserialize_reader(reader)?;
+                Ok(Self::FundPaymentEscrowUsdc(amount))
+            }
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid discriminator",
