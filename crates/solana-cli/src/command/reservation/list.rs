@@ -36,10 +36,10 @@ struct SeatRow {
     client_ip: Ipv4Addr,
     #[tabled(rename = "Tenure")]
     tenure: u16,
-    #[tabled(rename = "Epoch")]
-    epoch: u64,
-    #[tabled(rename = "Funding Account")]
-    funding_account: String,
+    #[tabled(rename = "Funded Epoch")]
+    funded_epoch: u64,
+    #[tabled(rename = "Active Epoch")]
+    active_epoch: u64,
 }
 
 impl ListCommand {
@@ -85,15 +85,15 @@ impl ListCommand {
         let mut rows: Vec<SeatRow> = accounts
             .iter()
             .filter_map(|(seat_key, account)| {
-                let (device_key, client_ip, tenure, epoch, funding_account_key) =
+                let (device_key, client_ip, tenure, funded_epoch, active_epoch) =
                     state::parse_client_seat(&account.data)?;
                 Some(SeatRow {
                     seat_pda: seat_key.to_string(),
                     device: device_key.to_string(),
                     client_ip,
                     tenure,
-                    epoch,
-                    funding_account: funding_account_key.to_string(),
+                    funded_epoch,
+                    active_epoch,
                 })
             })
             .collect();

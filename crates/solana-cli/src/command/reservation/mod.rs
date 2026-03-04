@@ -1,3 +1,4 @@
+pub mod fund;
 pub mod initialize_seat;
 pub mod list;
 pub mod price;
@@ -27,6 +28,8 @@ pub enum ReservationSubcommand {
     Withdraw(withdraw::WithdrawCommand),
     /// List client seats.
     List(list::ListCommand),
+    /// Fund a payment escrow with USDC.
+    Fund(fund::FundCommand),
     /// Show current device pricing.
     Price(price::PriceCommand),
 }
@@ -37,6 +40,7 @@ impl ReservationSubcommand {
             Self::InitializeSeat(command) => command.try_into_execute().await,
             Self::Withdraw(command) => command.try_into_execute().await,
             Self::List(command) => command.try_into_execute().await,
+            Self::Fund(command) => command.try_into_execute().await,
             Self::Price(command) => command.try_into_execute().await,
         }
     }

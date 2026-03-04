@@ -48,7 +48,7 @@ impl WithdrawCommand {
         println!("Connected to Solana: {network_env:?}");
 
         let device = self.device_args.resolve(network_env).await?;
-        let usdc_mint_key = self.usdc_mint.unwrap_or(state::USDC_MINT_KEY);
+        let usdc_mint_key = self.usdc_mint.unwrap_or(*state::USDC_MINT_KEY);
         let client_ip_bits = u32::from(self.client_ip);
         let (client_seat_key, _) = state::find_client_seat_address(&device, client_ip_bits);
 
