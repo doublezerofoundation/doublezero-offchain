@@ -508,7 +508,10 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             let (_, config) = try_fetch_config(&connection).await?;
 
             let dz_epoch_value = match dz_epoch {
-                Some(epoch) => epoch,
+                Some(epoch) => {
+                    info!("Will distribute for provided dz_epoch: {epoch}");
+                    epoch
+                }
                 None => {
                     let sol_conversion_state = SolConversionState::try_fetch(&connection).await?;
                     let next_sweep = sol_conversion_state
@@ -517,7 +520,9 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                         .next_dz_epoch_to_sweep_tokens
                         .value();
                     ensure!(next_sweep > 0, "No epochs have been swept yet");
-                    next_sweep - 1
+                    let dist_epoch = next_sweep - 1;
+                    info!("Will distribute for dz_epoch: {dist_epoch}, next_sweep: {next_sweep}");
+                    dist_epoch
                 }
             };
 
