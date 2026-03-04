@@ -59,6 +59,12 @@ fn try_process_instruction(
     if discriminator == ReservationInstructionData::CLOSE_PAYMENT_ESCROW {
         return try_close_payment_escrow(accounts);
     }
+    if discriminator == ReservationInstructionData::FUND_PAYMENT_ESCROW_USDC {
+        let mut reader = &data[DISCRIMINATOR_LEN..];
+        let amount: u64 = BorshDeserialize::deserialize_reader(&mut reader)
+            .map_err(|_| ProgramError::InvalidInstructionData)?;
+        return try_fund_payment_escrow_usdc(accounts, amount);
+    }
     if discriminator == ReservationInstructionData::DEDUCT_SUBSCRIPTION_FEE {
         return try_deduct_subscription_fee(accounts);
     }
@@ -907,13 +913,10 @@ fn try_initialize_client_seat(
         Default::default(),
     )?;
 
-    let clock = Clock::get().unwrap();
     client_seat.device_key = device_history.device_key;
     client_seat.client_ip_bits = client_ip_bits;
     client_seat.bump_seed = client_seat_bump;
     client_seat.usdc_token_pda_bump_seed = token_pda_bump;
-    client_seat.requested_epoch = clock.epoch;
-    client_seat.usdc_funding_account_key = *payer_info.key;
 
     msg!(
         "Created seat for device {} ip {}",
@@ -1052,12 +1055,13 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
 
     // Accounts:
     // - 0: Program config.
-    // - 1: Payment escrow (writable).
-    // - 2: Withdraw authority (signer, writable).
-    // - 3: Client seat (if balance > 0).
-    // - 4: Client seat USDC token account (if balance > 0).
-    // - 5: Refund USDC token account (if balance > 0).
-    // - 6: SPL token program (if balance > 0).
+    // - 1: Execution controller (readonly).
+    // - 2: Payment escrow (writable).
+    // - 3: Withdraw authority (signer, writable).
+    // - 4: Client seat (if balance > 0).
+    // - 5: Client seat USDC token account (if balance > 0).
+    // - 6: Refund USDC token account (if balance > 0).
+    // - 7: SPL token program (if balance > 0).
     let mut accounts_iter = accounts.iter().enumerate();
 
     // Account 0: Program config.
@@ -1066,11 +1070,20 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
 
     program_config.try_require_unpaused()?;
 
-    // Account 1: Payment escrow.
+    // Account 1: Execution controller — forbid ClosedForRequests phase.
+    let execution_controller =
+        ZeroCopyAccount::<ExecutionController>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    if execution_controller.phase() == ExecutionPhase::ClosedForRequests {
+        msg!("Cannot close payment escrow during ClosedForRequests phase");
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    // Account 2: Payment escrow.
     let payment_escrow =
         ZeroCopyMutAccount::<PaymentEscrow>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
 
-    // Account 2: Withdraw authority (signer).
+    // Account 3: Withdraw authority (signer).
     let (account_index, withdraw_authority_info) = try_next_enumerated_account(
         &mut accounts_iter,
         NextAccountOptions {
@@ -1090,15 +1103,15 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
     let usdc_balance = payment_escrow.usdc_balance;
 
     if usdc_balance > 0 {
-        // Account 3: Client seat.
+        // Account 4: Client seat.
         let client_seat =
             ZeroCopyAccount::<ClientSeat>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
 
-        // Account 4: Client seat USDC token account.
+        // Account 5: Client seat USDC token account.
         let (_, token_pda_info) =
             try_next_enumerated_account(&mut accounts_iter, Default::default())?;
 
-        // Account 5: Refund USDC token account.
+        // Account 6: Refund USDC token account.
         let (_, refund_info) =
             try_next_enumerated_account(&mut accounts_iter, Default::default())?;
 
@@ -1151,6 +1164,143 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
     solana_program_memory::sol_memset(&mut escrow_data, 0, data_len);
 
     msg!("Closed payment escrow");
+
+    Ok(())
+}
+
+fn try_fund_payment_escrow_usdc(accounts: &[AccountInfo], amount: u64) -> ProgramResult {
+    msg!("Fund payment escrow USDC (amount={})", amount);
+
+    // Accounts:
+    // - 0: Program config (readonly).
+    // - 1: Execution controller (writable).
+    // - 2: Metro history (readonly).
+    // - 3: Device history (readonly).
+    // - 4: Client seat (writable).
+    // - 5: Payment escrow (writable).
+    // - 6: Client seat USDC token account (writable).
+    // - 7: Source USDC token account (writable).
+    // - 8: Transfer authority (signer, readonly).
+    // - 9: SPL token program (readonly).
+    let mut accounts_iter = accounts.iter().enumerate();
+
+    // Account 0: Program config.
+    let program_config =
+        ZeroCopyAccount::<ProgramConfig>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    program_config.try_require_unpaused()?;
+
+    // Account 1: Execution controller.
+    let execution_controller =
+        ZeroCopyAccount::<ExecutionController>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    let phase = execution_controller.phase();
+    if phase != ExecutionPhase::OpenForRequests {
+        msg!("Phase is not OpenForRequests (current: {})", phase);
+        return Err(ProgramError::InvalidInstructionData);
+    }
+
+    let subscription_epoch = execution_controller.next_subscription_epoch;
+
+    // Account 2: Metro history.
+    let metro_history =
+        ZeroCopyAccount::<MetroHistory>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    let metro_price = metro_history
+        .current_price()
+        .ok_or_else(|| {
+            msg!("No metro price available");
+            ProgramError::InvalidAccountData
+        })?;
+
+    // Account 3: Device history.
+    let device_history =
+        ZeroCopyAccount::<DeviceHistory>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    if !device_history.is_enabled() {
+        msg!("Device is not enabled");
+        return Err(ProgramError::InvalidAccountData);
+    }
+
+    let device_sub = device_history.history.current_entry().ok_or_else(|| {
+        msg!("No device subscription entry");
+        ProgramError::InvalidAccountData
+    })?;
+
+    // Compute expected price: metro_usdc_price + device_premium (in whole USDC).
+    let expected_price_usdc = (metro_price.usdc_price as i32 + device_sub.data.usdc_price_premium as i32)
+        .max(0) as u64;
+    // Convert to micro-USDC (6 decimals).
+    let expected_amount = expected_price_usdc * 1_000_000;
+
+    if amount < expected_amount {
+        msg!(
+            "Insufficient funding: {} < {} (expected)",
+            amount,
+            expected_amount
+        );
+        return Err(ProgramError::InsufficientFunds);
+    }
+
+    // Account 4: Client seat.
+    let mut client_seat =
+        ZeroCopyMutAccount::<ClientSeat>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    // Account 5: Payment escrow.
+    let mut payment_escrow =
+        ZeroCopyMutAccount::<PaymentEscrow>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    // Account 6: Client seat USDC token account (destination).
+    let (_, token_pda_info) =
+        try_next_enumerated_account(&mut accounts_iter, Default::default())?;
+
+    // Account 7: Source USDC token account.
+    let (_, source_token_info) =
+        try_next_enumerated_account(&mut accounts_iter, Default::default())?;
+
+    // Account 8: Transfer authority (signer).
+    let (_, transfer_authority_info) = try_next_enumerated_account(
+        &mut accounts_iter,
+        NextAccountOptions {
+            must_be_signer: true,
+            ..Default::default()
+        },
+    )?;
+
+    // Transfer USDC from source to client seat token PDA.
+    let transfer_ix = spl_token_interface::instruction::transfer(
+        &spl_token_interface::ID,
+        source_token_info.key,
+        token_pda_info.key,
+        transfer_authority_info.key,
+        &[],
+        amount,
+    )
+    .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+    solana_cpi::invoke(
+        &transfer_ix,
+        &[
+            source_token_info.clone(),
+            token_pda_info.clone(),
+            transfer_authority_info.clone(),
+        ],
+    )?;
+
+    // Update payment escrow balance.
+    payment_escrow.usdc_balance = payment_escrow
+        .usdc_balance
+        .checked_add(amount)
+        .ok_or(ProgramError::ArithmeticOverflow)?;
+
+    // Update client seat: set funded_epoch.
+    client_seat.funded_epoch = subscription_epoch;
+
+    msg!(
+        "Funded escrow with {} USDC (atomic) for epoch {}",
+        amount,
+        subscription_epoch
+    );
 
     Ok(())
 }

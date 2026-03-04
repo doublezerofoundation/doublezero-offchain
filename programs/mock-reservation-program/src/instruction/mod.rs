@@ -77,6 +77,8 @@ impl ReservationInstructionData {
         Discriminator::new_sha2(b"dz::ix::initialize_payment_escrow");
     pub const CLOSE_PAYMENT_ESCROW: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::close_payment_escrow");
+    pub const FUND_PAYMENT_ESCROW_USDC: Discriminator<DISCRIMINATOR_LEN> =
+        Discriminator::new_sha2(b"dz::ix::fund_payment_escrow_usdc");
     pub const DEDUCT_SUBSCRIPTION_FEE: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::deduct_subscription_fee");
     pub const TEST_SETUP: Discriminator<DISCRIMINATOR_LEN> =

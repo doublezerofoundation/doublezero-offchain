@@ -81,11 +81,10 @@ fn integration_reservation_cli_workflow() {
     let client_ip_bits = u32::from(CLIENT_IP);
     let (seat_key, _) = state::find_client_seat_address(&setup.device_key, client_ip_bits);
     let seat_account = rpc.get_account(&seat_key).expect("fetch seat account");
-    let (device_key, ip, _tenure, _epoch, funding_account_key) =
+    let (device_key, ip, _tenure, _funded_epoch, _active_epoch) =
         state::parse_client_seat(&seat_account.data).expect("parse seat");
     assert_eq!(device_key, setup.device_key);
     assert_eq!(ip, CLIENT_IP);
-    assert_eq!(funding_account_key, user.pubkey());
 
     // Verify token PDA was created with 0 balance.
     let (token_pda_key, _) = state::find_token_pda_address(&seat_key, &setup.usdc_mint_key);

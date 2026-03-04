@@ -1,6 +1,11 @@
 use bytemuck::{Pod, Zeroable};
-use doublezero_program_tools::{types::StorageGap, Discriminator, PrecomputedDiscriminator};
+use doublezero_program_tools::{Discriminator, PrecomputedDiscriminator};
 use solana_pubkey::Pubkey;
+use svm_hash::sha2::Hash;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
+pub struct Flags(u64);
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
 #[repr(C, align(8))]
@@ -12,11 +17,13 @@ pub struct ClientSeat {
     pub usdc_token_pda_bump_seed: u8,
     pub tenure_epochs: u16,
 
-    pub requested_epoch: u64,
+    pub _flags: Flags,
 
-    pub usdc_funding_account_key: Pubkey,
+    pub funded_epoch: u64,
+    pub active_epoch: u64,
+    pub funding_index: u64,
 
-    _gap: StorageGap<4>,
+    pub settlement_sort_key: Hash,
 }
 
 impl PrecomputedDiscriminator for ClientSeat {

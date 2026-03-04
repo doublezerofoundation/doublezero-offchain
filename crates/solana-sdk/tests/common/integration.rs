@@ -66,7 +66,7 @@ impl TestValidator {
             .arg("--faucet-port")
             .arg(faucet_port.to_string())
             .arg("--upgradeable-program")
-            .arg(PROGRAM_ID.to_string())
+            .arg(program_id().to_string())
             .arg(program_so_path)
             .arg(upgrade_authority.to_string())
             .arg("--reset")
@@ -153,7 +153,7 @@ pub fn setup_program_state(rpc: &RpcClient, payer: &Keypair) -> SetupResult {
         rpc,
         payer,
         &[owner_signer],
-        SetAdminAccounts::new(&PROGRAM_ID, &owner_signer.pubkey()),
+        SetAdminAccounts::new(&program_id(), &owner_signer.pubkey()),
         &AdminInstructionData::SetAdmin(admin_signer.pubkey()),
     );
 

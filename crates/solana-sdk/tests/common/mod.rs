@@ -10,7 +10,9 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-pub const PROGRAM_ID: Pubkey = doublezero_solana_sdk::reservation::ID;
+pub fn program_id() -> Pubkey {
+    *doublezero_solana_sdk::reservation::ID
+}
 
 pub const FIRST_EPOCH: u64 = 100;
 
@@ -21,7 +23,7 @@ fn build_instruction<A: Into<Vec<AccountMeta>>, D: BorshSerialize>(
     data: &D,
 ) -> Instruction {
     Instruction {
-        program_id: PROGRAM_ID,
+        program_id: program_id(),
         accounts: accounts.into(),
         data: borsh::to_vec(data).unwrap(),
     }
