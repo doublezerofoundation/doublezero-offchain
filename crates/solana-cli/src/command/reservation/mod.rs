@@ -102,11 +102,7 @@ async fn resolve_device_code(
     program_id: &Pubkey,
     code: &str,
 ) -> Result<Pubkey> {
-    // Build a Borsh-encoded string to match: 4-byte LE length + bytes.
-    let code_bytes = code.as_bytes();
-    let mut match_bytes = Vec::with_capacity(4 + code_bytes.len());
-    match_bytes.extend_from_slice(&(code_bytes.len() as u32).to_le_bytes());
-    match_bytes.extend_from_slice(code_bytes);
+    let match_bytes = borsh::to_vec(code).expect("borsh string serialization");
 
     let config = RpcProgramAccountsConfig {
         filters: Some(vec![

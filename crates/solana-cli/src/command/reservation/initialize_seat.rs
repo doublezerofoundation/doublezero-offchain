@@ -56,32 +56,46 @@ impl InitializeSeatCommand {
         let (_, token_pda_bump) = state::find_token_pda_address(&client_seat_key, &usdc_mint_key);
         let (_, escrow_bump) = state::find_payment_escrow_address(&client_seat_key, &wallet_key);
 
-        // 1. InitializeClientSeat — creates seat PDA + token PDA.
-        let seat_ix = try_build_instruction(
-            &ID,
-            InitializeClientSeatAccounts::new(&wallet_key, &device, client_ip_bits, &usdc_mint_key),
-            &ReservationInstructionData::InitializeClientSeat {
-                client_ip: client_ip_bits,
-            },
-        )?;
+        // Check if the client seat already exists on-chain.
+        let seat_exists = wallet
+            .connection
+            .get_account(&client_seat_key)
+            .await
+            .is_ok();
 
-        // 2. InitializePaymentEscrow — creates escrow PDA for this payer.
+        let mut instructions = Vec::new();
+        let mut compute_unit_limit = 50_000 + Wallet::compute_units_for_bump_seed(escrow_bump);
+
+        if seat_exists {
+            println!("Client seat already exists, skipping initialization.");
+        } else {
+            let seat_ix = try_build_instruction(
+                &ID,
+                InitializeClientSeatAccounts::new(
+                    &wallet_key,
+                    &device,
+                    client_ip_bits,
+                    &usdc_mint_key,
+                ),
+                &ReservationInstructionData::InitializeClientSeat {
+                    client_ip: client_ip_bits,
+                },
+            )?;
+            instructions.push(seat_ix);
+            compute_unit_limit += Wallet::compute_units_for_bump_seed(seat_bump)
+                + Wallet::compute_units_for_bump_seed(token_pda_bump);
+        }
+
+        // InitializePaymentEscrow — creates escrow PDA for this payer.
         let escrow_ix = try_build_instruction(
             &ID,
             InitializePaymentEscrowAccounts::new(&client_seat_key, &wallet_key),
             &ReservationInstructionData::InitializePaymentEscrow,
         )?;
-
-        let compute_unit_limit = 50_000
-            + Wallet::compute_units_for_bump_seed(seat_bump)
-            + Wallet::compute_units_for_bump_seed(token_pda_bump)
-            + Wallet::compute_units_for_bump_seed(escrow_bump);
-
-        let mut instructions = vec![
-            seat_ix,
-            escrow_ix,
-            ComputeBudgetInstruction::set_compute_unit_limit(compute_unit_limit),
-        ];
+        instructions.push(escrow_ix);
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
+            compute_unit_limit,
+        ));
 
         if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
             instructions.push(compute_unit_price_ix.clone());

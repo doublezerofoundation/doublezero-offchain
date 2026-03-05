@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Args;
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutcome, Wallet};
 use doublezero_solana_sdk::{
@@ -52,20 +52,18 @@ impl WithdrawCommand {
         let client_ip_bits = u32::from(self.client_ip);
         let (client_seat_key, _) = state::find_client_seat_address(&device, client_ip_bits);
 
-        let accounts = if let Some(refund_account) = self.refund_token_account {
-            ClosePaymentEscrowAccounts::new(
-                &client_seat_key,
-                &wallet_key,
-                &usdc_mint_key,
-                &refund_account,
-            )
-        } else {
-            ClosePaymentEscrowAccounts::new_with_ata_refund(
-                &client_seat_key,
-                &wallet_key,
-                &usdc_mint_key,
-            )
-        };
+        // Verify the payment escrow exists before submitting the transaction.
+        let (escrow_key, _) = state::find_payment_escrow_address(&client_seat_key, &wallet_key);
+        if wallet.connection.get_account(&escrow_key).await.is_err() {
+            bail!("No payment escrow found for this seat and wallet. Nothing to withdraw.");
+        }
+
+        let accounts = ClosePaymentEscrowAccounts::new(
+            &client_seat_key,
+            &wallet_key,
+            &usdc_mint_key,
+            self.refund_token_account.as_ref(),
+        );
 
         let ix = try_build_instruction(
             &ID,

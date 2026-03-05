@@ -56,19 +56,35 @@ impl FundCommand {
         let client_ip_bits = u32::from(self.client_ip);
 
         // Convert decimal USDC to micro-USDC (6 decimals).
-        let amount_micro = (self.amount * 1_000_000.0).round() as u64;
-        if amount_micro == 0 {
-            bail!("Amount must be greater than zero");
+        if self.amount <= 0.0 {
+            bail!("Amount must be a positive value");
         }
+        let amount_micro = (self.amount * 1_000_000.0).round() as u64;
 
         // Derive the exchange key from the on-chain DeviceHistory account.
         let device_history_key = state::find_device_history_address(&device).0;
         let device_history_account = wallet.connection.get_account(&device_history_key).await?;
-        let exchange_key =
-            state::parse_exchange_key_from_device_history(&device_history_account.data)
-                .ok_or_else(|| {
-                    anyhow::anyhow!("Failed to parse exchange key from DeviceHistory")
-                })?;
+        let device_info = state::parse_device_history(&device_history_account.data)
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse DeviceHistory account"))?;
+        let exchange_key = device_info.exchange_key;
+
+        // Check the current price so the user gets a friendly error instead of
+        // an opaque on-chain revert.
+        let metro_history_key = state::find_metro_history_address(&exchange_key).0;
+        let metro_history_account = wallet.connection.get_account(&metro_history_key).await?;
+        if let Some(metro_info) = state::parse_metro_history(&metro_history_account.data) {
+            let min_price = (metro_info.current_usdc_price as i32
+                + device_info.current_premium as i32)
+                .max(0) as u64;
+            if amount_micro < min_price {
+                let min_usdc = min_price as f64 / 1_000_000.0;
+                bail!(
+                    "Amount ({:.6} USDC) is below the current price ({:.6} USDC)",
+                    self.amount,
+                    min_usdc,
+                );
+            }
+        }
 
         let source_usdc_token_account = self
             .source_token_account
