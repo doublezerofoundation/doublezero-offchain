@@ -19,11 +19,11 @@ use tabled::{Table, Tabled, settings::Style};
 #[derive(Debug, Args)]
 pub struct PriceCommand {
     /// Filter by device public key.
-    #[arg(long)]
+    #[arg(long, group = "filter")]
     device: Option<Pubkey>,
 
     /// Filter by metro exchange public key.
-    #[arg(long)]
+    #[arg(long, group = "filter")]
     metro: Option<Pubkey>,
 
     #[command(flatten)]
