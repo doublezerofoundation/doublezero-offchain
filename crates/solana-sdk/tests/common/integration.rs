@@ -188,7 +188,7 @@ pub fn setup_program_state(rpc: &RpcClient, payer: &Keypair) -> SetupResult {
         &AdminInstructionData::InitializeMetroHistory(exchange_key),
     );
 
-    // 5. InitializeDeviceHistory
+    // 5. InitializeDeviceHistory (also creates the USDC token PDA).
     send_admin_ix(
         rpc,
         payer,
@@ -198,6 +198,7 @@ pub fn setup_program_state(rpc: &RpcClient, payer: &Keypair) -> SetupResult {
             &payer.pubkey(),
             &exchange_key,
             &device_key,
+            &usdc_mint_key,
         ),
         &AdminInstructionData::InitializeDeviceHistory(device_key),
     );

@@ -13,8 +13,7 @@ pub struct ClientSeat {
     pub device_key: Pubkey,
     pub client_ip_bits: u32,
 
-    pub bump_seed: u8,
-    pub usdc_token_pda_bump_seed: u8,
+    pub _padding: [u8; 2],
     pub tenure_epochs: u16,
 
     pub _flags: Flags,

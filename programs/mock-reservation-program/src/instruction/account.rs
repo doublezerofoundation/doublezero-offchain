@@ -3,7 +3,7 @@ use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 use solana_system_interface::program as system_program;
 
-use crate::state::{DeviceHistory, ExecutionController, MetroHistory, ProgramConfig};
+use crate::state::{DeviceHistory, ExecutionController, MetroHistory, ProgramConfig, find_token_pda_address};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InitializeProgramAccounts {
@@ -158,6 +158,8 @@ pub struct InitializeDeviceHistoryAccounts {
     pub metro_history_key: Pubkey,
     pub payer_key: Pubkey,
     pub new_device_history_key: Pubkey,
+    pub new_device_history_usdc_token_pda_key: Pubkey,
+    pub usdc_mint_key: Pubkey,
 }
 
 impl InitializeDeviceHistoryAccounts {
@@ -166,11 +168,14 @@ impl InitializeDeviceHistoryAccounts {
         payer_key: &Pubkey,
         exchange_key: &Pubkey,
         device_key: &Pubkey,
+        usdc_mint_key: &Pubkey,
     ) -> Self {
         let program_config_key = ProgramConfig::find_address().0;
         let execution_controller_key = ExecutionController::find_address().0;
         let metro_history_key = MetroHistory::find_address(exchange_key).0;
         let new_device_history_key = DeviceHistory::find_address(device_key).0;
+        let new_device_history_usdc_token_pda_key =
+            find_token_pda_address(&new_device_history_key, usdc_mint_key).0;
 
         Self {
             program_config_key,
@@ -179,6 +184,8 @@ impl InitializeDeviceHistoryAccounts {
             metro_history_key,
             payer_key: *payer_key,
             new_device_history_key,
+            new_device_history_usdc_token_pda_key,
+            usdc_mint_key: *usdc_mint_key,
         }
     }
 }
@@ -192,6 +199,8 @@ impl From<InitializeDeviceHistoryAccounts> for Vec<AccountMeta> {
             metro_history_key,
             payer_key,
             new_device_history_key,
+            new_device_history_usdc_token_pda_key,
+            usdc_mint_key,
         } = accounts;
 
         vec![
@@ -201,6 +210,9 @@ impl From<InitializeDeviceHistoryAccounts> for Vec<AccountMeta> {
             AccountMeta::new(metro_history_key, false),
             AccountMeta::new(payer_key, true),
             AccountMeta::new(new_device_history_key, false),
+            AccountMeta::new(new_device_history_usdc_token_pda_key, false),
+            AccountMeta::new_readonly(usdc_mint_key, false),
+            AccountMeta::new_readonly(spl_token_interface::ID, false),
             AccountMeta::new_readonly(system_program::ID, false),
         ]
     }

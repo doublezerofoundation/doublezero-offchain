@@ -404,7 +404,10 @@ fn try_initialize_device_history(accounts: &[AccountInfo], device_key: Pubkey) -
     // - 3: Metro history.
     // - 4: Payer.
     // - 5: New device history.
-    // - 6: System program.
+    // - 6: New device history USDC token PDA.
+    // - 7: USDC mint.
+    // - 8: SPL token program.
+    // - 9: System program.
     let mut accounts_iter = accounts.iter().enumerate();
 
     // Account 0 must be the program config.
@@ -464,6 +467,22 @@ fn try_initialize_device_history(accounts: &[AccountInfo], device_key: Pubkey) -
         return Err(ProgramError::InvalidSeeds);
     }
 
+    // Account 6: Device history USDC token PDA.
+    let (account_index, token_pda_info) =
+        try_next_enumerated_account(&mut accounts_iter, Default::default())?;
+
+    // Account 7: USDC mint.
+    let (_, usdc_mint_info) =
+        try_next_enumerated_account(&mut accounts_iter, Default::default())?;
+
+    let (expected_token_pda, token_pda_bump) =
+        find_token_pda_address(&expected_device_history_key, usdc_mint_info.key);
+
+    if token_pda_info.key != &expected_token_pda {
+        msg!("Invalid token PDA (account {})", account_index);
+        return Err(ProgramError::InvalidSeeds);
+    }
+
     let mut device_history = try_create_account::<DeviceHistory>(
         payer_info.key,
         new_device_history_info,
@@ -477,9 +496,55 @@ fn try_initialize_device_history(accounts: &[AccountInfo], device_key: Pubkey) -
     )?;
 
     device_history.device_key = device_key;
+    device_history.bump_seed = device_history_bump;
+    device_history.usdc_token_pda_bump_seed = token_pda_bump;
     device_history.metro_exchange_key = metro_history.exchange_key;
     device_history.set_is_enabled(true);
     msg!("History initialized and enabled for device: {}", device_key);
+
+    // Create USDC token account as a PDA owned by the DeviceHistory PDA.
+    let rent = Rent::get().unwrap();
+    let token_account_len = spl_token_interface::state::Account::LEN;
+    let lamports = rent.minimum_balance(token_account_len);
+
+    let device_history_key_bytes = expected_device_history_key.to_bytes();
+    let usdc_mint_key_bytes = usdc_mint_info.key.to_bytes();
+    let token_pda_seeds: &[&[u8]] = &[
+        crate::state::TOKEN_PDA_SEED_PREFIX,
+        &device_history_key_bytes,
+        &usdc_mint_key_bytes,
+        &[token_pda_bump],
+    ];
+
+    let create_account_ix = solana_system_interface::instruction::create_account(
+        payer_info.key,
+        token_pda_info.key,
+        lamports,
+        token_account_len as u64,
+        &spl_token_interface::ID,
+    );
+
+    invoke_signed(
+        &create_account_ix,
+        &[payer_info.clone(), token_pda_info.clone()],
+        &[token_pda_seeds],
+    )?;
+
+    // Initialize the token account with the DeviceHistory PDA as owner.
+    let init_token_ix = spl_token_interface::instruction::initialize_account3(
+        &spl_token_interface::ID,
+        token_pda_info.key,
+        usdc_mint_info.key,
+        &expected_device_history_key,
+    )
+    .map_err(|_| ProgramError::InvalidInstructionData)?;
+
+    solana_cpi::invoke(
+        &init_token_ix,
+        &[token_pda_info.clone(), usdc_mint_info.clone()],
+    )?;
+
+    msg!("Created USDC token PDA for device history");
 
     Ok(())
 }
@@ -825,10 +890,7 @@ fn try_initialize_client_seat(
     // - 2: Device history.
     // - 3: Payer (signer, writable).
     // - 4: Client seat (must not exist yet).
-    // - 5: Client seat USDC token PDA (new).
-    // - 6: USDC mint.
-    // - 7: SPL token program.
-    // - 8: System program.
+    // - 5: System program.
     let mut accounts_iter = accounts.iter().enumerate();
 
     // Account 0: Program config.
@@ -883,22 +945,6 @@ fn try_initialize_client_seat(
         return Err(ProgramError::AccountAlreadyInitialized);
     }
 
-    // Account 5: Client seat USDC token PDA.
-    let (account_index, token_pda_info) =
-        try_next_enumerated_account(&mut accounts_iter, Default::default())?;
-
-    // Account 6: USDC mint.
-    let (_, usdc_mint_info) =
-        try_next_enumerated_account(&mut accounts_iter, Default::default())?;
-
-    let (expected_token_pda, token_pda_bump) =
-        find_token_pda_address(&expected_client_seat_key, usdc_mint_info.key);
-
-    if token_pda_info.key != &expected_token_pda {
-        msg!("Invalid token PDA (account {})", account_index);
-        return Err(ProgramError::InvalidSeeds);
-    }
-
     // Create client seat account.
     let mut client_seat = try_create_account::<ClientSeat>(
         payer_info.key,
@@ -915,58 +961,12 @@ fn try_initialize_client_seat(
 
     client_seat.device_key = device_history.device_key;
     client_seat.client_ip_bits = client_ip_bits;
-    client_seat.bump_seed = client_seat_bump;
-    client_seat.usdc_token_pda_bump_seed = token_pda_bump;
 
     msg!(
         "Created seat for device {} ip {}",
         device_history.device_key,
         client_ip
     );
-
-    // Create USDC token account as a PDA owned by the ClientSeat PDA.
-    let rent = Rent::get().unwrap();
-    let token_account_len = spl_token_interface::state::Account::LEN;
-    let lamports = rent.minimum_balance(token_account_len);
-
-    let client_seat_key_bytes = expected_client_seat_key.to_bytes();
-    let usdc_mint_key_bytes = usdc_mint_info.key.to_bytes();
-    let token_pda_seeds: &[&[u8]] = &[
-        crate::state::TOKEN_PDA_SEED_PREFIX,
-        &client_seat_key_bytes,
-        &usdc_mint_key_bytes,
-        &[token_pda_bump],
-    ];
-
-    let create_account_ix = solana_system_interface::instruction::create_account(
-        payer_info.key,
-        token_pda_info.key,
-        lamports,
-        token_account_len as u64,
-        &spl_token_interface::ID,
-    );
-
-    invoke_signed(
-        &create_account_ix,
-        &[payer_info.clone(), token_pda_info.clone()],
-        &[token_pda_seeds],
-    )?;
-
-    // Initialize the token account with the ClientSeat PDA as owner.
-    let init_token_ix = spl_token_interface::instruction::initialize_account3(
-        &spl_token_interface::ID,
-        token_pda_info.key,
-        usdc_mint_info.key,
-        &expected_client_seat_key,
-    )
-    .map_err(|_| ProgramError::InvalidInstructionData)?;
-
-    solana_cpi::invoke(
-        &init_token_ix,
-        &[token_pda_info.clone(), usdc_mint_info.clone()],
-    )?;
-
-    msg!("Created token PDA for seat");
 
     Ok(())
 }
@@ -1058,10 +1058,11 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
     // - 1: Execution controller (readonly).
     // - 2: Payment escrow (writable).
     // - 3: Withdraw authority (signer, writable).
-    // - 4: Client seat (if balance > 0).
-    // - 5: Client seat USDC token account (if balance > 0).
-    // - 6: Refund USDC token account (if balance > 0).
-    // - 7: SPL token program (if balance > 0).
+    // - 4: Client seat (readonly).
+    // - 5: Device history (readonly).
+    // - 6: Device history USDC token account (if balance > 0).
+    // - 7: Refund USDC token account (if balance > 0).
+    // - 8: SPL token program (if balance > 0).
     let mut accounts_iter = accounts.iter().enumerate();
 
     // Account 0: Program config.
@@ -1102,37 +1103,40 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
 
     let usdc_balance = payment_escrow.usdc_balance;
 
-    if usdc_balance > 0 {
-        // Account 4: Client seat.
-        let client_seat =
-            ZeroCopyAccount::<ClientSeat>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+    // Account 4: Client seat (readonly — needed to verify escrow belongs to seat).
+    let _client_seat =
+        ZeroCopyAccount::<ClientSeat>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
 
-        // Account 5: Client seat USDC token account.
+    // Account 5: Device history (readonly — PDA signs token transfers).
+    let device_history =
+        ZeroCopyAccount::<DeviceHistory>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
+
+    if usdc_balance > 0 {
+        // Account 6: Device history USDC token account.
         let (_, token_pda_info) =
             try_next_enumerated_account(&mut accounts_iter, Default::default())?;
 
-        // Account 6: Refund USDC token account.
+        // Account 7: Refund USDC token account.
         let (_, refund_info) =
             try_next_enumerated_account(&mut accounts_iter, Default::default())?;
 
-        // Transfer USDC from seat token PDA to refund account (client seat PDA signs).
+        // Transfer USDC from device history token PDA to refund account
+        // (device history PDA signs).
         let transfer_ix = spl_token_interface::instruction::transfer(
             &spl_token_interface::ID,
             token_pda_info.key,
             refund_info.key,
-            &payment_escrow.client_seat_key,
+            device_history.info.key,
             &[],
             usdc_balance,
         )
         .map_err(|_| ProgramError::InvalidInstructionData)?;
 
-        let device_key_bytes = client_seat.device_key.to_bytes();
-        let ip_bytes = client_seat.client_ip_bits.to_le_bytes();
-        let seat_seeds: &[&[u8]] = &[
-            ClientSeat::SEED_PREFIX,
+        let device_key_bytes = device_history.device_key.to_bytes();
+        let history_seeds: &[&[u8]] = &[
+            DeviceHistory::SEED_PREFIX,
             &device_key_bytes,
-            &ip_bytes,
-            &[client_seat.bump_seed],
+            &[device_history.bump_seed],
         ];
 
         invoke_signed(
@@ -1140,9 +1144,9 @@ fn try_close_payment_escrow(accounts: &[AccountInfo]) -> ProgramResult {
             &[
                 token_pda_info.clone(),
                 refund_info.clone(),
-                client_seat.info.clone(),
+                device_history.info.clone(),
             ],
-            &[seat_seeds],
+            &[history_seeds],
         )?;
 
         msg!("Refunded {} USDC (atomic)", usdc_balance);
@@ -1178,7 +1182,7 @@ fn try_fund_payment_escrow_usdc(accounts: &[AccountInfo], amount: u64) -> Progra
     // - 3: Device history (readonly).
     // - 4: Client seat (writable).
     // - 5: Payment escrow (writable).
-    // - 6: Client seat USDC token account (writable).
+    // - 6: Device history USDC token account (writable).
     // - 7: Source USDC token account (writable).
     // - 8: Transfer authority (signer, readonly).
     // - 9: SPL token program (readonly).
@@ -1250,7 +1254,7 @@ fn try_fund_payment_escrow_usdc(accounts: &[AccountInfo], amount: u64) -> Progra
     let mut payment_escrow =
         ZeroCopyMutAccount::<PaymentEscrow>::try_next_accounts(&mut accounts_iter, Some(&ID))?;
 
-    // Account 6: Client seat USDC token account (destination).
+    // Account 6: Device history USDC token account (destination).
     let (_, token_pda_info) =
         try_next_enumerated_account(&mut accounts_iter, Default::default())?;
 
@@ -1267,7 +1271,7 @@ fn try_fund_payment_escrow_usdc(accounts: &[AccountInfo], amount: u64) -> Progra
         },
     )?;
 
-    // Transfer USDC from source to client seat token PDA.
+    // Transfer USDC from source to device history token PDA.
     let transfer_ix = spl_token_interface::instruction::transfer(
         &spl_token_interface::ID,
         source_token_info.key,

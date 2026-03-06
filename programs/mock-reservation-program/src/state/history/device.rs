@@ -14,6 +14,10 @@ pub struct DeviceHistory {
 
     pub flags: Flags,
 
+    pub bump_seed: u8,
+    pub usdc_token_pda_bump_seed: u8,
+    _bump_padding: [u8; 6],
+
     pub metro_exchange_key: Pubkey,
 
     _gap: StorageGap<4>,

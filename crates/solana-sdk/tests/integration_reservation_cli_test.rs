@@ -57,7 +57,7 @@ fn integration_reservation_cli_workflow() {
     let device_str = setup.device_key.to_string();
     let usdc_mint_str = setup.usdc_mint_key.to_string();
 
-    // 4. CLI: initialize-seat (no --amount in per-seat PDA model)
+    // 4. CLI: initialize-seat
     let (status, stdout, stderr) = integration::run_cli(&[
         "reservation",
         "initialize-seat",
@@ -69,8 +69,6 @@ fn integration_reservation_cli_workflow() {
         &device_str,
         "--client-ip",
         "10.0.0.1",
-        "--usdc-mint",
-        &usdc_mint_str,
     ]);
     assert!(
         status.success(),
@@ -86,8 +84,10 @@ fn integration_reservation_cli_workflow() {
     assert_eq!(device_key, setup.device_key);
     assert_eq!(ip, CLIENT_IP);
 
-    // Verify token PDA was created with 0 balance.
-    let (token_pda_key, _) = state::find_token_pda_address(&seat_key, &setup.usdc_mint_key);
+    // Verify USDC token PDA on device history was created with 0 balance.
+    let device_history_key = state::find_device_history_address(&setup.device_key).0;
+    let (token_pda_key, _) =
+        state::find_token_pda_address(&device_history_key, &setup.usdc_mint_key);
     let token_pda_account = rpc.get_account(&token_pda_key).expect("fetch token PDA");
     let token_state: spl_token_interface::state::Account =
         solana_program_pack::Pack::unpack(&token_pda_account.data).expect("parse token PDA");

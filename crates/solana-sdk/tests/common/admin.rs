@@ -12,7 +12,7 @@ use doublezero_solana_sdk::{
     DISCRIMINATOR_LEN, Discriminator,
     reservation::state::{
         find_device_history_address, find_execution_controller_address, find_metro_history_address,
-        find_program_config_address,
+        find_program_config_address, find_token_pda_address,
     },
 };
 use solana_loader_v3_interface::get_program_data_address;
@@ -236,6 +236,8 @@ pub struct InitializeDeviceHistoryAccounts {
     metro_history_key: Pubkey,
     payer_key: Pubkey,
     new_device_history_key: Pubkey,
+    new_device_history_usdc_token_pda_key: Pubkey,
+    usdc_mint_key: Pubkey,
 }
 
 impl InitializeDeviceHistoryAccounts {
@@ -244,14 +246,22 @@ impl InitializeDeviceHistoryAccounts {
         payer_key: &Pubkey,
         exchange_key: &Pubkey,
         device_key: &Pubkey,
+        usdc_mint_key: &Pubkey,
     ) -> Self {
+        let new_device_history_key = find_device_history_address(device_key).0;
         Self {
             program_config_key: find_program_config_address().0,
             oracle_key: *oracle_key,
             execution_controller_key: find_execution_controller_address().0,
             metro_history_key: find_metro_history_address(exchange_key).0,
             payer_key: *payer_key,
-            new_device_history_key: find_device_history_address(device_key).0,
+            new_device_history_key,
+            new_device_history_usdc_token_pda_key: find_token_pda_address(
+                &new_device_history_key,
+                usdc_mint_key,
+            )
+            .0,
+            usdc_mint_key: *usdc_mint_key,
         }
     }
 }
@@ -265,6 +275,9 @@ impl From<InitializeDeviceHistoryAccounts> for Vec<AccountMeta> {
             AccountMeta::new(a.metro_history_key, false),
             AccountMeta::new(a.payer_key, true),
             AccountMeta::new(a.new_device_history_key, false),
+            AccountMeta::new(a.new_device_history_usdc_token_pda_key, false),
+            AccountMeta::new_readonly(a.usdc_mint_key, false),
+            AccountMeta::new_readonly(spl_token_interface::ID, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
         ]
     }
