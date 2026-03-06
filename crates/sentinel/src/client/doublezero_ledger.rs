@@ -1,3 +1,5 @@
+use std::{collections::HashMap, net::Ipv4Addr, sync::Arc, time::Duration};
+
 use async_trait::async_trait;
 use doublezero_program_tools::instruction::try_build_instruction;
 use doublezero_record::instruction as record_instruction;
@@ -31,7 +33,6 @@ use solana_sdk::{
     signature::{Keypair, Signature, Signer},
 };
 use solana_system_interface::{instruction as system_instruction, program as system_program};
-use std::{collections::HashMap, net::Ipv4Addr, sync::Arc, time::Duration};
 use tracing::info;
 use url::Url;
 
