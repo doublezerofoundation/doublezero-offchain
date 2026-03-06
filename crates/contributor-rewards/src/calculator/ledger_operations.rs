@@ -1,14 +1,20 @@
-use std::{fmt, fs, mem::size_of, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap, fmt, fs, mem::size_of, path::PathBuf, str::FromStr, time::Duration,
+};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
 use doublezero_program_tools::zero_copy;
 use doublezero_record::{instruction as record_ix, state::RecordData};
 use doublezero_revenue_distribution::state::ProgramConfig;
 use doublezero_sdk::record::pubkey::create_record_key;
+use doublezero_serviceability::state::{accounttype::AccountType, contributor::Contributor};
 use doublezero_solana_client_tools::rpc::DoubleZeroLedgerConnection;
 use solana_client::{
-    client_error::ClientError as SolanaClientError, nonblocking::rpc_client::RpcClient,
+    client_error::ClientError as SolanaClientError,
+    nonblocking::rpc_client::RpcClient,
+    rpc_config::RpcProgramAccountsConfig,
+    rpc_filter::{Memcmp, RpcFilterType},
 };
 use solana_sdk::{
     commitment_config::CommitmentConfig, message::Message, pubkey::Pubkey, signature::Keypair,
@@ -1087,4 +1093,36 @@ pub async fn inspect_records(
     );
 
     Ok(())
+}
+
+/// Fetch contributor labels (owner → code) from the DZ Ledger serviceability program.
+pub async fn try_fetch_contributor_labels(
+    dz_connection: &DoubleZeroLedgerConnection,
+    serviceability_program_id: &str,
+) -> Result<HashMap<Pubkey, String>> {
+    let program_pubkey = Pubkey::from_str(serviceability_program_id).with_context(|| {
+        format!("Invalid serviceability program ID: {serviceability_program_id}")
+    })?;
+
+    let config = RpcProgramAccountsConfig {
+        filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
+            0,
+            &[AccountType::Contributor as u8],
+        ))]),
+        ..Default::default()
+    };
+
+    let accounts = dz_connection
+        .get_program_accounts_with_config(&program_pubkey, config)
+        .await
+        .context("Failed to fetch contributor accounts")?;
+
+    accounts
+        .into_iter()
+        .map(|(key, account_info)| {
+            let contributor = Contributor::try_from(&account_info.data[..])
+                .with_context(|| format!("Failed to deserialize contributor account {key}"))?;
+            Ok((contributor.owner, contributor.code))
+        })
+        .collect::<Result<HashMap<_, _>>>()
 }
