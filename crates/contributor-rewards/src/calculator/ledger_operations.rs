@@ -630,6 +630,7 @@ pub struct AllRewardsOutput {
 pub fn print_rewards_summary(
     shapley_storage: &ShapleyOutputStorage,
     merkle_root: &solana_sdk::hash::Hash,
+    contributor_labels: &HashMap<Pubkey, String>,
 ) {
     #[derive(Tabled)]
     struct SummaryRow {
@@ -667,6 +668,8 @@ pub fn print_rewards_summary(
     struct RewardRow {
         #[tabled(rename = "Contributor")]
         contributor: String,
+        #[tabled(rename = "Pubkey")]
+        pubkey: String,
         #[tabled(rename = "Unit Share")]
         unit_share: u32,
     }
@@ -674,9 +677,16 @@ pub fn print_rewards_summary(
     let reward_rows: Vec<RewardRow> = shapley_storage
         .rewards
         .iter()
-        .map(|r| RewardRow {
-            contributor: r.contributor_key.to_string(),
-            unit_share: r.unit_share,
+        .map(|r| {
+            let contributor = contributor_labels
+                .get(&r.contributor_key)
+                .cloned()
+                .unwrap_or_default();
+            RewardRow {
+                contributor,
+                pubkey: r.contributor_key.to_string(),
+                unit_share: r.unit_share,
+            }
         })
         .collect();
 
@@ -729,7 +739,15 @@ pub async fn read_all_rewards(
         };
         println!("{}", serde_json::to_string(&output)?);
     } else {
-        print_rewards_summary(&shapley_storage, &merkle_root);
+        let dz_connection = DoubleZeroLedgerConnection::new(settings.rpc.dz_url.clone());
+        let labels = try_fetch_contributor_labels(
+            &dz_connection,
+            &settings.programs.serviceability_program_id,
+        )
+        .await
+        .unwrap_or_default();
+
+        print_rewards_summary(&shapley_storage, &merkle_root, &labels);
     }
 
     Ok(())
