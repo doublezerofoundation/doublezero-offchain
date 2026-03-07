@@ -633,7 +633,10 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                                 if c.distributed { "yes" } else { "no" }.to_string(),
                             ]);
                         }
-                        let table = table_builder.build().with(Style::markdown()).to_string();
+                        let table = table_builder
+                            .build()
+                            .with(Style::psql().remove_horizontals())
+                            .to_string();
                         println!("\n{table}");
 
                         // Post Slack notification for completed distributions.

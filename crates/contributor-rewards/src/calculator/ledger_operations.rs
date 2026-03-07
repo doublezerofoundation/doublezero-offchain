@@ -681,7 +681,7 @@ pub fn print_rewards_summary(
             let contributor = contributor_labels
                 .get(&r.contributor_key)
                 .cloned()
-                .unwrap_or_default();
+                .unwrap_or_else(|| r.contributor_key.to_string());
             RewardRow {
                 contributor,
                 pubkey: r.contributor_key.to_string(),
