@@ -73,51 +73,6 @@ impl PayCommand {
             .is_ok();
         let escrow_exists = wallet.connection.get_account(&escrow_key).await.is_ok();
 
-        if !seat_exists || !escrow_exists {
-            let mut instructions = Vec::new();
-            let mut compute_unit_limit = 0u32;
-
-            if !seat_exists {
-                let seat_ix = try_build_instruction(
-                    &ID,
-                    InitializeClientSeatAccounts::new(&wallet_key, &device, client_ip_bits),
-                    &ReservationInstructionData::InitializeClientSeat {
-                        client_ip: client_ip_bits,
-                    },
-                )?;
-                instructions.push(seat_ix);
-                compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(seat_bump);
-            }
-
-            if !escrow_exists {
-                let escrow_ix = try_build_instruction(
-                    &ID,
-                    InitializePaymentEscrowAccounts::new(&client_seat_key, &wallet_key),
-                    &ReservationInstructionData::InitializePaymentEscrow,
-                )?;
-                instructions.push(escrow_ix);
-                compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(escrow_bump);
-            }
-
-            instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
-                compute_unit_limit,
-            ));
-
-            if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
-                instructions.push(compute_unit_price_ix.clone());
-            }
-
-            let transaction = wallet.new_transaction(&instructions).await?;
-            let tx_outcome = wallet.send_or_simulate_transaction(&transaction).await?;
-
-            if let TransactionOutcome::Executed(tx_sig) = tx_outcome {
-                println!("Initialized seat/escrow: {tx_sig}");
-                wallet.print_verbose_output(&[tx_sig]).await?;
-            }
-        } else {
-            println!("Client seat and escrow already exist, skipping initialization.");
-        }
-
         let usdc_mint_key = self.usdc_mint.unwrap_or(*state::USDC_MINT_KEY);
 
         // Convert decimal USDC to micro-USDC (6 decimals).
@@ -151,32 +106,54 @@ impl PayCommand {
             }
         }
 
+        let mut instructions = Vec::new();
+        let mut compute_unit_limit = 0u32;
+
+        if !seat_exists {
+            let seat_ix = try_build_instruction(
+                &ID,
+                InitializeClientSeatAccounts::new(&wallet_key, &device, client_ip_bits),
+                &ReservationInstructionData::InitializeClientSeat {
+                    client_ip: client_ip_bits,
+                },
+            )?;
+            instructions.push(seat_ix);
+            compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(seat_bump);
+        }
+
+        if !escrow_exists {
+            let escrow_ix = try_build_instruction(
+                &ID,
+                InitializePaymentEscrowAccounts::new(&client_seat_key, &wallet_key),
+                &ReservationInstructionData::InitializePaymentEscrow,
+            )?;
+            instructions.push(escrow_ix);
+            compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(escrow_bump);
+        }
+
         let source_usdc_token_account = self
             .source_token_account
             .unwrap_or_else(|| get_associated_token_address(&wallet_key, &usdc_mint_key));
 
-        let accounts = FundPaymentEscrowUsdcAccounts::new(
-            &exchange_key,
-            &device,
-            client_ip_bits,
-            &wallet_key,
-            &usdc_mint_key,
-            &source_usdc_token_account,
-            &wallet_key,
-        );
-
-        let ix = try_build_instruction(
+        let fund_ix = try_build_instruction(
             &ID,
-            accounts,
+            FundPaymentEscrowUsdcAccounts::new(
+                &exchange_key,
+                &device,
+                client_ip_bits,
+                &wallet_key,
+                &usdc_mint_key,
+                &source_usdc_token_account,
+                &wallet_key,
+            ),
             &ReservationInstructionData::FundPaymentEscrowUsdc(amount_micro),
         )?;
+        instructions.push(fund_ix);
+        compute_unit_limit += 50_000;
 
-        let compute_unit_limit = 50_000;
-
-        let mut instructions = vec![
-            ix,
-            ComputeBudgetInstruction::set_compute_unit_limit(compute_unit_limit),
-        ];
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
+            compute_unit_limit,
+        ));
 
         if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
             instructions.push(compute_unit_price_ix.clone());
