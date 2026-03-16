@@ -66,12 +66,13 @@ impl PayCommand {
             state::find_payment_escrow_address(&client_seat_key, &wallet_key);
 
         // Check which accounts already exist on-chain.
-        let seat_exists = wallet
+        let accounts = wallet
             .connection
-            .get_account(&client_seat_key)
+            .get_multiple_accounts(&[client_seat_key, escrow_key])
             .await
-            .is_ok();
-        let escrow_exists = wallet.connection.get_account(&escrow_key).await.is_ok();
+            .unwrap();
+        let seat_exists = accounts[0].is_some();
+        let escrow_exists = accounts[1].is_some();
 
         let usdc_mint_key = self.usdc_mint.unwrap_or(*state::USDC_MINT_KEY);
 
