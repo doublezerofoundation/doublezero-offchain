@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::{Result, ensure};
 use clap::Subcommand;
-use doublezero_solana_client_tools::rpc::SolanaConnection;
+use doublezero_solana_client_tools::{
+    payer::Wallet,
+    rpc::{DoubleZeroLedgerConnection, SolanaConnection},
+};
 use doublezero_solana_sdk::revenue_distribution::fetch::{
     SolConversionState, try_fetch_config, try_fetch_distribution,
 };
@@ -14,7 +17,10 @@ use tabled::{builder::Builder as TableBuilder, settings::Style};
 use tracing::{info, warn};
 
 use crate::{
-    calculator::{ledger_operations::WriteResult, orchestrator::Orchestrator},
+    calculator::{
+        distribute, keypair_loader::load_keypair, ledger_operations::WriteResult,
+        orchestrator::Orchestrator,
+    },
     cli::snapshot::CompleteSnapshot,
 };
 
@@ -327,6 +333,35 @@ pub enum RewardsCommands {
         )]
         keypair: Option<PathBuf>,
     },
+    #[command(
+        about = "Re-distribute rewards for a past epoch (backfill missed contributors)",
+        long_about = "Ad-hoc operator tool for re-distributing rewards for a past epoch where some \
+            contributors were skipped (e.g., because their ContributorRewards account didn't exist yet). \
+            No Slack notifications are sent. Script in a loop for multiple epochs:\n\n\
+            for e in 40..50; do distribute-backfill -e $e -k keypair.json; done",
+        after_help = r#"Examples:
+    # Backfill a specific epoch
+    distribute-backfill -e 42 -k keypair.json
+
+    # Simulate backfill without sending transactions
+    distribute-backfill -e 42 -k keypair.json --dry-run"#
+    )]
+    DistributeBackfill {
+        /// DZ epoch to backfill (defaults to latest distributable epoch)
+        #[arg(short = 'e', long, value_name = "EPOCH")]
+        dz_epoch: Option<u64>,
+
+        /// Simulate transactions without sending
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Path to keypair file for signing transactions.
+        /// Always required because even --dry-run simulates signed transactions
+        /// against the RPC. Use `distribute-rewards --dry-run -e N` for a
+        /// lightweight readiness check that needs no keypair.
+        #[arg(short = 'k', long, value_name = "FILE")]
+        keypair: PathBuf,
+    },
 }
 
 /// Handle rewards commands
@@ -343,8 +378,6 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             skip_merkle_root,
             slack_notify,
         } => {
-            use tracing::warn;
-
             // Construct WriteConfig from CLI flags
             let write_config = crate::calculator::WriteConfig::from_flags(
                 skip_device_telemetry,
@@ -547,12 +580,6 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                 }
                 // Mode 2 & 3: Simulate or Execute (keypair present)
                 (dry_run, Some(keypair_path)) => {
-                    use doublezero_solana_client_tools::{
-                        payer::Wallet, rpc::DoubleZeroLedgerConnection,
-                    };
-
-                    use crate::calculator::{distribute, keypair_loader::load_keypair};
-
                     let signer = load_keypair(&Some(keypair_path))?;
                     let dz_connection =
                         DoubleZeroLedgerConnection::new(orchestrator.settings.rpc.dz_url.clone());
@@ -688,6 +715,126 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                 }
                 // Unreachable: clap enforces keypair is required unless dry_run
                 (false, None) => unreachable!(),
+            }
+
+            Ok(())
+        }
+        RewardsCommands::DistributeBackfill {
+            dz_epoch,
+            dry_run,
+            keypair,
+        } => {
+            let connection =
+                SolanaConnection::new(orchestrator.settings.rpc.solana_write_url.clone());
+
+            let (_, config) = try_fetch_config(&connection).await?;
+
+            let dz_epoch_value = match dz_epoch {
+                Some(epoch) => {
+                    info!("Will backfill for provided dz_epoch: {epoch}");
+                    epoch
+                }
+                None => {
+                    let sol_conversion_state = SolConversionState::try_fetch(&connection).await?;
+                    let next_sweep = sol_conversion_state
+                        .journal
+                        .1
+                        .next_dz_epoch_to_sweep_tokens
+                        .value();
+                    ensure!(next_sweep > 0, "No epochs have been swept yet");
+                    let dist_epoch = next_sweep - 1;
+                    info!("Will backfill for dz_epoch: {dist_epoch}, next_sweep: {next_sweep}");
+                    dist_epoch
+                }
+            };
+
+            let signer = load_keypair(&Some(keypair))?;
+            let dz_connection =
+                DoubleZeroLedgerConnection::new(orchestrator.settings.rpc.dz_url.clone());
+
+            let wallet = Wallet {
+                connection,
+                signer,
+                compute_unit_price_ix: None,
+                verbose: false,
+                fee_payer: None,
+                dry_run,
+            };
+
+            if dry_run {
+                info!("Backfilling rewards for epoch {dz_epoch_value} (dry-run)");
+            } else {
+                info!("Backfilling rewards for epoch {dz_epoch_value}");
+            }
+
+            let shapley_prefix = orchestrator.settings.get_contributor_rewards_prefix();
+
+            let summary = distribute::try_distribute_epoch_rewards(
+                &wallet,
+                &dz_connection,
+                &config.rewards_accountant_key,
+                dz_epoch_value,
+                &shapley_prefix,
+            )
+            .await?;
+
+            match &summary.outcome {
+                distribute::DistributionOutcome::Complete { total_contributors } => {
+                    info!(
+                        "Backfill epoch {dz_epoch_value} complete: {total_contributors}/{total_contributors} distributed"
+                    );
+                }
+                distribute::DistributionOutcome::PartiallyComplete {
+                    total_contributors,
+                    distributed,
+                    skipped,
+                } => {
+                    info!(
+                        "Backfill epoch {dz_epoch_value} partially complete: {distributed}/{total_contributors} distributed, {skipped} skipped (missing ContributorRewards accounts)"
+                    );
+                }
+                distribute::DistributionOutcome::NotReady => {
+                    info!("Distribution not ready for epoch {dz_epoch_value}");
+                }
+            }
+
+            // Print per-contributor rewards table (no Slack notification).
+            if !summary.contributors.is_empty() {
+                let labels = crate::calculator::ledger_operations::try_fetch_contributor_labels(
+                    &dz_connection,
+                    &orchestrator.settings.programs.serviceability_program_id,
+                )
+                .await
+                .unwrap_or_default();
+
+                let resolve_label = |key: &solana_sdk::pubkey::Pubkey| {
+                    labels.get(key).cloned().unwrap_or_else(|| key.to_string())
+                };
+
+                let mut table_builder = TableBuilder::default();
+                table_builder.push_record([
+                    "dz_epoch".to_string(),
+                    "index".to_string(),
+                    "contributor".to_string(),
+                    "proportion".to_string(),
+                    "reward".to_string(),
+                    "distributed".to_string(),
+                ]);
+                for c in &summary.contributors {
+                    table_builder.push_record([
+                        summary.dz_epoch.to_string(),
+                        c.index.to_string(),
+                        resolve_label(&c.contributor_key),
+                        format!("{:.2}%", 100.0 * c.proportion),
+                        format!("{:.1} 2Z", c.reward_tokens),
+                        if c.distributed { "yes" } else { "no" }.to_string(),
+                    ]);
+                }
+                let table = table_builder
+                    .build()
+                    .with(Style::psql().remove_horizontals())
+                    .to_string();
+                println!("\n{table}");
             }
 
             Ok(())
