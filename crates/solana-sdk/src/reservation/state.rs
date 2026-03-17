@@ -10,7 +10,7 @@ pub const CLIENT_SEAT_SEED_PREFIX: &[u8] = b"client_seat";
 pub const METRO_HISTORY_SEED_PREFIX: &[u8] = b"metro_history";
 pub const TOKEN_PDA_SEED_PREFIX: &[u8] = b"token";
 pub const PAYMENT_ESCROW_SEED_PREFIX: &[u8] = b"payment_escrow";
-pub const INSTANT_ALLOCATION_REQUEST_SEED_PREFIX: &[u8] = b"instant_allocation_request";
+pub const INSTANT_ALLOCATION_REQUEST_SEED_PREFIX: &[u8] = b"instant_seat_allocation_request";
 
 /// Mainnet USDC mint address.
 const DEFAULT_USDC_MINT_KEY: Pubkey =
@@ -68,11 +68,15 @@ pub fn find_token_pda_address(token_owner_key: &Pubkey, mint_key: &Pubkey) -> (P
     )
 }
 
-pub fn find_instant_allocation_request_address(client_seat_key: &Pubkey) -> (Pubkey, u8) {
+pub fn find_instant_allocation_request_address(
+    device_key: &Pubkey,
+    client_ip_bits: u32,
+) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[
             INSTANT_ALLOCATION_REQUEST_SEED_PREFIX,
-            client_seat_key.as_ref(),
+            device_key.as_ref(),
+            &client_ip_bits.to_le_bytes(),
         ],
         &crate::reservation::ID,
     )

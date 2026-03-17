@@ -172,7 +172,8 @@ impl RequestInstantAllocationAccounts {
             .0,
             payer_key: *payer_key,
             new_instant_allocation_request_key: state::find_instant_allocation_request_address(
-                &client_seat_key,
+                device_key,
+                client_ip_bits,
             )
             .0,
         }
@@ -183,11 +184,11 @@ impl From<RequestInstantAllocationAccounts> for Vec<AccountMeta> {
     fn from(accounts: RequestInstantAllocationAccounts) -> Self {
         vec![
             AccountMeta::new_readonly(accounts.program_config_key, false),
-            AccountMeta::new_readonly(accounts.execution_controller_key, false),
+            AccountMeta::new(accounts.execution_controller_key, false),
             AccountMeta::new_readonly(accounts.metro_history_key, false),
-            AccountMeta::new_readonly(accounts.device_history_key, false),
-            AccountMeta::new_readonly(accounts.client_seat_key, false),
-            AccountMeta::new_readonly(accounts.payment_escrow_key, false),
+            AccountMeta::new(accounts.device_history_key, false),
+            AccountMeta::new(accounts.client_seat_key, false),
+            AccountMeta::new(accounts.payment_escrow_key, false),
             AccountMeta::new(accounts.payer_key, true),
             AccountMeta::new(accounts.new_instant_allocation_request_key, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
