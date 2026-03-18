@@ -225,7 +225,7 @@ impl From<RequestInstantSeatWithdrawalAccounts> for Vec<AccountMeta> {
         vec![
             AccountMeta::new_readonly(accounts.program_config_key, false),
             AccountMeta::new(accounts.execution_controller_key, false),
-            AccountMeta::new_readonly(accounts.client_seat_key, false),
+            AccountMeta::new(accounts.client_seat_key, false),
             AccountMeta::new(accounts.payer_key, true),
             AccountMeta::new(accounts.withdraw_seat_request_key, false),
             AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
