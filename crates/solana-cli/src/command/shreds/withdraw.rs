@@ -6,7 +6,10 @@ use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutco
 use doublezero_solana_sdk::{
     reservation::{
         ID,
-        instruction::{ReservationInstructionData, account::ClosePaymentEscrowAccounts},
+        instruction::{
+            ReservationInstructionData,
+            account::{ClosePaymentEscrowAccounts, RequestSeatWithdrawalAccounts},
+        },
         state,
     },
     try_build_instruction,
@@ -32,6 +35,9 @@ pub struct WithdrawCommand {
     /// USDC token account to receive the refund (defaults to your ATA)
     #[arg(long)]
     refund_token_account: Option<Pubkey>,
+    /// Request instant seat withdrawal.
+    #[arg(long)]
+    now: bool,
 
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
@@ -72,12 +78,22 @@ impl WithdrawCommand {
             &ReservationInstructionData::ClosePaymentEscrow,
         )?;
 
-        let compute_unit_limit = 30_000;
+        let mut instructions = vec![ix];
+        let mut compute_unit_limit = 30_000;
 
-        let mut instructions = vec![
-            ix,
-            ComputeBudgetInstruction::set_compute_unit_limit(compute_unit_limit),
-        ];
+        if self.now {
+            let request_ix = try_build_instruction(
+                &ID,
+                RequestSeatWithdrawalAccounts::new(&device, client_ip_bits, &wallet_key),
+                &ReservationInstructionData::RequestSeatWithdrawal,
+            )?;
+            instructions.push(request_ix);
+            compute_unit_limit += 50_000;
+        }
+
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
+            compute_unit_limit,
+        ));
 
         if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
             instructions.push(compute_unit_price_ix.clone());
