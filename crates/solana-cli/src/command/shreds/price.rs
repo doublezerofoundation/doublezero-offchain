@@ -57,15 +57,15 @@ struct PriceRow {
     #[tabled(rename = "Status")]
     status: String,
     #[tabled(rename = "Settled Seats")]
-    settled_seats: String,
+    settled_seats: u16,
     #[tabled(rename = "Available Seats")]
-    available_seats: String,
+    available_seats: u16,
     #[tabled(rename = "Base Price (USDC)")]
-    base_price: String,
+    base_price: i32,
     #[tabled(rename = "Premium (USDC)")]
-    premium: String,
+    premium: i32,
     #[tabled(rename = "Epoch Price (USDC)")]
-    epoch_price: String,
+    epoch_price: i32,
 }
 
 impl PriceCommand {
@@ -210,11 +210,11 @@ impl PriceCommand {
                     metro_name,
                     metro: device_info.exchange_key.to_string(),
                     status,
-                    settled_seats: device_info.granted_seat_count.to_string(),
-                    available_seats: device_info.total_available_seats.to_string(),
-                    base_price: base.to_string(),
-                    premium: premium.to_string(),
-                    epoch_price: epoch_price.to_string(),
+                    settled_seats: device_info.granted_seat_count,
+                    available_seats: device_info.total_available_seats,
+                    base_price: base,
+                    premium,
+                    epoch_price,
                 })
             })
             .collect();
@@ -231,7 +231,7 @@ impl PriceCommand {
         });
 
         println!("{} device(s) found:\n", rows.len());
-        
+
         if self.json {
             println!("{}", serde_json::to_string_pretty(&rows)?);
         } else {
