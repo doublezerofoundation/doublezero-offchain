@@ -18,7 +18,7 @@ pub enum ReservationInstructionData {
     /// Request instant allocation for a funded seat (skips auction settlement).
     RequestInstantAllocation,
     /// Request instant seat withdrawal.
-    RequestSeatWithdrawal,
+    RequestInstantSeatWithdrawal,
 }
 
 impl ReservationInstructionData {
@@ -50,7 +50,7 @@ impl BorshSerialize for ReservationInstructionData {
                 amount.serialize(writer)
             }
             Self::RequestInstantAllocation => Self::REQUEST_INSTANT_ALLOCATION.serialize(writer),
-            Self::RequestSeatWithdrawal => Self::REQUEST_SEAT_WITHDRAWAL.serialize(writer),
+            Self::RequestInstantSeatWithdrawal => Self::REQUEST_SEAT_WITHDRAWAL.serialize(writer),
         }
     }
 }
@@ -69,7 +69,7 @@ impl BorshDeserialize for ReservationInstructionData {
                 Ok(Self::FundPaymentEscrowUsdc(amount))
             }
             Self::REQUEST_INSTANT_ALLOCATION => Ok(Self::RequestInstantAllocation),
-            Self::REQUEST_SEAT_WITHDRAWAL => Ok(Self::RequestSeatWithdrawal),
+            Self::REQUEST_SEAT_WITHDRAWAL => Ok(Self::RequestInstantSeatWithdrawal),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "Invalid discriminator",

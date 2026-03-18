@@ -8,7 +8,7 @@ use doublezero_solana_sdk::{
         ID,
         instruction::{
             ReservationInstructionData,
-            account::{ClosePaymentEscrowAccounts, RequestSeatWithdrawalAccounts},
+            account::{ClosePaymentEscrowAccounts, RequestInstantSeatWithdrawalAccounts},
         },
         state,
     },
@@ -36,8 +36,8 @@ pub struct WithdrawCommand {
     #[arg(long)]
     refund_token_account: Option<Pubkey>,
     /// Request instant seat withdrawal.
-    #[arg(long)]
-    now: bool,
+    #[arg(long = "unsafe-now", hide = true)]
+    unsafe_now: bool,
 
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
@@ -81,11 +81,11 @@ impl WithdrawCommand {
         let mut instructions = vec![ix];
         let mut compute_unit_limit = 30_000;
 
-        if self.now {
+        if self.unsafe_now {
             let request_ix = try_build_instruction(
                 &ID,
-                RequestSeatWithdrawalAccounts::new(&device, client_ip_bits, &wallet_key),
-                &ReservationInstructionData::RequestSeatWithdrawal,
+                RequestInstantSeatWithdrawalAccounts::new(&device, client_ip_bits, &wallet_key),
+                &ReservationInstructionData::RequestInstantSeatWithdrawal,
             )?;
             instructions.push(request_ix);
             compute_unit_limit += 50_000;

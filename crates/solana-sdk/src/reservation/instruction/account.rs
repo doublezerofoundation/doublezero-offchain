@@ -196,9 +196,9 @@ impl From<RequestInstantAllocationAccounts> for Vec<AccountMeta> {
     }
 }
 
-/// Accounts for the `RequestSeatWithdrawal` instruction (6 accounts).
+/// Accounts for the `RequestInstantSeatWithdrawal` instruction (6 accounts).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RequestSeatWithdrawalAccounts {
+pub struct RequestInstantSeatWithdrawalAccounts {
     pub program_config_key: Pubkey,
     pub execution_controller_key: Pubkey,
     pub client_seat_key: Pubkey,
@@ -206,7 +206,7 @@ pub struct RequestSeatWithdrawalAccounts {
     pub withdraw_seat_request_key: Pubkey,
 }
 
-impl RequestSeatWithdrawalAccounts {
+impl RequestInstantSeatWithdrawalAccounts {
     pub fn new(device_key: &Pubkey, client_ip_bits: u32, payer_key: &Pubkey) -> Self {
         let client_seat_key = state::find_client_seat_address(device_key, client_ip_bits).0;
         Self {
@@ -220,8 +220,8 @@ impl RequestSeatWithdrawalAccounts {
     }
 }
 
-impl From<RequestSeatWithdrawalAccounts> for Vec<AccountMeta> {
-    fn from(accounts: RequestSeatWithdrawalAccounts) -> Self {
+impl From<RequestInstantSeatWithdrawalAccounts> for Vec<AccountMeta> {
+    fn from(accounts: RequestInstantSeatWithdrawalAccounts) -> Self {
         vec![
             AccountMeta::new_readonly(accounts.program_config_key, false),
             AccountMeta::new_readonly(accounts.execution_controller_key, false),
