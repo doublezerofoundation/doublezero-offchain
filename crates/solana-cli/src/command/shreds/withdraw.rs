@@ -64,32 +64,29 @@ impl WithdrawCommand {
             bail!("No payment escrow found for this seat and wallet. Nothing to withdraw.");
         }
 
-        let accounts = ClosePaymentEscrowAccounts::new(
-            &device,
-            client_ip_bits,
-            &wallet_key,
-            &usdc_mint_key,
-            self.refund_token_account.as_ref(),
-        );
-
-        let ix = try_build_instruction(
-            &ID,
-            accounts,
-            &ReservationInstructionData::ClosePaymentEscrow,
-        )?;
-
-        let mut instructions = vec![ix];
+        let mut instructions = Vec::new();
         let mut compute_unit_limit = 30_000;
 
         if self.unsafe_now {
-            let request_ix = try_build_instruction(
+            instructions.push(try_build_instruction(
                 &ID,
                 RequestInstantSeatWithdrawalAccounts::new(&device, client_ip_bits, &wallet_key),
                 &ReservationInstructionData::RequestInstantSeatWithdrawal,
-            )?;
-            instructions.push(request_ix);
+            )?);
             compute_unit_limit += 50_000;
         }
+
+        instructions.push(try_build_instruction(
+            &ID,
+            ClosePaymentEscrowAccounts::new(
+                &device,
+                client_ip_bits,
+                &wallet_key,
+                &usdc_mint_key,
+                self.refund_token_account.as_ref(),
+            ),
+            &ReservationInstructionData::ClosePaymentEscrow,
+        )?);
 
         instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
             compute_unit_limit,
