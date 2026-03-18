@@ -13,7 +13,10 @@ use solana_client::{
     rpc_filter::{Memcmp, RpcFilterType},
 };
 use solana_sdk::{account::Account, pubkey::Pubkey};
-use tabled::{Table, Tabled, settings::Style};
+use tabled::{
+    Table, Tabled,
+    settings::{Remove, Style, location::ByColumnName},
+};
 
 /*
    doublezero-solana reservation price [--device <PUBKEY> | --device-code <CODE> | --metro <PUBKEY>]
@@ -29,11 +32,17 @@ pub struct PriceCommand {
     #[arg(long, group = "device_id")]
     metro: Option<Pubkey>,
 
+    #[arg(long)]
+    wide: bool,
+
+    #[arg(long)]
+    json: bool,
+
     #[command(flatten)]
     connection_options: SolanaConnectionOptions,
 }
 
-#[derive(Debug, Tabled)]
+#[derive(Debug, Tabled, serde::Serialize)]
 struct PriceRow {
     #[tabled(rename = "Device Code")]
     device_code: String,
@@ -222,10 +231,19 @@ impl PriceCommand {
         });
 
         println!("{} device(s) found:\n", rows.len());
-
-        let mut table = Table::new(rows);
-        table.with(Style::markdown());
-        println!("{table}");
+        
+        if self.json {
+            println!("{}", serde_json::to_string_pretty(&rows)?);
+        } else {
+            let mut table = Table::new(rows);
+            if !self.wide {
+                table
+                    .with(Remove::column(ByColumnName::new("Device Pubkey")))
+                    .with(Remove::column(ByColumnName::new("Metro Pubkey")));
+            }
+            table.with(Style::markdown());
+            println!("{table}");
+        }
 
         Ok(())
     }
