@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use clap::Args;
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutcome, Wallet};
 use doublezero_solana_sdk::{

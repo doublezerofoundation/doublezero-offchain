@@ -1,6 +1,5 @@
 use std::net::Ipv4Addr;
 
-use super::serviceability_program_id;
 use anyhow::{Result, bail};
 use clap::Args;
 use doublezero_serviceability::{pda::get_user_pda, state::user::UserType};
@@ -25,6 +24,8 @@ use doublezero_solana_sdk::{
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, pubkey::Pubkey};
 use spl_associated_token_account_interface::address::get_associated_token_address;
+
+use super::serviceability_program_id;
 
 /*
    doublezero-solana reservation pay \
@@ -71,8 +72,7 @@ impl PayCommand {
 
         // Check if this client IP already has a Multicast user on serviceability.
         // If so, the shred oracle will fail to create a new subscribe user at
-        // settlement time (the User PDA is already initialized). The user must
-        // disconnect first.
+        // settlement time.
         if let Ok(svc_program_id) = serviceability_program_id(network_env) {
             let dz_connection = DoubleZeroLedgerConnection::from(network_env);
             let (user_pda, _) = get_user_pda(&svc_program_id, &self.client_ip, UserType::Multicast);
