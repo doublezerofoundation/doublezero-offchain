@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::{collections::HashMap, net::Ipv4Addr};
 
 use anyhow::Result;
 use clap::Args;
@@ -9,8 +8,10 @@ use doublezero_solana_client_tools::rpc::{
 };
 use doublezero_solana_sdk::reservation::{self, state};
 use solana_account_decoder_client_types::UiAccountEncoding;
-use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
-use solana_client::rpc_filter::{Memcmp, RpcFilterType};
+use solana_client::{
+    rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    rpc_filter::{Memcmp, RpcFilterType},
+};
 use solana_sdk::{account::Account, pubkey::Pubkey};
 use tabled::{Table, Tabled, settings::Style};
 
@@ -44,10 +45,6 @@ struct SeatRow {
     client_ip: Ipv4Addr,
     #[tabled(rename = "Tenure")]
     tenure: u16,
-    #[tabled(rename = "Funded Epoch")]
-    funded_epoch: u64,
-    #[tabled(rename = "Active Epoch")]
-    active_epoch: u64,
     #[tabled(rename = "Est. Epochs Paid")]
     est_epochs_paid: String,
 }
@@ -104,16 +101,9 @@ impl ListCommand {
         let parsed_seats: Vec<_> = accounts
             .iter()
             .filter_map(|(seat_key, account)| {
-                let (device_key, client_ip, tenure, funded_epoch, active_epoch) =
+                let (device_key, client_ip, tenure, _, _) =
                     state::parse_client_seat(&account.data)?;
-                Some((
-                    *seat_key,
-                    device_key,
-                    client_ip,
-                    tenure,
-                    funded_epoch,
-                    active_epoch,
-                ))
+                Some((*seat_key, device_key, client_ip, tenure))
             })
             .collect();
 
@@ -154,7 +144,7 @@ impl ListCommand {
         let filtered_seats: Vec<_> = if let Some(ref authority) = self.withdraw_authority {
             parsed_seats
                 .into_iter()
-                .filter(|(seat_key, _, _, _, _, _)| {
+                .filter(|(seat_key, _, _, _)| {
                     escrow_authorities
                         .get(seat_key)
                         .is_some_and(|auths| auths.contains(authority))
@@ -198,40 +188,27 @@ impl ListCommand {
         // Build rows.
         let mut rows: Vec<SeatRow> = filtered_seats
             .iter()
-            .map(
-                |(seat_key, device_key, client_ip, tenure, raw_funded_epoch, active_epoch)| {
-                    let device_code = device_codes
-                        .get(device_key)
-                        .cloned()
-                        .unwrap_or_else(|| device_key.to_string());
+            .map(|(seat_key, device_key, client_ip, tenure)| {
+                let device_code = device_codes
+                    .get(device_key)
+                    .cloned()
+                    .unwrap_or_else(|| device_key.to_string());
 
-                    // If the seat is active and has no tenure, funded epoch equals
-                    // active epoch (the epoch the user paid for via instant allocation).
-                    // Otherwise show the raw on-chain value.
-                    let funded_epoch = if *active_epoch > 0 && *tenure == 0 {
-                        *active_epoch
-                    } else {
-                        *raw_funded_epoch
-                    };
+                let balance = escrow_balances.get(seat_key).copied().unwrap_or(0);
+                let price = device_prices.get(device_key).copied().unwrap_or(0);
+                let est_epochs_paid = if price > 0 {
+                    format!("~{}", balance / price)
+                } else {
+                    "N/A".to_string()
+                };
 
-                    let balance = escrow_balances.get(seat_key).copied().unwrap_or(0);
-                    let price = device_prices.get(device_key).copied().unwrap_or(0);
-                    let est_epochs_paid = if price > 0 {
-                        format!("~{}", balance / price)
-                    } else {
-                        "N/A".to_string()
-                    };
-
-                    SeatRow {
-                        device_code,
-                        client_ip: *client_ip,
-                        tenure: *tenure,
-                        funded_epoch,
-                        active_epoch: *active_epoch,
-                        est_epochs_paid,
-                    }
-                },
-            )
+                SeatRow {
+                    device_code,
+                    client_ip: *client_ip,
+                    tenure: *tenure,
+                    est_epochs_paid,
+                }
+            })
             .collect();
 
         rows.sort_by(|a, b| {
