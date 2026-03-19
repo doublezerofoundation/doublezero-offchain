@@ -45,6 +45,8 @@ struct SeatRow {
     client_ip: Ipv4Addr,
     #[tabled(rename = "Tenure")]
     tenure: u16,
+    #[tabled(rename = "Balance (USDC)")]
+    escrow_usdc: String,
     #[tabled(rename = "Est. Epochs Paid")]
     est_epochs_paid: String,
 }
@@ -162,7 +164,7 @@ impl ListCommand {
         // Collect unique device keys.
         let unique_devices: Vec<Pubkey> = filtered_seats
             .iter()
-            .map(|(_, device_key, _, _, _, _)| *device_key)
+            .map(|(_, device_key, _, _)| *device_key)
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
@@ -195,6 +197,7 @@ impl ListCommand {
                     .unwrap_or_else(|| device_key.to_string());
 
                 let balance = escrow_balances.get(seat_key).copied().unwrap_or(0);
+                let escrow_usdc = format!("{:.2}", balance as f64 / 1_000_000.0);
                 let price = device_prices.get(device_key).copied().unwrap_or(0);
                 let est_epochs_paid = if price > 0 {
                     format!("~{}", balance / price)
@@ -206,6 +209,7 @@ impl ListCommand {
                     device_code,
                     client_ip: *client_ip,
                     tenure: *tenure,
+                    escrow_usdc,
                     est_epochs_paid,
                 }
             })
