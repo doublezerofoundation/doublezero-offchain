@@ -1,6 +1,6 @@
 use std::net::Ipv4Addr;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use clap::Args;
 use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutcome, Wallet};
 use doublezero_solana_sdk::{
@@ -63,8 +63,7 @@ impl WithdrawCommand {
         let escrow_exists = wallet.connection.get_account(&escrow_key).await.is_ok();
 
         if !escrow_exists && !self.unsafe_now {
-            println!("No payment escrow found for this seat and wallet. Nothing to withdraw.");
-            return Ok(());
+            bail!("No payment escrow found for this seat and wallet. Nothing to withdraw.");
         }
 
         let mut instructions = Vec::new();

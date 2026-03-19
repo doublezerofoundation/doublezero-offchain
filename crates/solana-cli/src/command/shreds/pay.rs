@@ -70,9 +70,9 @@ impl PayCommand {
         let device = self.device_args.resolve(network_env).await?;
         let client_ip_bits = u32::from(self.client_ip);
 
-        // Check if this client IP already has a Multicast user on serviceability.
-        // If so, the shred oracle will fail to create a new subscribe user at
-        // settlement time.
+        // Best-effort check: verify this client IP doesn't already have a Multicast
+        // user on serviceability. If so, the shred oracle will fail to create a new
+        // subscribe user at settlement time. This is not enforced on-chain.
         if let Ok(svc_program_id) = serviceability_program_id(network_env) {
             let dz_connection = DoubleZeroLedgerConnection::from(network_env);
             let (user_pda, _) = get_user_pda(&svc_program_id, &self.client_ip, UserType::Multicast);
