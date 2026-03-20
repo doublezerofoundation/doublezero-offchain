@@ -109,51 +109,51 @@ impl ListCommand {
             })
             .collect();
 
-        // Fetch all payment escrows.
-        let escrow_disc_bytes = borsh::to_vec(&state::PAYMENT_ESCROW_DISCRIMINATOR)
-            .expect("discriminator serialization");
-        let escrow_config = RpcProgramAccountsConfig {
-            filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                0,
-                escrow_disc_bytes,
-            ))]),
-            account_config: RpcAccountInfoConfig {
-                encoding: Some(UiAccountEncoding::Base64),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let escrow_accounts: Vec<(Pubkey, Account)> = connection
-            .get_program_accounts_with_config(&reservation::ID, escrow_config)
-            .await?;
-
-        // Group escrow balances and authorities by seat key.
-        let mut escrow_balances: HashMap<Pubkey, u64> = HashMap::new();
-        let mut escrow_authorities: HashMap<Pubkey, std::collections::HashSet<Pubkey>> =
-            HashMap::new();
-        for (_, account) in &escrow_accounts {
-            if let Some((seat_key, authority, balance)) = state::parse_payment_escrow(&account.data)
-            {
-                *escrow_balances.entry(seat_key).or_default() += balance;
-                escrow_authorities
-                    .entry(seat_key)
-                    .or_default()
-                    .insert(authority);
-            }
-        }
-
-        // Apply withdraw authority filter.
-        let filtered_seats: Vec<_> = if let Some(ref authority) = self.withdraw_authority {
-            parsed_seats
-                .into_iter()
-                .filter(|(seat_key, _, _, _)| {
-                    escrow_authorities
-                        .get(seat_key)
-                        .is_some_and(|auths| auths.contains(authority))
+        // Fetch escrow balances.
+        let (escrow_balances, filtered_seats) = if let Some(ref authority) = self.withdraw_authority
+        {
+            let escrow_keys: Vec<Pubkey> = parsed_seats
+                .iter()
+                .map(|(seat_key, _, _, _)| {
+                    state::find_payment_escrow_address(seat_key, authority).0
                 })
-                .collect()
+                .collect();
+            let escrow_accounts = connection.try_fetch_multiple_accounts(&escrow_keys).await?;
+
+            let mut balances: HashMap<Pubkey, u64> = HashMap::new();
+            let mut matching_seats = Vec::new();
+            for (seat, account) in parsed_seats.into_iter().zip(escrow_accounts.into_iter()) {
+                if let Some((seat_key, _, balance)) = state::parse_payment_escrow(&account.data) {
+                    balances.insert(seat_key, balance);
+                    matching_seats.push(seat);
+                }
+            }
+            (balances, matching_seats)
         } else {
-            parsed_seats
+            let escrow_disc_bytes = borsh::to_vec(&state::PAYMENT_ESCROW_DISCRIMINATOR)
+                .expect("discriminator serialization");
+            let escrow_config = RpcProgramAccountsConfig {
+                filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                    0,
+                    escrow_disc_bytes,
+                ))]),
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            let escrow_accounts: Vec<(Pubkey, Account)> = connection
+                .get_program_accounts_with_config(&reservation::ID, escrow_config)
+                .await?;
+
+            let mut balances: HashMap<Pubkey, u64> = HashMap::new();
+            for (_, account) in &escrow_accounts {
+                if let Some((seat_key, _, balance)) = state::parse_payment_escrow(&account.data) {
+                    balances.insert(seat_key, balance);
+                }
+            }
+            (balances, parsed_seats)
         };
 
         if filtered_seats.is_empty() {
