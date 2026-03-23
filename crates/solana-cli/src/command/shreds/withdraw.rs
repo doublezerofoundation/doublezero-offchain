@@ -53,7 +53,10 @@ impl WithdrawCommand {
         let network_env = wallet.connection.try_network_environment().await?;
         println!("Connected to Solana: {network_env:?}");
 
-        let device = self.device_args.resolve(network_env, &dz_ledger_url).await?;
+        let device = self
+            .device_args
+            .resolve(network_env, &dz_ledger_url)
+            .await?;
         let usdc_mint_key = self.usdc_mint.unwrap_or(*state::USDC_MINT_KEY);
         let client_ip_bits = u32::from(self.client_ip);
         let (client_seat_key, _) = state::find_client_seat_address(&device, client_ip_bits);

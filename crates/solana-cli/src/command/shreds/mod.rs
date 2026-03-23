@@ -28,9 +28,7 @@ pub struct ShredsCommand {
 
 impl ShredsCommand {
     pub async fn try_into_execute(self) -> Result<()> {
-        self.command
-            .try_into_execute(self.dz_ledger_url)
-            .await
+        self.command.try_into_execute(self.dz_ledger_url).await
     }
 }
 
@@ -47,10 +45,7 @@ pub enum ShredsSubcommand {
 }
 
 impl ShredsSubcommand {
-    pub async fn try_into_execute(
-        self,
-        dz_ledger_url: Option<String>,
-    ) -> Result<()> {
+    pub async fn try_into_execute(self, dz_ledger_url: Option<String>) -> Result<()> {
         match self {
             Self::Pay(command) => command.try_into_execute(dz_ledger_url).await,
             Self::Withdraw(command) => command.try_into_execute(dz_ledger_url).await,

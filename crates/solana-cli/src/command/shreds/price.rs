@@ -109,7 +109,10 @@ impl PriceCommand {
         ))];
 
         if self.device_args.device.is_some() || self.device_args.device_code.is_some() {
-            let device = self.device_args.resolve(network_env, &dz_ledger_url).await?;
+            let device = self
+                .device_args
+                .resolve(network_env, &dz_ledger_url)
+                .await?;
             device_filters.push(RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
                 state::DEVICE_HISTORY_DEVICE_KEY_OFFSET,
                 device.to_bytes().to_vec(),

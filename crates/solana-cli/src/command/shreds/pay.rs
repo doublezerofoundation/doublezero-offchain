@@ -64,7 +64,10 @@ impl PayCommand {
         let network_env = wallet.connection.try_network_environment().await?;
         println!("Connected to Solana: {network_env:?}");
 
-        let device = self.device_args.resolve(network_env, &dz_ledger_url).await?;
+        let device = self
+            .device_args
+            .resolve(network_env, &dz_ledger_url)
+            .await?;
         let client_ip_bits = u32::from(self.client_ip);
 
         // Best-effort check: verify this client IP doesn't already have a Multicast
