@@ -236,7 +236,7 @@ pub const DEVICE_HISTORY_FLAGS_OFFSET: usize = DISCRIMINATOR_LEN + 32;
 pub const DEVICE_HISTORY_EXCHANGE_KEY_OFFSET: usize = DISCRIMINATOR_LEN + 32 + 16;
 const DEVICE_HISTORY_ACTIVE_GRANTED_SEATS_OFFSET: usize = DISCRIMINATOR_LEN + 80;
 const DEVICE_HISTORY_ACTIVE_TOTAL_AVAILABLE_SEATS_OFFSET: usize = DISCRIMINATOR_LEN + 82;
-const DEVICE_HISTORY_RING_OFFSET: usize = DISCRIMINATOR_LEN + 208; // after StorageGap<3> + new fields (128 bytes)
+const DEVICE_HISTORY_RING_OFFSET: usize = DISCRIMINATOR_LEN + 208; // after active seat fields + StorageGap<3> (128 bytes total)
 const DEVICE_HISTORY_ENTRY_SIZE: usize = 80; // EpochEntry<DeviceSubscription>
 
 /// Parse the metro exchange pubkey directly from raw `DeviceHistory` account data.
