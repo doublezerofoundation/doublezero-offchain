@@ -286,22 +286,6 @@ impl PayCommand {
         instructions.push(fund_ix);
         compute_unit_limit += 50_000;
 
-        if !seat_already_active {
-            let request_ix = try_build_instruction(
-                &ID,
-                RequestInstantSeatAllocationAccounts::new(
-                    &exchange_key,
-                    &device,
-                    client_ip_bits,
-                    &wallet_key,
-                    &wallet_key,
-                ),
-                &ReservationInstructionData::RequestInstantSeatAllocation,
-            )?;
-            instructions.push(request_ix);
-            compute_unit_limit += 50_000;
-        }
-
         instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
             compute_unit_limit,
         ));
@@ -316,6 +300,45 @@ impl PayCommand {
         if let TransactionOutcome::Executed(tx_sig) = tx_outcome {
             println!("Fund escrow ({} USDC): {tx_sig}", self.amount);
             wallet.print_verbose_output(&[tx_sig]).await?;
+        }
+
+        // Request instant seat allocation as a separate best-effort
+        // transaction. This is kept out of the funding transaction so that
+        // escrow funding always succeeds even when instant allocation is not
+        // possible (e.g. device at capacity). The oracle will allocate via
+        // the regular auction if instant allocation is skipped.
+        if !seat_already_active {
+            let mut alloc_instructions = Vec::new();
+            let request_ix = try_build_instruction(
+                &ID,
+                RequestInstantSeatAllocationAccounts::new(
+                    &exchange_key,
+                    &device,
+                    client_ip_bits,
+                    &wallet_key,
+                    &wallet_key,
+                ),
+                &ReservationInstructionData::RequestInstantSeatAllocation,
+            )?;
+            alloc_instructions.push(request_ix);
+            alloc_instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(50_000));
+            if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
+                alloc_instructions.push(compute_unit_price_ix.clone());
+            }
+
+            let alloc_tx = wallet.new_transaction(&alloc_instructions).await?;
+            match wallet.send_or_simulate_transaction(&alloc_tx).await {
+                Ok(TransactionOutcome::Executed(sig)) => {
+                    println!("Instant seat allocation: {sig}");
+                }
+                Ok(_) => {} // dry-run
+                Err(_) => {
+                    eprintln!(
+                        "Note: instant seat allocation was not possible; \
+                         the oracle will allocate your seat in the next epoch."
+                    );
+                }
+            }
         }
 
         Ok(())
