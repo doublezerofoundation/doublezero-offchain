@@ -7,12 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - add `--dz-ledger-url` flag to `shreds` commands to override the DZ Ledger RPC endpoint ([#303](https://github.com/doublezerofoundation/doublezero-offchain/pull/303))
+- `shreds pay`: always request instant seat allocation (removed `--now` flag)
+- `shreds withdraw`: always request instant seat withdrawal (removed `--unsafe-now` flag)
 - rework `shreds list`: show device code instead of seat PDA/pubkey, add escrow balance and estimated epochs paid columns
 - `shreds pay`: block payment when client IP already has an active multicast user on serviceability
-- `shreds withdraw`: allow `--unsafe-now` without a payment escrow (sends only the instant withdrawal request)
-- `shreds withdraw`: exit cleanly instead of erroring when no escrow exists and `--unsafe-now` is not set
-- add `--unsafe-now` flag to `shreds withdraw` for instant seat withdrawal request
-- add `--now` flag to `reservation pay` for instant seat allocation
 - combine `shreds initialize-seat` and `shreds fund` into a single `shreds pay` command that initializes seat/escrow on-demand before funding
 - rename `reservation` command to `shreds`
 
