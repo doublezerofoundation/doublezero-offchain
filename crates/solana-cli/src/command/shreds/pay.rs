@@ -165,7 +165,8 @@ impl PayCommand {
         let seat_exists = accounts[0].is_some();
         let escrow_exists = accounts[1].is_some();
 
-        let seat_already_active = is_seat_already_active(accounts[0].as_ref().map(|a| a.data.as_slice()));
+        let seat_already_active =
+            is_seat_already_active(accounts[0].as_ref().map(|a| a.data.as_slice()));
 
         // Epoch-remaining warning: if <10% of the epoch remains, the user is
         // paying full price for a partial epoch. Skip if: flag set, dry-run,
