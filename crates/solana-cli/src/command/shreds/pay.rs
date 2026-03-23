@@ -3,10 +3,7 @@ use std::net::Ipv4Addr;
 use anyhow::{Result, bail};
 use clap::Args;
 use doublezero_serviceability::{pda::get_user_pda, state::user::UserType};
-use doublezero_solana_client_tools::{
-    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
-    rpc::DoubleZeroLedgerConnection,
-};
+use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutcome, Wallet};
 use doublezero_solana_sdk::{
     reservation::{
         ID,
@@ -58,7 +55,7 @@ pub struct PayCommand {
 }
 
 impl PayCommand {
-    pub async fn try_into_execute(self) -> Result<()> {
+    pub async fn try_into_execute(self, dz_ledger_url: Option<String>) -> Result<()> {
         let wallet = Wallet::try_from(self.solana_payer_options)?;
         let wallet_key = wallet.pubkey();
 
@@ -67,14 +64,14 @@ impl PayCommand {
         let network_env = wallet.connection.try_network_environment().await?;
         println!("Connected to Solana: {network_env:?}");
 
-        let device = self.device_args.resolve(network_env).await?;
+        let device = self.device_args.resolve(network_env, &dz_ledger_url).await?;
         let client_ip_bits = u32::from(self.client_ip);
 
         // Best-effort check: verify this client IP doesn't already have a Multicast
         // user on serviceability. If so, the shred oracle will fail to create a new
         // subscribe user at settlement time. This is not enforced on-chain.
         if let Ok(svc_program_id) = serviceability_program_id(network_env) {
-            let dz_connection = DoubleZeroLedgerConnection::from(network_env);
+            let dz_connection = super::make_dz_connection(&dz_ledger_url, network_env);
             let (user_pda, _) = get_user_pda(&svc_program_id, &self.client_ip, UserType::Multicast);
             if let Ok(Some(_)) = dz_connection
                 .get_account_with_commitment(&user_pda, CommitmentConfig::confirmed())
