@@ -154,6 +154,17 @@ impl PayCommand {
         let seat_exists = accounts[0].is_some();
         let escrow_exists = accounts[1].is_some();
 
+        // Check whether the seat is already active (has been allocated in a
+        // previous epoch). When re-funding an active seat we only need to top
+        // up the escrow — requesting a new instant allocation would fail
+        // onchain because the seat is already counted against the device's
+        // available capacity.
+        let seat_already_active = accounts[0]
+            .as_ref()
+            .and_then(|acct| state::parse_client_seat(&acct.data))
+            .map(|(_, _, _, _, active_epoch)| active_epoch > 0)
+            .unwrap_or(false);
+
         // Epoch-remaining warning: if <10% of the epoch remains, the user is
         // paying full price for a partial epoch. Skip if: flag set, dry-run,
         // or seat is already active for this epoch (re-fund).
@@ -272,19 +283,21 @@ impl PayCommand {
         instructions.push(fund_ix);
         compute_unit_limit += 50_000;
 
-        let request_ix = try_build_instruction(
-            &ID,
-            RequestInstantSeatAllocationAccounts::new(
-                &exchange_key,
-                &device,
-                client_ip_bits,
-                &wallet_key,
-                &wallet_key,
-            ),
-            &ReservationInstructionData::RequestInstantSeatAllocation,
-        )?;
-        instructions.push(request_ix);
-        compute_unit_limit += 50_000;
+        if !seat_already_active {
+            let request_ix = try_build_instruction(
+                &ID,
+                RequestInstantSeatAllocationAccounts::new(
+                    &exchange_key,
+                    &device,
+                    client_ip_bits,
+                    &wallet_key,
+                    &wallet_key,
+                ),
+                &ReservationInstructionData::RequestInstantSeatAllocation,
+            )?;
+            instructions.push(request_ix);
+            compute_unit_limit += 50_000;
+        }
 
         instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
             compute_unit_limit,
