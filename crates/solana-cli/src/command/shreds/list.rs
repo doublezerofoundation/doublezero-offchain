@@ -13,6 +13,8 @@ use solana_client::{
 use solana_sdk::{account::Account, pubkey::Pubkey};
 use tabled::{Table, Tabled, settings::Style};
 
+use super::make_dz_connection;
+
 /*
    doublezero-solana reservation list [--device <PUBKEY> | --device-code <CODE>]
 */
@@ -172,7 +174,7 @@ impl ListCommand {
 
         // Resolve device codes from DZ Ledger (best-effort).
         let device_codes: HashMap<Pubkey, String> = {
-            let dz_connection = super::make_dz_connection(&dz_ledger_url, network_env);
+            let dz_connection = make_dz_connection(&dz_ledger_url, network_env);
             let dz_accounts = dz_connection.get_multiple_accounts(&unique_devices).await;
             dz_accounts
                 .unwrap_or_default()

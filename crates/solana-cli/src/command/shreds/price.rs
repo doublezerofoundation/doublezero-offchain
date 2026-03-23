@@ -16,6 +16,8 @@ use tabled::{
     settings::{Remove, Style, location::ByColumnName},
 };
 
+use super::make_dz_connection;
+
 /*
    doublezero-solana reservation price [--device <PUBKEY> | --device-code <CODE> | --metro <PUBKEY>]
 */
@@ -156,7 +158,7 @@ impl PriceCommand {
 
         // Fetch Device accounts from DZ Ledger for code, status, etc.
         let device_keys: Vec<Pubkey> = device_infos.iter().map(|d| d.device_key).collect();
-        let dz_connection = super::make_dz_connection(&dz_ledger_url, network_env);
+        let dz_connection = make_dz_connection(&dz_ledger_url, network_env);
         let dz_device_accounts = dz_connection.get_multiple_accounts(&device_keys).await?;
 
         let device_map: HashMap<Pubkey, Device> = device_keys
