@@ -347,9 +347,9 @@ pub enum RewardsCommands {
     distribute-backfill -e 42 -k keypair.json --dry-run"#
     )]
     DistributeBackfill {
-        /// DZ epoch to backfill (defaults to latest distributable epoch)
+        /// DZ epoch to backfill
         #[arg(short = 'e', long, value_name = "EPOCH")]
-        dz_epoch: Option<u64>,
+        dz_epoch: u64,
 
         /// Simulate transactions without sending
         #[arg(long)]
@@ -724,29 +724,12 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             dry_run,
             keypair,
         } => {
+            info!("Will backfill for dz_epoch: {dz_epoch}");
+
             let connection =
                 SolanaConnection::new(orchestrator.settings.rpc.solana_write_url.clone());
 
             let (_, config) = try_fetch_config(&connection).await?;
-
-            let dz_epoch_value = match dz_epoch {
-                Some(epoch) => {
-                    info!("Will backfill for provided dz_epoch: {epoch}");
-                    epoch
-                }
-                None => {
-                    let sol_conversion_state = SolConversionState::try_fetch(&connection).await?;
-                    let next_sweep = sol_conversion_state
-                        .journal
-                        .1
-                        .next_dz_epoch_to_sweep_tokens
-                        .value();
-                    ensure!(next_sweep > 0, "No epochs have been swept yet");
-                    let dist_epoch = next_sweep - 1;
-                    info!("Will backfill for dz_epoch: {dist_epoch}, next_sweep: {next_sweep}");
-                    dist_epoch
-                }
-            };
 
             let signer = load_keypair(&Some(keypair))?;
             let dz_connection =
@@ -762,9 +745,9 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             };
 
             if dry_run {
-                info!("Backfilling rewards for epoch {dz_epoch_value} (dry-run)");
+                info!("Backfilling rewards for epoch {dz_epoch} (dry-run)");
             } else {
-                info!("Backfilling rewards for epoch {dz_epoch_value}");
+                info!("Backfilling rewards for epoch {dz_epoch}");
             }
 
             let shapley_prefix = orchestrator.settings.get_contributor_rewards_prefix();
@@ -773,7 +756,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                 &wallet,
                 &dz_connection,
                 &config.rewards_accountant_key,
-                dz_epoch_value,
+                dz_epoch,
                 &shapley_prefix,
             )
             .await?;
@@ -781,7 +764,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
             match &summary.outcome {
                 distribute::DistributionOutcome::Complete { total_contributors } => {
                     info!(
-                        "Backfill epoch {dz_epoch_value} complete: {total_contributors}/{total_contributors} distributed"
+                        "Backfill epoch {dz_epoch} complete: {total_contributors}/{total_contributors} distributed"
                     );
                 }
                 distribute::DistributionOutcome::PartiallyComplete {
@@ -790,11 +773,11 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                     skipped,
                 } => {
                     info!(
-                        "Backfill epoch {dz_epoch_value} partially complete: {distributed}/{total_contributors} distributed, {skipped} skipped (missing ContributorRewards accounts)"
+                        "Backfill epoch {dz_epoch} partially complete: {distributed}/{total_contributors} distributed, {skipped} skipped (missing ContributorRewards accounts)"
                     );
                 }
                 distribute::DistributionOutcome::NotReady => {
-                    info!("Distribution not ready for epoch {dz_epoch_value}");
+                    info!("Distribution not ready for epoch {dz_epoch}");
                 }
             }
 
