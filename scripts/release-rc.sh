@@ -37,13 +37,13 @@ die() { echo -e "${RED}ERROR:${RESET} $*" >&2; exit 1; }
 # --- Args ---
 
 DRY_RUN=false
-VERBOSE=false
+QUIET=false
 CONFIG_NAME=""
 BASE_VERSION=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --dry-run) DRY_RUN=true; shift ;;
-        --verbose) VERBOSE=true; shift ;;
+        --quiet|-q) QUIET=true; shift ;;
         --version) [[ -n "${2:-}" ]] || die "--version requires a value"; BASE_VERSION="$2"; shift 2 ;;
         --help|-h)
             echo "Usage: $0 <config-name> [--version <version>] [--dry-run]"
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Flags:"
             echo "  --version <ver>   Base version for the RC (e.g. 0.4.2); defaults to latest RC series"
-            echo "  --verbose         Enable verbose goreleaser output"
+            echo "  --quiet, -q       Suppress verbose goreleaser output"
             echo "  --dry-run         Build only, skip publishing to GitHub"
             echo "  --help            Show this help"
             echo ""
@@ -163,9 +163,9 @@ fi
 DIST_DIR="$REPO_ROOT/dist"
 rm -rf "$DIST_DIR"
 
-VERBOSE_FLAG=""
-if [[ "$VERBOSE" == true ]]; then
-    VERBOSE_FLAG="--verbose"
+VERBOSE_FLAG="--verbose"
+if [[ "$QUIET" == true ]]; then
+    VERBOSE_FLAG=""
 fi
 
 echo -e "${BOLD}${CYAN}[1/2]${RESET} ${BOLD}Building snapshot in linux/amd64 container${RESET}"
@@ -230,8 +230,8 @@ echo ""
 echo -e "${BOLD}${CYAN}[2/2]${RESET} ${BOLD}Publishing ${RC_TAG} to GitHub Releases${RESET}"
 echo ""
 
-# Create a lightweight tag.
-git tag "$RC_TAG"
+# Create a lightweight tag (-m forces it to skip the editor).
+git tag -m "Release candidate ${RC_VERSION}" "$RC_TAG"
 git push origin "$RC_TAG"
 
 # Create the release with artifacts.
