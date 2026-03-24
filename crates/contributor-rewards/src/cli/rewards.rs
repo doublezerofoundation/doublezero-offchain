@@ -603,6 +603,7 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                         &config.rewards_accountant_key,
                         dz_epoch_value,
                         &shapley_prefix,
+                        false,
                     )
                     .await?;
 
@@ -657,7 +658,12 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                                 resolve_label(&c.contributor_key),
                                 format!("{:.2}%", 100.0 * c.proportion),
                                 format!("{:.1} 2Z", c.reward_tokens),
-                                if c.distributed { "yes" } else { "no" }.to_string(),
+                                match c.status {
+                                    distribute::ContributorStatus::Existing
+                                    | distribute::ContributorStatus::New => "yes",
+                                    distribute::ContributorStatus::Skipped => "no",
+                                }
+                                .to_string(),
                             ]);
                         }
                         let table = table_builder
@@ -684,8 +690,12 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                                     contributor: resolve_label(&c.contributor_key),
                                     proportion: format!("{:.2}%", 100.0 * c.proportion),
                                     reward: format!("{:.1} 2Z", c.reward_tokens),
-                                    distributed: if c.distributed { "yes" } else { "no" }
-                                        .to_string(),
+                                    distributed: match c.status {
+                                        distribute::ContributorStatus::Existing
+                                        | distribute::ContributorStatus::New => "yes",
+                                        distribute::ContributorStatus::Skipped => "no",
+                                    }
+                                    .to_string(),
                                 })
                                 .collect();
 
@@ -758,31 +768,44 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
                 &config.rewards_accountant_key,
                 dz_epoch,
                 &shapley_prefix,
+                true,
             )
             .await?;
 
-            match &summary.outcome {
-                distribute::DistributionOutcome::Complete { total_contributors } => {
-                    info!(
-                        "Backfill epoch {dz_epoch} complete: {total_contributors}/{total_contributors} distributed"
-                    );
-                }
-                distribute::DistributionOutcome::PartiallyComplete {
-                    total_contributors,
-                    distributed,
-                    skipped,
-                } => {
-                    info!(
-                        "Backfill epoch {dz_epoch} partially complete: {distributed}/{total_contributors} distributed, {skipped} skipped (missing ContributorRewards accounts)"
-                    );
-                }
-                distribute::DistributionOutcome::NotReady => {
-                    info!("Distribution not ready for epoch {dz_epoch}");
-                }
+            if matches!(summary.outcome, distribute::DistributionOutcome::NotReady) {
+                info!("Distribution not ready for epoch {dz_epoch}");
+                return Ok(());
             }
 
-            // Print per-contributor rewards table (no Slack notification).
-            if !summary.contributors.is_empty() {
+            // Compute counts by status.
+            let new_count = summary
+                .contributors
+                .iter()
+                .filter(|c| c.status == distribute::ContributorStatus::New)
+                .count();
+            let existing_count = summary
+                .contributors
+                .iter()
+                .filter(|c| c.status == distribute::ContributorStatus::Existing)
+                .count();
+            let skipped_count = summary
+                .contributors
+                .iter()
+                .filter(|c| c.status == distribute::ContributorStatus::Skipped)
+                .count();
+
+            info!(
+                "Backfill epoch {dz_epoch}: {new_count} new, {existing_count} existing, {skipped_count} skipped"
+            );
+
+            // Show only the delta (new + skipped), not existing distributions.
+            let delta: Vec<_> = summary
+                .contributors
+                .iter()
+                .filter(|c| c.status != distribute::ContributorStatus::Existing)
+                .collect();
+
+            if !delta.is_empty() {
                 let labels = crate::calculator::ledger_operations::try_fetch_contributor_labels(
                     &dz_connection,
                     &orchestrator.settings.programs.serviceability_program_id,
@@ -796,21 +819,22 @@ pub async fn handle(orchestrator: &Orchestrator, cmd: RewardsCommands) -> Result
 
                 let mut table_builder = TableBuilder::default();
                 table_builder.push_record([
-                    "dz_epoch".to_string(),
-                    "index".to_string(),
                     "contributor".to_string(),
                     "proportion".to_string(),
                     "reward".to_string(),
-                    "distributed".to_string(),
+                    "status".to_string(),
                 ]);
-                for c in &summary.contributors {
+                for c in &delta {
                     table_builder.push_record([
-                        summary.dz_epoch.to_string(),
-                        c.index.to_string(),
                         resolve_label(&c.contributor_key),
                         format!("{:.2}%", 100.0 * c.proportion),
                         format!("{:.1} 2Z", c.reward_tokens),
-                        if c.distributed { "yes" } else { "no" }.to_string(),
+                        match c.status {
+                            distribute::ContributorStatus::New => "new",
+                            distribute::ContributorStatus::Skipped => "skipped",
+                            distribute::ContributorStatus::Existing => unreachable!(),
+                        }
+                        .to_string(),
                     ]);
                 }
                 let table = table_builder
