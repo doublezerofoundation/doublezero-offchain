@@ -53,6 +53,7 @@ struct SeatRow {
 
 impl ListCommand {
     pub async fn try_into_execute(self, dz_ledger_url: Option<String>) -> Result<()> {
+        let moniker_env = self.connection_options.moniker_env();
         let connection = SolanaConnection::from(self.connection_options);
 
         let discriminator_bytes =
@@ -64,7 +65,10 @@ impl ListCommand {
         ))];
 
         // Resolve device filter.
-        let network_env = connection.try_network_environment().await?;
+        let network_env = match moniker_env {
+            Some(env) => env,
+            None => connection.try_network_environment().await?,
+        };
         if self.device_args.device.is_some() || self.device_args.device_code.is_some() {
             let device = self
                 .device_args

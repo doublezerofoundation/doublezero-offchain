@@ -110,6 +110,15 @@ pub struct SolanaConnectionOptions {
     pub solana_url_or_moniker: Option<String>,
 }
 
+impl SolanaConnectionOptions {
+    /// If the URL is a known moniker (m/t/l), return the corresponding network
+    /// environment. Returns `None` when a raw URL was provided.
+    pub fn moniker_env(&self) -> Option<NetworkEnvironment> {
+        let url_or_moniker = self.solana_url_or_moniker.as_deref().unwrap_or("m");
+        <NetworkEnvironment as FromStr>::from_str(url_or_moniker).ok()
+    }
+}
+
 pub struct SolanaConnection(pub RpcClient);
 
 impl SolanaConnection {
@@ -186,10 +195,11 @@ impl From<SolanaConnectionOptions> for SolanaConnection {
         let url_or_moniker = solana_url_or_moniker.as_deref().unwrap_or("m");
 
         // Give it the ol' college try to convert a moniker. If it fails, assume
-        // a URL was provided.
+        // a URL was provided. Monikers resolve to the DoubleZero Ledger URL
+        // since the shred subscription program lives there.
         let url = <NetworkEnvironment as FromStr>::from_str(url_or_moniker)
             .as_ref()
-            .map(NetworkEnvironment::solana_public_url)
+            .map(NetworkEnvironment::doublezero_ledger_public_url)
             .unwrap_or(url_or_moniker);
         Self::new(url.to_string())
     }

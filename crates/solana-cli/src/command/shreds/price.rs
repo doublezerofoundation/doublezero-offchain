@@ -70,8 +70,12 @@ struct PriceRow {
 
 impl PriceCommand {
     pub async fn try_into_execute(self, dz_ledger_url: Option<String>) -> Result<()> {
+        let moniker_env = self.connection_options.moniker_env();
         let connection = SolanaConnection::from(self.connection_options);
-        let network_env = connection.try_network_environment().await?;
+        let network_env = match moniker_env {
+            Some(env) => env,
+            None => connection.try_network_environment().await?,
+        };
 
         // Fetch all MetroHistory accounts
         let metro_disc_bytes = borsh::to_vec(&state::METRO_HISTORY_DISCRIMINATOR)
