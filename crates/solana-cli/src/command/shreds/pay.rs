@@ -211,8 +211,8 @@ impl PayCommand {
         let usdc_mint_key = self.usdc_mint.unwrap_or(*state::USDC_MINT_KEY);
 
         // Convert decimal USDC to micro-USDC (6 decimals).
-        if self.amount <= 0.0 {
-            bail!("Amount must be a positive value");
+        if self.amount < 0.0 {
+            bail!("Amount must be a non-negative value");
         }
         let amount_micro = (self.amount * 1_000_000.0).round() as u64;
 
