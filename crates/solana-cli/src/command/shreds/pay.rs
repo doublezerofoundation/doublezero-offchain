@@ -236,6 +236,7 @@ impl PayCommand {
             let min_price = seat_price_override.unwrap_or_else(|| {
                 (metro_info.current_usdc_price as i32 + device_info.current_premium as i32)
                     .max(0) as u64
+                    * 1_000_000
             });
             if amount_micro < min_price {
                 let min_usdc = min_price as f64 / 1_000_000.0;
