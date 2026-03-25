@@ -234,8 +234,8 @@ impl PayCommand {
         let metro_history_account = wallet.connection.get_account(&metro_history_key).await?;
         if let Some(metro_info) = state::parse_metro_history(&metro_history_account.data) {
             let min_price = seat_price_override.unwrap_or_else(|| {
-                (metro_info.current_usdc_price as i32 + device_info.current_premium as i32)
-                    .max(0) as u64
+                (metro_info.current_usdc_price as i32 + device_info.current_premium as i32).max(0)
+                    as u64
                     * 1_000_000
             });
             if amount_micro < min_price {
