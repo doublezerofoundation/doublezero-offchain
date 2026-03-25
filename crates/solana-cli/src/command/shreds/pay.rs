@@ -101,7 +101,7 @@ pub struct PayCommand {
     /// Amount of USDC to fund (in decimal, e.g. 1.5 = 1_500_000 micro-USDC)
     #[arg(long)]
     amount: f64,
-    /// USDC mint (defaults to mainnet USDC)
+    /// USDC mint (auto-detected from network: mainnet or development)
     #[arg(long, hide = true)]
     usdc_mint: Option<Pubkey>,
     /// Source USDC token account (defaults to payer's ATA)
@@ -118,7 +118,13 @@ pub struct PayCommand {
 impl PayCommand {
     pub async fn try_into_execute(self, dz_ledger_url: Option<String>) -> Result<()> {
         let moniker_env = self.solana_payer_options.connection_options.moniker_env();
-        let wallet = Wallet::try_from(self.solana_payer_options)?;
+        let dz_connection = self
+            .solana_payer_options
+            .connection_options
+            .clone()
+            .into_dz_ledger_solana_connection();
+        let mut wallet = Wallet::try_from(self.solana_payer_options)?;
+        wallet.connection = dz_connection;
         let wallet_key = wallet.pubkey();
 
         println!("Shred subscription - Pay");
@@ -212,10 +218,12 @@ impl PayCommand {
             }
         }
 
-        let usdc_mint_key = self.usdc_mint.unwrap_or(if network_env.is_mainnet_beta() {
-            state::MAINNET_USDC_MINT_KEY
-        } else {
-            state::DEVELOPMENT_USDC_MINT_KEY
+        let usdc_mint_key = self.usdc_mint.unwrap_or_else(|| {
+            if network_env.is_mainnet_beta() {
+                state::MAINNET_USDC_MINT_KEY
+            } else {
+                state::DEVELOPMENT_USDC_MINT_KEY
+            }
         });
 
         // Convert decimal USDC to micro-USDC (6 decimals).

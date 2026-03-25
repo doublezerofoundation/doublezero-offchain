@@ -111,11 +111,32 @@ pub struct SolanaConnectionOptions {
 }
 
 impl SolanaConnectionOptions {
+    const DEFAULT_MONIKER: &str = "m";
+
     /// If the URL is a known moniker (m/t/l), return the corresponding network
     /// environment. Returns `None` when a raw URL was provided.
     pub fn moniker_env(&self) -> Option<NetworkEnvironment> {
-        let url_or_moniker = self.solana_url_or_moniker.as_deref().unwrap_or("m");
+        let url_or_moniker = self
+            .solana_url_or_moniker
+            .as_deref()
+            .unwrap_or(Self::DEFAULT_MONIKER);
         <NetworkEnvironment as FromStr>::from_str(url_or_moniker).ok()
+    }
+
+    /// Build a `SolanaConnection` that points at the DoubleZero Ledger.
+    /// Monikers resolve to the DZ Ledger URL (where the shred subscription
+    /// program lives); raw URLs are passed through as-is.
+    pub fn into_dz_ledger_solana_connection(self) -> SolanaConnection {
+        let url_or_moniker = self
+            .solana_url_or_moniker
+            .as_deref()
+            .unwrap_or(Self::DEFAULT_MONIKER);
+
+        let url = <NetworkEnvironment as FromStr>::from_str(url_or_moniker)
+            .as_ref()
+            .map(NetworkEnvironment::doublezero_ledger_public_url)
+            .unwrap_or(url_or_moniker);
+        SolanaConnection::new(url.to_string())
     }
 }
 
@@ -192,14 +213,15 @@ impl From<SolanaConnectionOptions> for SolanaConnection {
             solana_url_or_moniker,
         } = opts;
 
-        let url_or_moniker = solana_url_or_moniker.as_deref().unwrap_or("m");
+        let url_or_moniker = solana_url_or_moniker
+            .as_deref()
+            .unwrap_or(SolanaConnectionOptions::DEFAULT_MONIKER);
 
         // Give it the ol' college try to convert a moniker. If it fails, assume
-        // a URL was provided. Monikers resolve to the DoubleZero Ledger URL
-        // since the shred subscription program lives there.
+        // a URL was provided.
         let url = <NetworkEnvironment as FromStr>::from_str(url_or_moniker)
             .as_ref()
-            .map(NetworkEnvironment::doublezero_ledger_public_url)
+            .map(NetworkEnvironment::solana_public_url)
             .unwrap_or(url_or_moniker);
         Self::new(url.to_string())
     }
@@ -303,4 +325,42 @@ pub async fn try_fetch_multiple_accounts(
     }
 
     Ok(accounts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moniker_env_defaults_to_mainnet() {
+        let opts = SolanaConnectionOptions {
+            solana_url_or_moniker: None,
+        };
+        assert_eq!(opts.moniker_env(), Some(NetworkEnvironment::MainnetBeta));
+    }
+
+    #[test]
+    fn moniker_env_recognizes_monikers() {
+        for (input, expected) in [
+            ("m", NetworkEnvironment::MainnetBeta),
+            ("mainnet-beta", NetworkEnvironment::MainnetBeta),
+            ("t", NetworkEnvironment::Testnet),
+            ("testnet", NetworkEnvironment::Testnet),
+            ("l", NetworkEnvironment::Localnet),
+            ("localhost", NetworkEnvironment::Localnet),
+        ] {
+            let opts = SolanaConnectionOptions {
+                solana_url_or_moniker: Some(input.to_string()),
+            };
+            assert_eq!(opts.moniker_env(), Some(expected), "input: {input}");
+        }
+    }
+
+    #[test]
+    fn moniker_env_returns_none_for_raw_url() {
+        let opts = SolanaConnectionOptions {
+            solana_url_or_moniker: Some("https://my-rpc.example.com".to_string()),
+        };
+        assert_eq!(opts.moniker_env(), None);
+    }
 }

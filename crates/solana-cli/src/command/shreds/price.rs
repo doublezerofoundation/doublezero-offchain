@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use clap::Args;
 use doublezero_serviceability::state::{device::Device, exchange::Exchange};
-use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
+use doublezero_solana_client_tools::rpc::SolanaConnectionOptions;
 use doublezero_solana_sdk::shred_subscription::{self, state};
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_client::{
@@ -71,7 +71,7 @@ struct PriceRow {
 impl PriceCommand {
     pub async fn try_into_execute(self, dz_ledger_url: Option<String>) -> Result<()> {
         let moniker_env = self.connection_options.moniker_env();
-        let connection = SolanaConnection::from(self.connection_options);
+        let connection = self.connection_options.into_dz_ledger_solana_connection();
         let network_env = match moniker_env {
             Some(env) => env,
             None => connection.try_network_environment().await?,
