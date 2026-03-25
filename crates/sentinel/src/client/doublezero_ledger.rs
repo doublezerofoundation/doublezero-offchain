@@ -438,6 +438,4 @@ impl DzRpcClient {
         let epoch_info = self.client.get_epoch_info().await?;
         Ok(epoch_info.epoch.saturating_sub(1))
     }
-
 }
-
