@@ -8,10 +8,10 @@ use solana_sdk::signature::Keypair;
 
 use crate::keypair::{error::KeypairLoadError, source::KeypairSource};
 
-/// Default keypair path relative to HOME (preferred).
-const DEFAULT_KEYPAIR_PATH: &str = ".config/doublezero/id.json";
-/// Fallback keypair path relative to HOME (standard Solana location).
-const FALLBACK_KEYPAIR_PATH: &str = ".config/solana/id.json";
+/// Default keypair path relative to HOME (standard Solana location).
+const DEFAULT_KEYPAIR_PATH: &str = ".config/solana/id.json";
+/// Fallback keypair path relative to HOME.
+const FALLBACK_KEYPAIR_PATH: &str = ".config/doublezero/id.json";
 
 /// Result of loading a keypair, including provenance information
 pub struct KeypairLoadResult {
@@ -71,8 +71,8 @@ fn read_keypair_from_stdin() -> Result<Keypair, KeypairLoadError> {
 /// Load keypair following the precedence chain:
 /// 1. CLI argument (--keypair)
 /// 2. Stdin (if not a TTY)
-/// 3. Default path (~/.config/doublezero/id.json)
-/// 4. Fallback path (~/.config/solana/id.json)
+/// 3. Default path (~/.config/solana/id.json)
+/// 4. Fallback path (~/.config/doublezero/id.json)
 ///
 /// # Arguments
 /// * `cli_path` - Optional path from CLI --keypair argument
@@ -122,7 +122,7 @@ pub fn load_keypair(
         }
     }
 
-    // 3. Try default path (~/.config/doublezero/id.json)
+    // 3. Try default path (~/.config/solana/id.json)
     match read_keypair_from_path(&default_path) {
         Ok(keypair) => {
             return Ok(KeypairLoadResult {
@@ -135,7 +135,7 @@ pub fn load_keypair(
         }
     }
 
-    // 4. Try fallback path (~/.config/solana/id.json)
+    // 4. Try fallback path (~/.config/doublezero/id.json)
     match read_keypair_from_path(&fallback_path) {
         Ok(keypair) => {
             return Ok(KeypairLoadResult {
@@ -158,8 +158,8 @@ pub fn load_keypair(
 /// Load keypair following the precedence chain:
 /// 1. CLI argument (--keypair)
 /// 2. Stdin (if not a TTY)
-/// 3. Default path (~/.config/doublezero/id.json)
-/// 4. Fallback path (~/.config/solana/id.json)
+/// 3. Default path (~/.config/solana/id.json)
+/// 4. Fallback path (~/.config/doublezero/id.json)
 ///
 /// This is a convenience wrapper around [`load_keypair`] that automatically
 /// computes the default path from the HOME environment variable.
