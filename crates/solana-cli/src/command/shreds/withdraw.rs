@@ -46,7 +46,7 @@ impl WithdrawCommand {
             .solana_payer_options
             .connection_options
             .clone()
-            .into_dz_ledger_solana_connection();
+            .into_shred_subscription_connection();
         let mut wallet = Wallet::try_from(self.solana_payer_options)?;
         wallet.connection = dz_connection;
         let wallet_key = wallet.pubkey();
