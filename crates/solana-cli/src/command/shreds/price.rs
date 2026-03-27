@@ -10,7 +10,7 @@ use solana_client::{
     rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     rpc_filter::{Memcmp, RpcFilterType},
 };
-use solana_sdk::{account::Account, pubkey::Pubkey};
+use solana_sdk::pubkey::Pubkey;
 use tabled::{
     Table, Tabled,
     settings::{Remove, Style, location::ByColumnName},
@@ -77,7 +77,7 @@ impl PriceCommand {
             None => connection.try_network_environment().await?,
         };
 
-        // Fetch all MetroHistory accounts
+        // Build MetroHistory filter
         let metro_disc_bytes = borsh::to_vec(&state::METRO_HISTORY_DISCRIMINATOR)
             .expect("discriminator serialization");
         let metro_filters = vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
@@ -94,19 +94,7 @@ impl PriceCommand {
             ..Default::default()
         };
 
-        let metro_accounts: Vec<(Pubkey, Account)> = connection
-            .get_program_accounts_with_config(&shred_subscription::ID, metro_config)
-            .await?;
-
-        let metro_map: HashMap<Pubkey, state::MetroHistoryInfo> = metro_accounts
-            .iter()
-            .filter_map(|(_key, account)| {
-                let info = state::parse_metro_history(&account.data)?;
-                Some((info.exchange_key, info))
-            })
-            .collect();
-
-        // Fetch DeviceHistory accounts
+        // Build DeviceHistory filter
         let device_disc_bytes = borsh::to_vec(&state::DEVICE_HISTORY_DISCRIMINATOR)
             .expect("discriminator serialization");
         let mut device_filters = vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
@@ -141,9 +129,19 @@ impl PriceCommand {
             ..Default::default()
         };
 
-        let device_accounts: Vec<(Pubkey, Account)> = connection
-            .get_program_accounts_with_config(&shred_subscription::ID, device_config)
-            .await?;
+        // Fetch metro and device accounts in parallel
+        let (metro_accounts, device_accounts) = tokio::try_join!(
+            connection.get_program_accounts_with_config(&shred_subscription::ID, metro_config),
+            connection.get_program_accounts_with_config(&shred_subscription::ID, device_config),
+        )?;
+
+        let metro_map: HashMap<Pubkey, state::MetroHistoryInfo> = metro_accounts
+            .iter()
+            .filter_map(|(_key, account)| {
+                let info = state::parse_metro_history(&account.data)?;
+                Some((info.exchange_key, info))
+            })
+            .collect();
 
         if device_accounts.is_empty() {
             if self.json {
@@ -154,16 +152,20 @@ impl PriceCommand {
             return Ok(());
         }
 
-        // Parse DeviceHistory accounts and collect device keys
         let device_infos: Vec<state::DeviceHistoryInfo> = device_accounts
             .iter()
             .filter_map(|(_key, account)| state::parse_device_history(&account.data))
             .collect();
 
-        // Fetch Device accounts from DZ Ledger for code, status, etc.
+        // Fetch Device and Exchange accounts from DZ Ledger in parallel
         let device_keys: Vec<Pubkey> = device_infos.iter().map(|d| d.device_key).collect();
+        let exchange_keys: Vec<Pubkey> = metro_map.keys().copied().collect();
         let dz_connection = make_dz_connection(&dz_ledger_url, network_env);
-        let dz_device_accounts = dz_connection.get_multiple_accounts(&device_keys).await?;
+
+        let (dz_device_accounts, dz_exchange_accounts) = tokio::try_join!(
+            dz_connection.get_multiple_accounts(&device_keys),
+            dz_connection.get_multiple_accounts(&exchange_keys),
+        )?;
 
         let device_map: HashMap<Pubkey, Device> = device_keys
             .iter()
@@ -174,10 +176,6 @@ impl PriceCommand {
                 Some((*key, device))
             })
             .collect();
-
-        // Fetch Exchange accounts from DZ Ledger for metro code/name
-        let exchange_keys: Vec<Pubkey> = metro_map.keys().copied().collect();
-        let dz_exchange_accounts = dz_connection.get_multiple_accounts(&exchange_keys).await?;
 
         let exchange_map: HashMap<Pubkey, Exchange> = exchange_keys
             .iter()
