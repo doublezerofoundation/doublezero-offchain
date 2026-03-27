@@ -537,3 +537,74 @@ pub fn parse_program_logs(
         success,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build 5-line logs with `marker` at line 5 (index 4).
+    fn logs_with_line5(marker: &str) -> String {
+        format!("L0\nL1\nL2\nL3\n{}", marker)
+    }
+
+    /// REQUIRED CASES (table-driven, minimal, high-signal):
+    /// 1. "Merkle leaf" at line 5 → success=false, result contains marker
+    /// 2. "Insufficient funds" at line 5 → success=false, result contains marker
+    /// 3. Normal success message at line 5 → success=true, result contains message
+    /// 4. None or < 5 lines → success=true, result=None
+    #[test]
+    fn classification_table() {
+        let node = Pubkey::new_from_array([1u8; 32]);
+        let amt = 1_000_000u64;
+
+        let cases: &[(&str, Option<String>, bool, Option<&str>)] = &[
+            // (name, logs, expected_success, expected_result_contains)
+            (
+                "merkle_leaf",
+                Some(logs_with_line5("Merkle leaf already processed")),
+                false,
+                Some("Merkle leaf"),
+            ),
+            (
+                "insufficient_funds",
+                Some(logs_with_line5("Insufficient funds in source")),
+                false,
+                Some("Insufficient funds"),
+            ),
+            (
+                "success_message",
+                Some(logs_with_line5("Transfer successful")),
+                true,
+                Some("Transfer successful"),
+            ),
+            ("none_logs", None, true, None),
+            ("short_logs", Some("L0\nL1\nL2".to_string()), true, None),
+        ];
+
+        for (name, logs, want_success, want_contains) in cases {
+            let r = parse_program_logs(amt, node, logs.clone());
+            assert_eq!(
+                r.success, *want_success,
+                "[{}] success mismatch: got {}, want {}",
+                name, r.success, want_success
+            );
+            assert_eq!(r.amount, amt, "[{}] amount", name);
+            assert_eq!(r.validator_id, node.to_string(), "[{}] validator_id", name);
+
+            match (want_contains, &r.result) {
+                (Some(substr), Some(res)) => {
+                    assert!(
+                        res.contains(substr),
+                        "[{}] result '{}' missing '{}'",
+                        name,
+                        res,
+                        substr
+                    );
+                }
+                (Some(_), None) => panic!("[{}] expected Some result", name),
+                (None, None) => {}
+                (None, Some(res)) => panic!("[{}] expected None result, got {:?}", name, res),
+            }
+        }
+    }
+}
