@@ -1,6 +1,7 @@
 [workspace]
 exclude = ["programs/mock-shred-subscription-program"]
 members = [
+    "crates/sentinel-admin",
     "crates/contributor-rewards",
     "crates/scheduled-command",
     "crates/sentinel",

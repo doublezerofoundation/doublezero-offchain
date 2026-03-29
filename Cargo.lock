@@ -2429,10 +2429,12 @@ dependencies = [
  "doublezero-record",
  "doublezero-revenue-distribution",
  "doublezero-serviceability",
+ "doublezero-solana-client-tools",
  "doublezero_sdk",
  "metrics",
  "metrics-exporter-prometheus",
  "mockall",
+ "reqwest",
  "retainer",
  "serde",
  "serde_json",
@@ -2578,6 +2580,30 @@ dependencies = [
  "tokio",
  "tokio-cron-scheduler",
  "tracing",
+]
+
+[[package]]
+name = "doublezero-sentinel-admin-cli"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "borsh 1.5.7",
+ "clap",
+ "doublezero-ledger-sentinel",
+ "doublezero-serviceability",
+ "doublezero-solana-client-tools",
+ "doublezero_sdk",
+ "mockall",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "solana-account-decoder-client-types",
+ "solana-client",
+ "solana-pubkey",
+ "solana-sdk",
+ "tabled",
+ "tokio",
 ]
 
 [[package]]
