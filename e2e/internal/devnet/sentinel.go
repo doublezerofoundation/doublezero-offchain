@@ -96,8 +96,9 @@ exec doublezero-sentinel \
 		ConfigModifier: func(cfg *dockercontainer.Config) {
 			cfg.Hostname = "sentinel"
 		},
-		Env:        env,
-		Entrypoint: []string{"bash", "-c"},
+		ExposedPorts: []string{fmt.Sprintf("%d/tcp", internalSentinelMetrics)},
+		Env:           env,
+		Entrypoint:    []string{"bash", "-c"},
 		Cmd:        []string{entrypoint},
 		Files: []testcontainers.ContainerFile{
 			{
