@@ -78,12 +78,28 @@ test-unit:
 test-integration:
     cargo test --features integration -p doublezero-solana-validator-debt
 
-# Run end-to-end tests (starts fork, runs full lifecycle)
-test-e2e:
-    bash sh/test_full_debt_flow.sh
+# Run end-to-end tests (Docker-based, requires Docker)
+e2e-test:
+    make -C e2e test
+
+# Run e2e tests with debug logging
+e2e-test-debug:
+    DEBUG=1 make -C e2e test
+
+# Run e2e tests (images must already be built)
+e2e-test-nobuild:
+    make -C e2e test-nobuild
+
+# Build e2e container images
+e2e-build:
+    make -C e2e build
+
+# Build e2e container images with verbose output
+e2e-build-debug:
+    make -C e2e build-debug
 
 # Run all tests (unit + integration + e2e)
 test-all:
     @just test-unit
     @just test-integration
-    @just test-e2e
+    @just e2e-test
