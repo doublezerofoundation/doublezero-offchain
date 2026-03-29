@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dockercontainer "github.com/docker/docker/api/types/container"
+	"github.com/docker/go-connections/nat"
 	"github.com/testcontainers/testcontainers-go"
 	tcwait "github.com/testcontainers/testcontainers-go/wait"
 )
@@ -104,9 +105,10 @@ exec doublezero-sentinel \
 				ContainerFilePath: containerSentinelKeypairPath,
 			},
 		},
-		WaitingFor: tcwait.ForLog("DoubleZero Ledger Sentinel starting").
+		WaitingFor: tcwait.ForHTTP("/").
+			WithPort(nat.Port(fmt.Sprintf("%d/tcp", internalSentinelMetrics))).
 			WithStartupTimeout(60 * time.Second).
-			WithPollInterval(500 * time.Millisecond),
+			WithPollInterval(1 * time.Second),
 		Networks: []string{networkName},
 		NetworkAliases: map[string][]string{
 			networkName: {"sentinel"},
