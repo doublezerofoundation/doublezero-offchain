@@ -7,10 +7,8 @@ use std::{
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use doublezero_ledger_sentinel::client::{
-    dz_ledger_reader::{
-        self as dz_ledger_reader, DzLedgerReader, DzUser, RpcDzLedgerReader,
-        build_create_multicast_publisher_instructions,
-    },
+    dz_ledger_reader::{self as dz_ledger_reader, DzLedgerReader, DzUser, RpcDzLedgerReader},
+    dz_ledger_writer::build_create_multicast_publisher_instructions,
     validator_metadata_reader::{
         DataApiValidatorMetadataReader, ValidatorMetadataReader, ValidatorRecord,
     },
