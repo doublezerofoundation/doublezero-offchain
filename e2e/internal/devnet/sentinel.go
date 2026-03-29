@@ -42,11 +42,6 @@ func (s *Sentinel) Start(ctx context.Context) error {
 
 	networkName := s.dn.DefaultNetworkName
 
-	pollSecs := s.dn.Spec.Sentinel.MulticastPublisherPollSecs
-	if pollSecs == 0 {
-		pollSecs = 5
-	}
-
 	// Build sentinel config as TOML.
 	// Use "devnet" env — must match the program ID loaded in the ledger.
 	// The sentinel's settings.serviceability_program_id() maps "devnet" to a
@@ -86,10 +81,8 @@ cat %s
 echo "==> Starting sentinel..."
 exec doublezero-sentinel \
   --config %s \
-  --poll-interval 30 \
-  --enable-multicast-publisher \
-  --multicast-publisher-poll-interval %d
-`, containerSentinelConfigPath, config, containerSentinelConfigPath, containerSentinelConfigPath, containerSentinelConfigPath, pollSecs)
+  --poll-interval 30
+`, containerSentinelConfigPath, config, containerSentinelConfigPath, containerSentinelConfigPath, containerSentinelConfigPath)
 
 	// Also set env vars as fallback.
 	env := map[string]string{
@@ -111,7 +104,7 @@ exec doublezero-sentinel \
 				ContainerFilePath: containerSentinelKeypairPath,
 			},
 		},
-		WaitingFor: tcwait.ForLog("multicast publisher sentinel starting").
+		WaitingFor: tcwait.ForLog("DoubleZero Ledger Sentinel starting").
 			WithStartupTimeout(60 * time.Second).
 			WithPollInterval(500 * time.Millisecond),
 		Networks: []string{networkName},
