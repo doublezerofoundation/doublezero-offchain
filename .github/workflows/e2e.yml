@@ -1,0 +1,95 @@
+name: e2e
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  OFFCHAIN_IMAGE_REPO: ghcr.io/malbeclabs/offchain-e2e
+  OFFCHAIN_IMAGE_TAG: ${{ github.sha }}
+  OFFCHAIN_BASE_IMAGE: ghcr.io/malbeclabs/offchain-e2e/base:${{ github.sha }}
+  OFFCHAIN_LEDGER_IMAGE: ghcr.io/malbeclabs/offchain-e2e/ledger:${{ github.sha }}
+  OFFCHAIN_SENTINEL_IMAGE: ghcr.io/malbeclabs/offchain-e2e/sentinel:${{ github.sha }}
+  OFFCHAIN_DATA_API_MOCK_IMAGE: ghcr.io/malbeclabs/offchain-e2e/data-api-mock:${{ github.sha }}
+
+jobs:
+  setup:
+    runs-on: self-hosted
+    timeout-minutes: 20
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: e2e/go.mod
+          cache: true
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build images
+        working-directory: e2e/
+        run: go run -tags=e2e ./cmd/devnet build -v
+      - name: Push images to registry
+        run: |
+          docker push ${{ env.OFFCHAIN_IMAGE_REPO }}/base:${{ env.OFFCHAIN_IMAGE_TAG }}
+          docker push ${{ env.OFFCHAIN_IMAGE_REPO }}/ledger:${{ env.OFFCHAIN_IMAGE_TAG }}
+          docker push ${{ env.OFFCHAIN_IMAGE_REPO }}/sentinel:${{ env.OFFCHAIN_IMAGE_TAG }}
+          docker push ${{ env.OFFCHAIN_IMAGE_REPO }}/data-api-mock:${{ env.OFFCHAIN_IMAGE_TAG }}
+
+  e2e:
+    needs: setup
+    runs-on: doublezero-k8s-ci
+    timeout-minutes: 15
+    permissions:
+      packages: read
+      contents: read
+    defaults:
+      run:
+        working-directory: e2e/
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: e2e/go.mod
+          cache: true
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull pre-built images
+        run: |
+          pull_with_retry() {
+            local image=$1
+            local max_attempts=3
+            local attempt=1
+            while [ $attempt -le $max_attempts ]; do
+              echo "Pulling $image (attempt $attempt/$max_attempts)"
+              if docker pull "$image"; then
+                return 0
+              fi
+              echo "Pull failed, retrying in 5 seconds..."
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+            echo "Failed to pull $image after $max_attempts attempts"
+            return 1
+          }
+          pull_with_retry ${{ env.OFFCHAIN_IMAGE_REPO }}/base:${{ env.OFFCHAIN_IMAGE_TAG }}
+          pull_with_retry ${{ env.OFFCHAIN_IMAGE_REPO }}/ledger:${{ env.OFFCHAIN_IMAGE_TAG }}
+          pull_with_retry ${{ env.OFFCHAIN_IMAGE_REPO }}/sentinel:${{ env.OFFCHAIN_IMAGE_TAG }}
+          pull_with_retry ${{ env.OFFCHAIN_IMAGE_REPO }}/data-api-mock:${{ env.OFFCHAIN_IMAGE_TAG }}
+      - name: Run e2e tests
+        env:
+          OFFCHAIN_E2E_NO_BUILD: "1"
+        run: go test -tags=e2e -timeout=20m -v -count=1 .
