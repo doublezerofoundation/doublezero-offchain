@@ -88,10 +88,10 @@ impl PriceCommand {
                     .await?;
                 let accounts = dz_connection.get_multiple_accounts(&[device_key]).await?;
                 let mut map = HashMap::new();
-                if let Some(Some(account)) = accounts.first() {
-                    if let Ok(device) = Device::try_from(account.data.as_slice()) {
-                        map.insert(device_key, device);
-                    }
+                if let Some(Some(account)) = accounts.first()
+                    && let Ok(device) = Device::try_from(account.data.as_slice())
+                {
+                    map.insert(device_key, device);
                 }
                 (vec![device_key], map)
             } else {
@@ -167,9 +167,15 @@ impl PriceCommand {
         all_history_keys.extend_from_slice(&dh_keys);
         all_history_keys.extend_from_slice(&mh_keys);
 
-        let (history_accounts, exchange_accounts) = tokio::try_join!(
+        let exchange_fut = async {
+            dz_connection
+                .get_multiple_accounts(&exchange_keys)
+                .await
+                .map_err(Into::into)
+        };
+        let (history_accounts, exchange_accounts): (_, Vec<Option<_>>) = tokio::try_join!(
             connection.try_fetch_multiple_accounts(&all_history_keys),
-            dz_connection.get_multiple_accounts(&exchange_keys),
+            exchange_fut
         )?;
 
         let (dh_data, mh_data) = history_accounts.split_at(dh_keys.len());
