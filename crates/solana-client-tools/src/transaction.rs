@@ -115,8 +115,9 @@ fn trial_transaction_size(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use solana_sdk::{instruction::AccountMeta, pubkey::Pubkey};
+
+    use super::*;
 
     /// Build a fake instruction that mimics InitializeDeviceHistory:
     /// 10 account metas (some shared, some unique per device), ~33 bytes of data.
