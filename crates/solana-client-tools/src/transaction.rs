@@ -186,7 +186,7 @@ mod tests {
         (instructions, vec![payer, oracle])
     }
 
-    /// All batched transactions must fit within 1232 bytes, even after the
+    /// All batched transactions must fit within MAX_TRANSACTION_SIZE, even after the
     /// caller appends a compute unit price instruction.
     fn assert_batches_fit(batches: &[Vec<Instruction>], signers: &[&Keypair], with_price: bool) {
         for (i, batch) in batches.iter().enumerate() {
@@ -197,8 +197,8 @@ mod tests {
             let tx = try_new_transaction(&final_batch, signers, &[], Default::default()).unwrap();
             let size = bincode::serialize(&tx).unwrap().len();
             assert!(
-                size <= 1_232,
-                "batch {i}: {size} bytes exceeds 1232-byte limit"
+                size <= MAX_TRANSACTION_SIZE,
+                "batch {i}: {size} bytes exceeds {MAX_TRANSACTION_SIZE}-byte limit"
             );
         }
     }
