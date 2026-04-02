@@ -74,7 +74,7 @@ impl WithdrawCommand {
         let (client_seat_key, _) = state::find_client_seat_address(&device, client_ip_bits);
         let (escrow_key, _) = state::find_payment_escrow_address(&client_seat_key, &wallet_key);
 
-        // Fetch both the client seat and payment escrow in a single RPC call.
+        // Fetch client seat and payment escrow.
         let accounts = wallet
             .connection
             .get_multiple_accounts(&[client_seat_key, escrow_key])
