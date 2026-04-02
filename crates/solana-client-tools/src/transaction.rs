@@ -63,9 +63,17 @@ pub fn try_batch_instructions_with_common_signers(
             let instruction = last_batch.pop().unwrap();
             let batch_compute_units = last_compute_units - compute_units;
 
-            let mut batch = std::mem::replace(&mut last_batch, vec![instruction]);
+            let batch = std::mem::replace(&mut last_batch, vec![instruction]);
+            if batch.is_empty() {
+                anyhow::bail!(
+                    "single instruction ({trial_size} bytes with compute budget \
+                     and extra instructions) exceeds the {MAX_TRANSACTION_SIZE}-byte \
+                     transaction limit"
+                );
+            }
             // Only append the CU limit instruction; the caller is responsible
             // for appending the price instruction if needed.
+            let mut batch = batch;
             batch.push(ComputeBudgetInstruction::set_compute_unit_limit(
                 batch_compute_units,
             ));
@@ -235,5 +243,77 @@ mod tests {
 
         assert_eq!(batches.len(), 1);
         assert_batches_fit(&batches, &signers, true);
+    }
+
+    #[test]
+    fn test_batching_with_extra_trial_instructions() {
+        let (instructions, keys) = make_ixs(128);
+        let signers: Vec<&Keypair> = keys.iter().collect();
+
+        // A memo instruction similar to what callers actually pass.
+        let memo_program_id: Pubkey = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
+            .parse()
+            .unwrap();
+        let memo_ix = Instruction {
+            program_id: memo_program_id,
+            accounts: vec![AccountMeta::new_readonly(signers[0].pubkey(), true)],
+            data: b"test memo".to_vec(),
+        };
+
+        let batches = try_batch_instructions_with_common_signers(
+            instructions,
+            &signers,
+            &[],
+            true,
+            std::slice::from_ref(&memo_ix),
+        )
+        .expect("batching with memo should succeed");
+
+        assert!(
+            batches.len() > 1,
+            "128 instructions with memo should require multiple batches"
+        );
+
+        // Each batch must still fit when we append the extra instructions
+        // the caller will add at send time (CU price + memo).
+        for (i, batch) in batches.iter().enumerate() {
+            let mut final_batch = batch.clone();
+            final_batch.push(ComputeBudgetInstruction::set_compute_unit_price(1_000));
+            final_batch.push(memo_ix.clone());
+            let tx = try_new_transaction(&final_batch, &signers, &[], Default::default()).unwrap();
+            let size = bincode::serialize(&tx).unwrap().len();
+            assert!(
+                size <= MAX_TRANSACTION_SIZE,
+                "batch {i}: {size} bytes exceeds {MAX_TRANSACTION_SIZE}-byte limit"
+            );
+        }
+    }
+
+    #[test]
+    fn test_batching_oversized_single_instruction_errors() {
+        let payer = Keypair::new();
+        let signers: Vec<&Keypair> = vec![&payer];
+
+        // Craft an instruction with enough data to exceed MAX_TRANSACTION_SIZE on its own.
+        let oversized_ix = Instruction {
+            program_id: Pubkey::new_unique(),
+            accounts: vec![AccountMeta::new(payer.pubkey(), true)],
+            data: vec![0u8; MAX_TRANSACTION_SIZE],
+        };
+
+        let result = try_batch_instructions_with_common_signers(
+            vec![(oversized_ix, 100_000)],
+            &signers,
+            &[],
+            true,
+            &[],
+        );
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("single instruction"),
+            "expected oversized-instruction error, got: {err_msg}"
+        );
     }
 }
