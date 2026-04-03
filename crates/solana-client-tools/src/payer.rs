@@ -47,7 +47,13 @@ pub struct SolanaSignerOptions {
     pub with_compute_unit_price: Option<u64>,
 
     /// Print verbose output.
-    #[arg(long, short = 'v', value_name = "VERBOSE", default_value = "false", env)]
+    #[arg(
+        long,
+        short = 'v',
+        value_name = "VERBOSE",
+        default_value = "false",
+        env
+    )]
     pub verbose: bool,
 
     /// Filepath or URL to keypair to pay transaction fee.
