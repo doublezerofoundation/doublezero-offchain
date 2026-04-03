@@ -119,6 +119,9 @@ pub struct PayCommand {
     /// Shred oracle pubkey (auto-detected from network; override for local dev)
     #[arg(long, hide = true)]
     shred_oracle_key: Option<Pubkey>,
+    /// Serviceability program ID for the multicast user guard (auto-detected; override for e2e)
+    #[arg(long, hide = true)]
+    serviceability_program_id: Option<Pubkey>,
 
     #[command(flatten)]
     solana_payer_options: SolanaPayerOptions,
@@ -154,7 +157,11 @@ impl PayCommand {
         // serviceability owned by a *different* authority, the shred oracle will
         // fail at create_subscribe_user (the User PDA is derived from IP alone).
         // If the user is owned by the shred oracle, this is a top-up or re-sub.
-        if let Ok(svc_program_id) = serviceability_program_id(network_env) {
+        let svc_program_id_result = match self.serviceability_program_id {
+            Some(id) => Ok(id),
+            None => serviceability_program_id(network_env),
+        };
+        if let Ok(svc_program_id) = svc_program_id_result {
             let oracle_key = self
                 .shred_oracle_key
                 .or_else(|| super::shred_oracle_key(network_env));
