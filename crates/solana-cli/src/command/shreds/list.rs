@@ -28,10 +28,11 @@ pub struct ListCommand {
     #[command(flatten)]
     device_args: super::DeviceArgs,
 
-    /// Filter seats by funder public key. When omitted, defaults to the
-    /// keypair's public key (use --all to show every seat instead).
-    #[arg(long)]
-    funder: Option<Pubkey>,
+    /// Filter seats by funder (withdraw authority). Accepts a public key or a
+    /// path to a keypair file. When omitted, defaults to the default keypair's
+    /// public key (use --all to show every seat instead).
+    #[arg(long, short = 'k')]
+    funder: Option<String>,
 
     /// Filter seats by client IPv4 address.
     #[arg(long)]
@@ -40,10 +41,6 @@ pub struct ListCommand {
     /// Show all seats regardless of funder.
     #[arg(long)]
     all: bool,
-
-    /// Filepath or URL to a keypair. Used to derive the default funder filter.
-    #[arg(long = "keypair", short = 'k', value_name = "KEYPAIR")]
-    keypair_path: Option<String>,
 
     #[command(flatten)]
     connection_options: SolanaConnectionOptions,
@@ -129,11 +126,15 @@ impl ListCommand {
             .collect();
 
         // Resolve the funder (withdraw authority) filter.
-        let funder: Option<Pubkey> = if let Some(funder) = self.funder {
-            Some(funder)
+        let funder: Option<Pubkey> = if let Some(ref funder_str) = self.funder {
+            if let Ok(pubkey) = funder_str.parse::<Pubkey>() {
+                Some(pubkey)
+            } else {
+                let keypair = try_load_keypair(Some(funder_str.into()))?;
+                Some(keypair.pubkey())
+            }
         } else if !self.all {
-            let keypair =
-                try_load_keypair(self.keypair_path.map(Into::into)).map_err(anyhow::Error::from)?;
+            let keypair = try_load_keypair(None)?;
             Some(keypair.pubkey())
         } else {
             None
