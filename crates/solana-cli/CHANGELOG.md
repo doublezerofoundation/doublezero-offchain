@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - `shreds pay`: block duplicate client IP across devices — prevent creating a seat for an IP that already has an active seat on a different device
+- `shreds pay`: close race window in duplicate IP guard by checking for in-flight instant allocation requests
 - `shreds validator-client-rewards`: add hidden command to set validator client rewards proportion
 
 ## [0.5.0](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/doublezero-solana/v0.5.0)

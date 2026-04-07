@@ -96,27 +96,32 @@ fn epoch_warning_prompt(input: &EpochWarningInput) -> Option<String> {
     ))
 }
 
-/// Given raw account data from a `getProgramAccounts` query filtered by
-/// client IP, return the device keys of any **active** seats that are NOT on
-/// `target_device`. Withdrawn seats (`tenure_epochs == 0`) are excluded
-/// because they will never win an auction and are harmless — blocking on
-/// them would prevent users from migrating an IP to a new device after
-/// withdrawal. An empty vec means no conflict.
-fn other_device_keys_for_ip(
+/// Partition seats on other devices into active (tenure > 0) and pending
+/// (tenure == 0). Active seats are definite conflicts. Pending seats need
+/// an additional check for an `InstantSeatAllocationRequest` PDA to
+/// distinguish in-flight allocations (should block) from withdrawn/dead
+/// seats (should allow).
+fn partition_other_device_seats(
     accounts: &[(Pubkey, solana_sdk::account::Account)],
     target_device: &Pubkey,
-) -> Vec<Pubkey> {
-    accounts
-        .iter()
-        .filter_map(|(_, account)| {
-            let (device_key, _, tenure_epochs, _, _) = state::parse_client_seat(&account.data)?;
-            if device_key != *target_device && tenure_epochs > 0 {
-                Some(device_key)
-            } else {
-                None
+) -> (Vec<Pubkey>, Vec<(Pubkey, u32)>) {
+    let mut active = Vec::new();
+    let mut pending = Vec::new();
+    for (_, account) in accounts {
+        if let Some((device_key, client_ip, tenure_epochs, _, _)) =
+            state::parse_client_seat(&account.data)
+        {
+            if device_key == *target_device {
+                continue;
             }
-        })
-        .collect()
+            if tenure_epochs > 0 {
+                active.push(device_key);
+            } else {
+                pending.push((device_key, u32::from(client_ip)));
+            }
+        }
+    }
+    (active, pending)
 }
 
 /*
@@ -260,10 +265,33 @@ impl PayCommand {
             .get_program_accounts_with_config(&ID, config)
             .await?;
 
-        let other_device_keys = other_device_keys_for_ip(&existing_seats, &device);
+        let (mut conflicting_devices, pending_seats) =
+            partition_other_device_seats(&existing_seats, &device);
 
-        if !other_device_keys.is_empty() {
-            let device_list = other_device_keys
+        // For pending seats (tenure == 0 on another device), check whether an
+        // InstantSeatAllocationRequest PDA exists. If it does, the seat is
+        // in-flight (just paid, waiting for oracle) and should block. If not,
+        // the seat was withdrawn and is safe to ignore.
+        if !pending_seats.is_empty() {
+            let request_keys: Vec<Pubkey> = pending_seats
+                .iter()
+                .map(|(device_key, ip_bits)| {
+                    state::find_instant_allocation_request_address(device_key, *ip_bits).0
+                })
+                .collect();
+            let request_accounts = wallet
+                .connection
+                .get_multiple_accounts(&request_keys)
+                .await?;
+            for (i, account) in request_accounts.iter().enumerate() {
+                if account.is_some() {
+                    conflicting_devices.push(pending_seats[i].0);
+                }
+            }
+        }
+
+        if !conflicting_devices.is_empty() {
+            let device_list = conflicting_devices
                 .iter()
                 .map(|k| k.to_string())
                 .collect::<Vec<_>>()
@@ -874,7 +902,7 @@ mod tests {
         assert!(!is_seat_already_active(Some(&short_data)));
     }
 
-    // --- other_device_keys_for_ip tests ---
+    // --- partition_other_device_seats tests ---
 
     /// Build a minimal ClientSeat byte buffer with the given device key and
     /// tenure_epochs value.
@@ -891,41 +919,46 @@ mod tests {
     #[test]
     fn no_conflict_when_no_seats() {
         let target = Pubkey::new_unique();
-        assert!(other_device_keys_for_ip(&[], &target).is_empty());
+        let (active, pending) = partition_other_device_seats(&[], &target);
+        assert!(active.is_empty());
+        assert!(pending.is_empty());
     }
 
     #[test]
     fn no_conflict_when_only_same_device() {
         let target = Pubkey::new_unique();
         let accounts = vec![(Pubkey::new_unique(), make_seat_with_device(&target, 1))];
-        assert!(other_device_keys_for_ip(&accounts, &target).is_empty());
+        let (active, pending) = partition_other_device_seats(&accounts, &target);
+        assert!(active.is_empty());
+        assert!(pending.is_empty());
     }
 
     #[test]
-    fn conflict_when_different_device() {
+    fn active_seat_on_different_device() {
         let target = Pubkey::new_unique();
         let other = Pubkey::new_unique();
         let accounts = vec![(Pubkey::new_unique(), make_seat_with_device(&other, 1))];
-        let result = other_device_keys_for_ip(&accounts, &target);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], other);
+        let (active, pending) = partition_other_device_seats(&accounts, &target);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0], other);
+        assert!(pending.is_empty());
     }
 
     #[test]
-    fn conflict_filters_out_target_device() {
+    fn active_seat_filters_out_target_device() {
         let target = Pubkey::new_unique();
         let other = Pubkey::new_unique();
         let accounts = vec![
             (Pubkey::new_unique(), make_seat_with_device(&target, 1)),
             (Pubkey::new_unique(), make_seat_with_device(&other, 1)),
         ];
-        let result = other_device_keys_for_ip(&accounts, &target);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0], other);
+        let (active, _pending) = partition_other_device_seats(&accounts, &target);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0], other);
     }
 
     #[test]
-    fn conflict_multiple_other_devices() {
+    fn multiple_active_seats_on_other_devices() {
         let target = Pubkey::new_unique();
         let other1 = Pubkey::new_unique();
         let other2 = Pubkey::new_unique();
@@ -933,15 +966,41 @@ mod tests {
             (Pubkey::new_unique(), make_seat_with_device(&other1, 1)),
             (Pubkey::new_unique(), make_seat_with_device(&other2, 1)),
         ];
-        let result = other_device_keys_for_ip(&accounts, &target);
-        assert_eq!(result.len(), 2);
+        let (active, pending) = partition_other_device_seats(&accounts, &target);
+        assert_eq!(active.len(), 2);
+        assert!(pending.is_empty());
     }
 
     #[test]
-    fn no_conflict_when_other_device_seat_withdrawn() {
+    fn withdrawn_seat_goes_to_pending() {
         let target = Pubkey::new_unique();
         let other = Pubkey::new_unique();
         let accounts = vec![(Pubkey::new_unique(), make_seat_with_device(&other, 0))];
-        assert!(other_device_keys_for_ip(&accounts, &target).is_empty());
+        let (active, pending) = partition_other_device_seats(&accounts, &target);
+        assert!(active.is_empty());
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, other);
+    }
+
+    #[test]
+    fn mixed_active_and_pending() {
+        let target = Pubkey::new_unique();
+        let active_device = Pubkey::new_unique();
+        let pending_device = Pubkey::new_unique();
+        let accounts = vec![
+            (
+                Pubkey::new_unique(),
+                make_seat_with_device(&active_device, 1),
+            ),
+            (
+                Pubkey::new_unique(),
+                make_seat_with_device(&pending_device, 0),
+            ),
+        ];
+        let (active, pending) = partition_other_device_seats(&accounts, &target);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0], active_device);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].0, pending_device);
     }
 }
