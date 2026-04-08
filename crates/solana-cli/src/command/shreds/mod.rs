@@ -135,8 +135,9 @@ pub(super) fn shred_oracle_key(env: NetworkEnvironment) -> Option<Pubkey> {
 /// Handles version strings like "0.5.0" or "0.5.0-rc1" by only considering
 /// the first three numeric components.
 fn cli_version() -> (u32, u32, u32) {
-    let version_str =
-        option_env!("BUILD_VERSION").unwrap_or(env!("CARGO_PKG_VERSION")).trim_start_matches('v');
+    let version_str = option_env!("BUILD_VERSION")
+        .unwrap_or(env!("CARGO_PKG_VERSION"))
+        .trim_start_matches('v');
     let mut parts = version_str.split('.');
     let major = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let minor = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
