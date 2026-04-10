@@ -100,10 +100,11 @@ impl ValidatorDepositCommand {
         let wallet = Wallet::try_from(solana_payer_options)?;
         let wallet_key = wallet.pubkey();
 
+        let exclusive_flag_count = u8::from(should_withdraw_excess_balance)
+            + u8::from(should_fund_outstanding_debt)
+            + u8::from(fund_amount_str.is_some());
         ensure!(
-            !should_withdraw_excess_balance
-                || !should_fund_outstanding_debt
-                || fund_amount_str.is_none(),
+            exclusive_flag_count <= 1,
             "Cannot use --withdraw-excess-balance, --fund-outstanding-debt or --fund together"
         );
 
