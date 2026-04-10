@@ -195,7 +195,6 @@ async fn try_print_validator_debts_outstanding_table(
         );
 
         if excess_mode {
-            // TODO: Strictly greater than?
             if total_debt >= deposit_balance {
                 continue;
             }
