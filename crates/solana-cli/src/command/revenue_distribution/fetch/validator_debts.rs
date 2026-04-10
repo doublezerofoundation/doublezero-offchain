@@ -130,7 +130,7 @@ async fn try_print_validator_debts_outstanding_table(
     let deposit_balances = deposit_account_infos
         .iter()
         .map(|account_info| {
-            doublezero_solana_client_tools::account::balance(&account_info, &rent_sysvar)
+            doublezero_solana_client_tools::account::balance(account_info, &rent_sysvar)
         })
         .collect::<Vec<_>>();
 

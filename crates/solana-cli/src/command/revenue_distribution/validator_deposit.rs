@@ -103,7 +103,7 @@ impl ValidatorDepositCommand {
         ensure!(
             !should_withdraw_excess_balance
                 || !should_fund_outstanding_debt
-                || !fund_amount_str.is_some(),
+                || fund_amount_str.is_none(),
             "Cannot use --withdraw-excess-balance, --fund-outstanding-debt or --fund together"
         );
 
