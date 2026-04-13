@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use anyhow::{Result, ensure};
 use doublezero_solana_client_tools::{
     account::zero_copy::ZeroCopyAccountOwnedData,
@@ -43,6 +45,17 @@ pub enum DistributionOutcome {
     },
 }
 
+/// Status of a contributor in a distribution attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContributorStatus {
+    /// Already distributed before this run.
+    Existing,
+    /// Newly distributed by this run.
+    New,
+    /// Attempted but skipped (missing account, simulation failure, etc.).
+    Skipped,
+}
+
 /// Per-contributor result from a distribution attempt.
 #[derive(Debug)]
 pub struct ContributorDistributionResult {
@@ -52,8 +65,8 @@ pub struct ContributorDistributionResult {
     pub proportion: f64,
     /// Human-readable 2Z amount (already divided by decimals)
     pub reward_tokens: f64,
-    /// Whether this leaf is processed (includes both pre-existing and newly distributed)
-    pub distributed: bool,
+    /// Outcome for this contributor in the current run.
+    pub status: ContributorStatus,
 }
 
 /// Full summary of a distribution attempt.
@@ -71,6 +84,7 @@ pub async fn try_distribute_epoch_rewards(
     rewards_accountant_key: &Pubkey,
     dz_epoch_value: u64,
     shapley_prefix: &[u8],
+    skip_failures: bool,
 ) -> Result<DistributionSummary> {
     // Fetch the distribution for this epoch.
     let (_, distribution) = try_fetch_distribution(&wallet.connection, dz_epoch_value).await?;
@@ -128,6 +142,7 @@ pub async fn try_distribute_epoch_rewards(
 
     let mut distributed_count = 0u32;
     let mut skipped_count = 0u32;
+    let mut leaf_outcomes: HashMap<usize, ContributorStatus> = HashMap::new();
 
     for (leaf_index, reward_share, is_processed) in
         try_distribution_rewards_iter(&distribution, &shapley_output)?
@@ -141,7 +156,7 @@ pub async fn try_distribute_epoch_rewards(
             dz_epoch_value, leaf_index, reward_share.contributor_key
         );
 
-        let was_distributed = try_distribute_contributor_rewards(
+        let was_distributed = match try_distribute_contributor_rewards(
             wallet,
             &dz_mint_key,
             &distribution,
@@ -149,12 +164,25 @@ pub async fn try_distribute_epoch_rewards(
             leaf_index,
             reward_share,
         )
-        .await?;
+        .await
+        {
+            Ok(distributed) => distributed,
+            Err(e) if skip_failures => {
+                warn!(
+                    "Skipping epoch {dz_epoch_value} leaf {leaf_index}, contributor {}: {e}",
+                    reward_share.contributor_key
+                );
+                false
+            }
+            Err(e) => return Err(e),
+        };
 
         if was_distributed {
             distributed_count += 1;
+            leaf_outcomes.insert(leaf_index, ContributorStatus::New);
         } else {
             skipped_count += 1;
+            leaf_outcomes.insert(leaf_index, ContributorStatus::Skipped);
         }
     }
 
@@ -190,7 +218,14 @@ pub async fn try_distribute_epoch_rewards(
                 contributor_key: reward_share.contributor_key,
                 proportion,
                 reward_tokens,
-                distributed: is_processed,
+                status: if is_processed {
+                    ContributorStatus::Existing
+                } else {
+                    leaf_outcomes
+                        .get(&index)
+                        .copied()
+                        .unwrap_or(ContributorStatus::Skipped)
+                },
             }
         })
         .collect();

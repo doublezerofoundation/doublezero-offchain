@@ -299,6 +299,7 @@ impl ScheduleWorker {
             rewards_accountant_key,
             dz_epoch_value,
             &shapley_prefix,
+            false,
         )
         .await
     }
@@ -347,7 +348,12 @@ impl ScheduleWorker {
                     contributor,
                     proportion: format!("{:.2}%", 100.0 * c.proportion),
                     reward: format!("{:.1} 2Z", c.reward_tokens),
-                    distributed: if c.distributed { "yes" } else { "no" }.to_string(),
+                    distributed: match c.status {
+                        distribute::ContributorStatus::Existing
+                        | distribute::ContributorStatus::New => "yes",
+                        distribute::ContributorStatus::Skipped => "no",
+                    }
+                    .to_string(),
                 }
             })
             .collect();
