@@ -99,9 +99,9 @@ impl WithdrawCommand {
         // (or --funds-only) skip the request and just close the payment escrow.
         let request_instant_withdrawal = has_active_service && !self.funds_only;
 
-        if !has_active_service && !escrow_exists {
+        if !request_instant_withdrawal && !escrow_exists {
             bail!(
-                "Client seat {client_seat_key} does not have active service and no payment escrow exists"
+                "Client seat {client_seat_key} has no payment escrow to close and no active service to withdraw"
             );
         }
 
