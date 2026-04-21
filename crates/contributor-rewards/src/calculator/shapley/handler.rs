@@ -12,9 +12,7 @@ use tabled::{Table, Tabled, settings::Style};
 use tracing::{debug, info};
 
 use crate::{
-    calculator::constants::{
-        BANDWIDTH_PER_SUBSCRIBER_SEAT_MBPS, BPS_TO_MBPS, FALLBACK_EDGE_BANDWIDTH_MBPS, SEC_TO_MS,
-    },
+    calculator::constants::{BPS_TO_MBPS, FALLBACK_EDGE_BANDWIDTH_MBPS, SEC_TO_MS},
     ingestor::{demand, fetcher::Fetcher, types::FetchData},
     processor::{
         internet::InternetTelemetryStatMap, telemetry::DZDTelemetryStatMap, util::quantile_r_type7,
@@ -174,8 +172,8 @@ pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devic
         _contributor_pk,
         city_code,
         owner,
-        max_mcast_subs,
-        actual_mcast_subs,
+        _max_mcast_subs,
+        _actual_mcast_subs,
         interface_bw_bps,
     ) in device_data
     {
@@ -195,18 +193,20 @@ pub fn build_devices(fetch_data: &FetchData, network: &Network) -> Result<(Devic
             interface_bw_bps as f64 / BPS_TO_MBPS as f64
         };
 
+        // TODO: Revisit this when we have some fidelity on subscriber count number universally
+
         // Use max(actual_subscribers, max_subscribers) as the subscriber count for
         // edge capacity. Many devices on-chain have max_multicast_subscribers = 0
         // but are actively serving subscribers (multicast_subscribers_count > 0).
         // This fallback ensures those devices get appropriate edge capacity
         // until the on-chain max values are corrected.
-        let effective_subs = max_mcast_subs.max(actual_mcast_subs);
-        let permitted_capacity_mbps = effective_subs as f64 * BANDWIDTH_PER_SUBSCRIBER_SEAT_MBPS;
-        let edge_mbps = actual_bandwidth_mbps.min(permitted_capacity_mbps);
+        // let effective_subs = max_mcast_subs.max(actual_mcast_subs);
+        // let permitted_capacity_mbps = effective_subs as f64 * BANDWIDTH_PER_SUBSCRIBER_SEAT_MBPS;
+        // let edge_mbps = actual_bandwidth_mbps.min(permitted_capacity_mbps);
 
         devices.push(Device {
             device: shapley_id,
-            edge: edge_mbps as u32,
+            edge: actual_bandwidth_mbps as u32,
             operator: owner,
         });
     }
