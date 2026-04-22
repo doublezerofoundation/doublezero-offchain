@@ -1371,7 +1371,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
 dependencies = [
  "borsh-derive 0.10.4",
- "hashbrown 0.13.2",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -2350,8 +2350,8 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "doublezero-config"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "eyre",
  "serde",
@@ -2414,8 +2414,8 @@ dependencies = [
 
 [[package]]
 name = "doublezero-geolocation"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "borsh 1.5.7",
  "borsh-incremental",
@@ -2445,6 +2445,7 @@ dependencies = [
  "doublezero-program-tools",
  "doublezero-record",
  "doublezero-revenue-distribution",
+ "doublezero-sentinel",
  "doublezero-serviceability",
  "doublezero_sdk",
  "metrics",
@@ -2462,7 +2463,7 @@ dependencies = [
  "solana-transaction-status-client-types",
  "spl-associated-token-account-interface",
  "spl-token-interface",
- "strum",
+ "strum 0.27.2",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
@@ -2505,8 +2506,8 @@ dependencies = [
 
 [[package]]
 name = "doublezero-program-common"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "borsh 1.5.7",
  "byteorder",
@@ -2541,8 +2542,8 @@ dependencies = [
 
 [[package]]
 name = "doublezero-record"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "bytemuck",
  "solana-program",
@@ -2600,9 +2601,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "doublezero-sentinel"
+version = "0.0.1"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "backon",
+ "borsh 1.5.7",
+ "clap",
+ "doublezero-config",
+ "doublezero-serviceability",
+ "doublezero-telemetry",
+ "doublezero_sdk",
+ "metrics",
+ "metrics-exporter-prometheus",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "solana-account-decoder",
+ "solana-client",
+ "solana-sdk",
+ "strum 0.26.3",
+ "strum_macros 0.26.4",
+ "tabled",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "doublezero-serviceability"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "bitflags",
  "borsh 1.5.7",
@@ -2807,8 +2841,8 @@ dependencies = [
 
 [[package]]
 name = "doublezero-telemetry"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "borsh 1.5.7",
  "borsh-incremental",
@@ -2822,8 +2856,8 @@ dependencies = [
 
 [[package]]
 name = "doublezero_sdk"
-version = "0.10.0"
-source = "git+https://github.com/malbeclabs/doublezero?rev=f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787#f6698ab6bd7f7ed24878eb3af5d2a22bae2c8787"
+version = "0.18.0"
+source = "git+https://github.com/malbeclabs/doublezero?rev=ebd28bdf0245724615d2699e0c8d85aec784f2b4#ebd28bdf0245724615d2699e0c8d85aec784f2b4"
 dependencies = [
  "async-trait",
  "backon",
@@ -4605,7 +4639,7 @@ dependencies = [
 [[package]]
 name = "network-shapley"
 version = "0.1.0"
-source = "git+https://github.com/doublezerofoundation/network-shapley-rs?tag=v0.5.0#932b40eba7b13ca1310be351eb2d71b3e3107538"
+source = "git+https://github.com/doublezerofoundation/network-shapley-rs?tag=v0.4.0#579d07d9cdde98a055d8b7c51fb46ab2fd9cb935"
 dependencies = [
  "borsh 1.5.7",
  "csv",
@@ -9160,11 +9194,30 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "strum"
+version = "0.26.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
+
+[[package]]
+name = "strum"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.27.2",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.110",
 ]
 
 [[package]]

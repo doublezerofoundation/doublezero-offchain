@@ -6,6 +6,7 @@ use doublezero_ledger_sentinel::{
     settings::{AppArgs, Settings},
 };
 use doublezero_revenue_distribution::state::Journal;
+use doublezero_sentinel::multicast_publisher::MulticastPublisherSentinel;
 use metrics_exporter_prometheus::PrometheusBuilder;
 use solana_sdk::signer::Signer;
 use spl_associated_token_account_interface::address::get_associated_token_address;
@@ -55,6 +56,23 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let multicast_publisher_sentinel = if args.multicast_autoconnect_enabled {
+        info!("multicast autoconnect enabled");
+        Some(MulticastPublisherSentinel::new(
+            dz_rpc_url.clone(),
+            sol_rpc_url.clone(),
+            keypair.clone(),
+            serviceability_id,
+            multicast_group_pubkeys.clone(),
+            settings.multicast_client_filter.clone(),
+            settings.multicast_validator_metadata_url.clone(),
+            args.multicast_publisher_poll_interval,
+        ))
+    } else {
+        info!("multicast autoconnect disabled");
+        None
+    };
+
     let mut polling_sentinel = PollingSentinel::new(
         dz_rpc_url.clone(),
         sol_rpc_url.clone(),
@@ -99,6 +117,16 @@ async fn main() -> anyhow::Result<()> {
         result = billing_sentinel.run(shutdown_listener.clone()) => {
             if let Err(err) = result {
                 error!(?err, "billing sentinel exited with error");
+            }
+        },
+        result = async {
+            match multicast_publisher_sentinel {
+                Some(s) => s.run(shutdown_listener.clone()).await,
+                None => std::future::pending().await,
+            }
+        } => {
+            if let Err(err) = result {
+                error!(?err, "multicast publisher sentinel exited with error");
             }
         }
     }

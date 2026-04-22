@@ -41,6 +41,15 @@ pub struct AppArgs {
     /// Default: 1 (any nonzero balance = paid).
     #[arg(long)]
     pub minimum_balance: Option<u64>,
+
+    /// Polling interval in seconds for the multicast publisher sentinel.
+    #[arg(long, default_value = "300")]
+    pub multicast_publisher_poll_interval: u64,
+
+    /// Enable automatic subscription of validators to multicast publisher groups.
+    /// Disabled by default.
+    #[arg(long, default_value = "false")]
+    pub multicast_autoconnect_enabled: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -70,6 +79,17 @@ pub struct Settings {
     /// validator onboarding. When empty (default), allowlisting is disabled.
     #[serde(default)]
     multicast_group_pubkeys: Option<String>,
+
+    /// Only create multicast publishers for validators whose software client
+    /// name matches any of these substrings (case-insensitive). Requires
+    /// `multicast_validator_metadata_url` to be set. Empty disables filtering.
+    #[serde(default = "default_multicast_client_filter")]
+    pub multicast_client_filter: Vec<String>,
+
+    /// URL of the validator metadata service used to look up software client
+    /// names for multicast publisher filtering.
+    #[serde(default)]
+    pub multicast_validator_metadata_url: Option<String>,
 }
 
 impl Settings {
@@ -177,6 +197,8 @@ fn settings_with_mcast_pubkeys(pubkeys: Option<&str>) -> Settings {
         keypair: "/dev/null".into(),
         metrics_addr: default_metrics_addr(),
         multicast_group_pubkeys: pubkeys.map(String::from),
+        multicast_client_filter: default_multicast_client_filter(),
+        multicast_validator_metadata_url: None,
     }
 }
 
@@ -186,6 +208,10 @@ fn default_log() -> String {
 
 fn default_metrics_addr() -> String {
     "127.0.0.1:2112".to_string()
+}
+
+fn default_multicast_client_filter() -> Vec<String> {
+    vec!["JitoLabs".to_string(), "AgaveBam".to_string()]
 }
 
 #[cfg(test)]
