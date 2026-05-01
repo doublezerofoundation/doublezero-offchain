@@ -4,6 +4,19 @@ use std::io;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use doublezero_program_tools::{DISCRIMINATOR_LEN, Discriminator};
+use solana_sdk::pubkey::Pubkey;
+
+/// Envelope for an offchain authorization produced by a validator operator
+/// via `solana sign-offchain-message`. Carries the ed25519 signature plus
+/// the cluster slot after which the authorization is no longer valid.
+///
+/// Wire-compatible with `ValidatorOffchainAuthorization` in the onchain
+/// program — Borsh-serialized in the same field order.
+#[derive(Debug, Clone, PartialEq, Eq, BorshDeserialize, BorshSerialize)]
+pub struct ValidatorOffchainAuthorization {
+    pub deadline_slot: u64,
+    pub signature: [u8; 64],
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShredSubscriptionInstructionData {
@@ -25,6 +38,27 @@ pub enum ShredSubscriptionInstructionData {
     RequestProratedInstantSeatWithdrawal,
     /// Set the rewards proportion for a validator client.
     SetValidatorClientRewardsProportion(u16),
+    /// Initialize the validator publisher rewards account for a node. Anyone
+    /// can call this; the account is created with the canonical 2Z mint as
+    /// the default reward token. Use `ConfigureValidatorPublisherRewards` to
+    /// set the destination owner and (optionally) switch the mint.
+    InitializeValidatorPublisherRewards { node_id: Pubkey },
+    /// Set the reward token destination owner and mint on a previously
+    /// initialized validator publisher rewards account. The mint is read
+    /// from the `ShredRewardToken` account passed in, not from this struct;
+    /// only protocol-registered mints are accepted.
+    ///
+    /// Authorization takes one of two forms:
+    /// - `offchain_authorization = Some(_)`: the validator identity signed
+    ///   the canonical authorization message via
+    ///   `solana sign-offchain-message`. The transaction does not need the
+    ///   node identity as a Solana signer.
+    /// - `offchain_authorization = None`: the validator identity must be a
+    ///   Solana signer on the transaction.
+    ConfigureValidatorPublisherRewards {
+        rewards_token_owner_key: Pubkey,
+        offchain_authorization: Option<ValidatorOffchainAuthorization>,
+    },
     /// Validates the provided CLI version against the onchain minimum.
     CheckCliVersion { major: u32, minor: u32, patch: u32 },
 }
@@ -46,6 +80,10 @@ impl ShredSubscriptionInstructionData {
         Discriminator::new_sha2(b"dz::ix::request_prorated_instant_seat_withdrawal");
     pub const SET_VALIDATOR_CLIENT_REWARDS_PROPORTION: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::set_validator_client_rewards_proportion");
+    pub const INITIALIZE_VALIDATOR_PUBLISHER_REWARDS: Discriminator<DISCRIMINATOR_LEN> =
+        Discriminator::new_sha2(b"dz::ix::initialize_validator_publisher_rewards");
+    pub const CONFIGURE_VALIDATOR_PUBLISHER_REWARDS: Discriminator<DISCRIMINATOR_LEN> =
+        Discriminator::new_sha2(b"dz::ix::configure_validator_publisher_rewards");
     pub const CHECK_CLI_VERSION: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::check_cli_version");
 }
@@ -75,6 +113,18 @@ impl BorshSerialize for ShredSubscriptionInstructionData {
             Self::SetValidatorClientRewardsProportion(proportion) => {
                 Self::SET_VALIDATOR_CLIENT_REWARDS_PROPORTION.serialize(writer)?;
                 proportion.serialize(writer)
+            }
+            Self::InitializeValidatorPublisherRewards { node_id } => {
+                Self::INITIALIZE_VALIDATOR_PUBLISHER_REWARDS.serialize(writer)?;
+                node_id.serialize(writer)
+            }
+            Self::ConfigureValidatorPublisherRewards {
+                rewards_token_owner_key,
+                offchain_authorization,
+            } => {
+                Self::CONFIGURE_VALIDATOR_PUBLISHER_REWARDS.serialize(writer)?;
+                rewards_token_owner_key.serialize(writer)?;
+                offchain_authorization.serialize(writer)
             }
             Self::CheckCliVersion {
                 major,
@@ -111,6 +161,19 @@ impl BorshDeserialize for ShredSubscriptionInstructionData {
             Self::SET_VALIDATOR_CLIENT_REWARDS_PROPORTION => {
                 let proportion = u16::deserialize_reader(reader)?;
                 Ok(Self::SetValidatorClientRewardsProportion(proportion))
+            }
+            Self::INITIALIZE_VALIDATOR_PUBLISHER_REWARDS => {
+                let node_id = Pubkey::deserialize_reader(reader)?;
+                Ok(Self::InitializeValidatorPublisherRewards { node_id })
+            }
+            Self::CONFIGURE_VALIDATOR_PUBLISHER_REWARDS => {
+                let rewards_token_owner_key = Pubkey::deserialize_reader(reader)?;
+                let offchain_authorization =
+                    Option::<ValidatorOffchainAuthorization>::deserialize_reader(reader)?;
+                Ok(Self::ConfigureValidatorPublisherRewards {
+                    rewards_token_owner_key,
+                    offchain_authorization,
+                })
             }
             Self::CHECK_CLI_VERSION => {
                 let major = u32::deserialize_reader(reader)?;

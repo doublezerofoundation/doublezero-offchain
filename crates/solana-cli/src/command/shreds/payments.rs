@@ -216,6 +216,12 @@ impl PaymentsCommand {
                             | ShredSubscriptionInstructionData::SetValidatorClientRewardsProportion(
                                 _,
                             )
+                            | ShredSubscriptionInstructionData::InitializeValidatorPublisherRewards {
+                                ..
+                            }
+                            | ShredSubscriptionInstructionData::ConfigureValidatorPublisherRewards {
+                                ..
+                            }
                             | ShredSubscriptionInstructionData::CheckCliVersion { .. },
                         ) => {}
                         // TODO: oracle instructions (BatchAllocateSeats,

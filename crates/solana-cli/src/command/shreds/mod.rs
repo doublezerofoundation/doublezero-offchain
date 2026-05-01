@@ -1,3 +1,4 @@
+pub mod configure_validator_publisher_rewards;
 pub mod list;
 pub mod pay;
 pub mod payments;
@@ -53,6 +54,11 @@ pub enum ShredsSubcommand {
     /// Set the rewards proportion for a validator client.
     #[command(hide = true)]
     ValidatorClientRewards(validator_client_rewards::ValidatorClientRewardsCommand),
+    /// Configure the rewards-token destination owner and preferred mint for a
+    /// validator publisher (auto-initializes the account if needed).
+    ConfigureValidatorPublisherRewards(
+        configure_validator_publisher_rewards::ConfigureValidatorPublisherRewardsCommand,
+    ),
 }
 
 impl ShredsSubcommand {
@@ -64,6 +70,7 @@ impl ShredsSubcommand {
             Self::Payments(command) => command.try_into_execute(dz_ledger_url).await,
             Self::Price(command) => command.try_into_execute(dz_ledger_url).await,
             Self::ValidatorClientRewards(command) => command.try_into_execute().await,
+            Self::ConfigureValidatorPublisherRewards(command) => command.try_into_execute().await,
         }
     }
 }

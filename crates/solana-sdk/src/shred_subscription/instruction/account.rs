@@ -337,6 +337,76 @@ impl From<SetValidatorClientRewardsProportionAccounts> for Vec<AccountMeta> {
     }
 }
 
+/// Accounts for the `InitializeValidatorPublisherRewards` instruction (3 accounts).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitializeValidatorPublisherRewardsAccounts {
+    pub payer_key: Pubkey,
+    pub new_validator_publisher_rewards_key: Pubkey,
+}
+
+impl InitializeValidatorPublisherRewardsAccounts {
+    pub fn new(payer_key: &Pubkey, node_id: &Pubkey) -> Self {
+        Self {
+            payer_key: *payer_key,
+            new_validator_publisher_rewards_key: state::find_validator_publisher_rewards_address(
+                node_id,
+            )
+            .0,
+        }
+    }
+}
+
+impl From<InitializeValidatorPublisherRewardsAccounts> for Vec<AccountMeta> {
+    fn from(accounts: InitializeValidatorPublisherRewardsAccounts) -> Self {
+        vec![
+            AccountMeta::new(accounts.payer_key, true),
+            AccountMeta::new(accounts.new_validator_publisher_rewards_key, false),
+            AccountMeta::new_readonly(solana_sdk::system_program::ID, false),
+        ]
+    }
+}
+
+/// Accounts for the `ConfigureValidatorPublisherRewards` instruction (4 accounts).
+///
+/// `is_node_signer` controls whether the validator node identity signs the
+/// Solana transaction directly. Set `true` for the direct-signer path; set
+/// `false` when the instruction data carries a `ValidatorOffchainAuthorization`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigureValidatorPublisherRewardsAccounts {
+    pub program_config_key: Pubkey,
+    pub shred_reward_token_key: Pubkey,
+    pub validator_node_key: Pubkey,
+    pub validator_publisher_rewards_key: Pubkey,
+    pub is_node_signer: bool,
+}
+
+impl ConfigureValidatorPublisherRewardsAccounts {
+    pub fn new(node_id: &Pubkey, rewards_token_mint_key: &Pubkey, is_node_signer: bool) -> Self {
+        Self {
+            program_config_key: state::find_program_config_address().0,
+            shred_reward_token_key: state::find_shred_reward_token_address(rewards_token_mint_key)
+                .0,
+            validator_node_key: *node_id,
+            validator_publisher_rewards_key: state::find_validator_publisher_rewards_address(
+                node_id,
+            )
+            .0,
+            is_node_signer,
+        }
+    }
+}
+
+impl From<ConfigureValidatorPublisherRewardsAccounts> for Vec<AccountMeta> {
+    fn from(accounts: ConfigureValidatorPublisherRewardsAccounts) -> Self {
+        vec![
+            AccountMeta::new_readonly(accounts.program_config_key, false),
+            AccountMeta::new_readonly(accounts.shred_reward_token_key, false),
+            AccountMeta::new_readonly(accounts.validator_node_key, accounts.is_node_signer),
+            AccountMeta::new(accounts.validator_publisher_rewards_key, false),
+        ]
+    }
+}
+
 /// Accounts for the `CheckCliVersion` instruction (1 account).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckCliVersionAccounts {

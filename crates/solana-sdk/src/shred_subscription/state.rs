@@ -14,6 +14,8 @@ pub const VALIDATOR_CLIENT_REWARDS_SEED_PREFIX: &[u8] = b"validator_client_rewar
 pub const INSTANT_ALLOCATION_REQUEST_SEED_PREFIX: &[u8] = b"instant_seat_allocation_request";
 pub const WITHDRAW_SEAT_REQUEST_SEED_PREFIX: &[u8] = b"withdraw_seat_request";
 pub const SHRED_DISTRIBUTION_SEED_PREFIX: &[u8] = b"shred_distribution";
+pub const VALIDATOR_PUBLISHER_REWARDS_SEED_PREFIX: &[u8] = b"validator_publisher_rewards";
+pub const SHRED_REWARD_TOKEN_SEED_PREFIX: &[u8] = b"shred_reward_token";
 
 pub fn find_program_config_address() -> (Pubkey, u8) {
     Pubkey::find_program_address(
@@ -116,6 +118,20 @@ pub fn find_shred_distribution_address(subscription_epoch: u64) -> (Pubkey, u8) 
             SHRED_DISTRIBUTION_SEED_PREFIX,
             &subscription_epoch.to_le_bytes(),
         ],
+        &crate::shred_subscription::ID,
+    )
+}
+
+pub fn find_validator_publisher_rewards_address(node_id: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[VALIDATOR_PUBLISHER_REWARDS_SEED_PREFIX, node_id.as_ref()],
+        &crate::shred_subscription::ID,
+    )
+}
+
+pub fn find_shred_reward_token_address(mint_key: &Pubkey) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[SHRED_REWARD_TOKEN_SEED_PREFIX, mint_key.as_ref()],
         &crate::shred_subscription::ID,
     )
 }
