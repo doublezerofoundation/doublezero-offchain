@@ -81,7 +81,7 @@ impl Default for DemandSettings {
     fn default() -> Self {
         Self {
             traffic: 0.15,
-            priority: 20.0,
+            priority: 0.0,
             kind: 1,
             multicast_enabled: false,
             shred_kind: 2,
@@ -429,7 +429,7 @@ shred_multicast_enabled = false
         let settings = Settings::from_path(&path).unwrap();
 
         assert_eq!(settings.demand.traffic, 0.2);
-        assert_eq!(settings.demand.priority, 20.0);
+        assert_eq!(settings.demand.priority, 0.0);
         assert_eq!(settings.demand.kind, 7);
         assert!(!settings.demand.multicast_enabled);
         assert_eq!(settings.demand.shred_kind, 2);
