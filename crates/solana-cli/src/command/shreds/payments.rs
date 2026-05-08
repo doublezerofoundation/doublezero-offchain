@@ -218,6 +218,12 @@ impl PaymentsCommand {
                             )
                             | ShredSubscriptionInstructionData::InitializeClaimHoldingAccount(_)
                             | ShredSubscriptionInstructionData::ClaimValidatorClientRewards(_)
+                            | ShredSubscriptionInstructionData::InitializeValidatorPublisherRewards(
+                                _,
+                            )
+                            | ShredSubscriptionInstructionData::ConfigureValidatorPublisherRewards {
+                                ..
+                            }
                             | ShredSubscriptionInstructionData::CheckCliVersion { .. },
                         ) => {}
                         // TODO: oracle instructions (BatchAllocateSeats,
