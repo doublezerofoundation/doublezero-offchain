@@ -122,9 +122,7 @@ impl RevenueDistributionAdminSubcommand {
             Self::InitializeRewardsIntegration {
                 program_id,
                 solana_payer_options,
-            } => {
-                try_execute_initialize_rewards_integration(program_id, solana_payer_options).await
-            }
+            } => try_execute_initialize_rewards_integration(program_id, solana_payer_options).await,
             Self::MigrateProgramAccounts {
                 solana_payer_options,
             } => try_execute_migrate_program_accounts(solana_payer_options).await,
