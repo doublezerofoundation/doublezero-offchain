@@ -213,12 +213,115 @@ $CLI_BIN revenue-distribution validator-deposit \
     --node-id $DUMMY_KEY
 echo
 
+### Validator-client claim commands.
+# Requires the fork to have been started with
+# `--synthetic-vcr-manager $(solana address -k test-ledger/validator-keypair.json)`
+# so that a synthetic ValidatorClientRewards PDA (client_id=65535, manager =
+# validator-keypair) was baked at genesis.
+
+CLIENT_ID=65535
+MANAGER_KEY_PATH=$VALIDATOR_KEYPAIR
+MANAGER_PUBKEY=$(solana address -k $MANAGER_KEY_PATH)
+TEST_EPOCH=100
+
+echo "solana-keygen new --silent --no-bip39-passphrase -o claim_payer.json"
+solana-keygen new --silent --no-bip39-passphrase -o claim_payer.json
+solana airdrop -ul 10 -k claim_payer.json
+echo
+
+CLAIM_PAYER_PUBKEY=$(solana address -k claim_payer.json)
+
+echo "spl-token create-token -ul --decimals 6 --fee-payer claim_payer.json --mint-authority $CLAIM_PAYER_PUBKEY --owner $CLAIM_PAYER_PUBKEY"
+TEST_MINT=$(spl-token create-token \
+    -ul \
+    --decimals 6 \
+    --fee-payer claim_payer.json \
+    --mint-authority $CLAIM_PAYER_PUBKEY \
+    --owner $CLAIM_PAYER_PUBKEY \
+    | grep "Creating token" | awk '{print $3}')
+echo "Test mint: $TEST_MINT"
+echo
+
+echo "spl-token create-account -ul $TEST_MINT --owner $MANAGER_PUBKEY --fee-payer claim_payer.json"
+spl-token create-account \
+    -ul \
+    $TEST_MINT \
+    --owner $MANAGER_PUBKEY \
+    --fee-payer claim_payer.json
+echo
+
+echo "doublezero-solana shreds validator-client-rewards show --client-id $CLIENT_ID -ul"
+$CLI_BIN shreds validator-client-rewards show --client-id $CLIENT_ID -ul
+echo
+
+echo "doublezero-solana shreds validator-client-rewards init-holding -ul --client-id $CLIENT_ID --rewards-token-mint $TEST_MINT --subscription-epoch $TEST_EPOCH -k claim_payer.json"
+$CLI_BIN shreds validator-client-rewards init-holding \
+    -ul \
+    --client-id $CLIENT_ID \
+    --rewards-token-mint $TEST_MINT \
+    --subscription-epoch $TEST_EPOCH \
+    -k claim_payer.json
+echo
+
+# Derive the holding PDA so we can mint tokens to it directly.
+HOLDING_PDA=$($CLI_BIN shreds validator-client-rewards show \
+    --client-id $CLIENT_ID \
+    --rewards-token-mint $TEST_MINT \
+    --subscription-epoch $TEST_EPOCH \
+    -ul \
+    | grep -E "^  epoch +$TEST_EPOCH" \
+    | awk '{print $3}')
+echo "Holding PDA: $HOLDING_PDA"
+echo
+
+echo "spl-token mint-to -ul --mint-authority claim_payer.json $TEST_MINT 1000000 $HOLDING_PDA"
+spl-token mint-to \
+    -ul \
+    --mint-authority claim_payer.json \
+    $TEST_MINT \
+    1000000 \
+    $HOLDING_PDA
+echo
+
+echo "doublezero-solana shreds validator-client-rewards show -ul --client-id $CLIENT_ID --rewards-token-mint $TEST_MINT --subscription-epoch $TEST_EPOCH"
+$CLI_BIN shreds validator-client-rewards show \
+    -ul \
+    --client-id $CLIENT_ID \
+    --rewards-token-mint $TEST_MINT \
+    --subscription-epoch $TEST_EPOCH
+echo
+
+DEST_ATA=$(spl-token address -ul --token $TEST_MINT --owner $MANAGER_PUBKEY --verbose | grep "Associated token address" | awk '{print $NF}')
+echo "Destination ATA: $DEST_ATA"
+
+echo "doublezero-solana shreds validator-client-rewards claim -ul --client-id $CLIENT_ID --rewards-token-mint $TEST_MINT --subscription-epoch $TEST_EPOCH -k $MANAGER_KEY_PATH"
+$CLI_BIN shreds validator-client-rewards claim \
+    -ul \
+    --client-id $CLIENT_ID \
+    --rewards-token-mint $TEST_MINT \
+    --subscription-epoch $TEST_EPOCH \
+    -k $MANAGER_KEY_PATH
+echo
+
+echo "doublezero-solana shreds validator-client-rewards show -ul --client-id $CLIENT_ID --rewards-token-mint $TEST_MINT --subscription-epoch $TEST_EPOCH"
+$CLI_BIN shreds validator-client-rewards show \
+    -ul \
+    --client-id $CLIENT_ID \
+    --rewards-token-mint $TEST_MINT \
+    --subscription-epoch $TEST_EPOCH
+echo
+
+echo "Destination balance after claim:"
+spl-token balance -ul $TEST_MINT --owner $MANAGER_PUBKEY
+echo
+
 ### Clean up.
 
 echo "rm dummy.json another_payer.json rewards_manager.json " \
-     "service_key_1.json service_key_1.json validator_node_id.json"
+     "service_key_1.json service_key_1.json validator_node_id.json claim_payer.json"
 rm \
     dummy.json \
     another_payer.json \
     rewards_manager.json \
-    service_key_1.json
+    service_key_1.json \
+    claim_payer.json
