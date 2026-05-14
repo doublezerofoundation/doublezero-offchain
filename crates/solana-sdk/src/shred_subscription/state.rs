@@ -556,10 +556,16 @@ pub const VALIDATOR_CLIENT_REWARDS_DISCRIMINATOR: Discriminator<DISCRIMINATOR_LE
     Discriminator::new_sha2(b"dz::account::validator_client_rewards");
 
 pub const VCR_CLIENT_ID_OFFSET: usize = DISCRIMINATOR_LEN;
+pub const VCR_BUMP_SEED_OFFSET: usize = DISCRIMINATOR_LEN + 2;
 pub const VCR_MANAGER_KEY_OFFSET: usize = DISCRIMINATOR_LEN + 8;
 pub const VCR_SHORT_DESCRIPTION_OFFSET: usize = DISCRIMINATOR_LEN + 40;
 pub const VCR_CLAIM_HOLDING_COUNT_OFFSET: usize = DISCRIMINATOR_LEN + 104;
 pub const VCR_SHORT_DESCRIPTION_LEN: usize = 64;
+/// Total on-chain size of a `ValidatorClientRewards` account, including the
+/// 8-byte discriminator. Mirrors the program's
+/// `assert!(zero_copy::data_end::<ValidatorClientRewards>() == 184)`.
+/// Update both sides together if the on-chain layout changes.
+pub const VCR_ACCOUNT_DATA_LEN: usize = 184;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatorClientRewardsInfo {

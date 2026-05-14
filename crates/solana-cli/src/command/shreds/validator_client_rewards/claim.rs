@@ -64,8 +64,23 @@ pub(crate) fn validate_manager(wallet: &Pubkey, vcr_manager: &Pubkey) -> Result<
     Ok(())
 }
 
+/// Upper bound on epochs per claim tx. Each `ClaimHoldingId` adds 9 bytes of
+/// instruction data and the holding account adds 32 bytes to the account list,
+/// so beyond ~20 the tx blows past the 1232-byte packet limit. 16 is a
+/// conservative cap that leaves room for the destination/rent/program-config
+/// accounts and the CheckCliVersion ix.
+pub(crate) const MAX_CLAIM_EPOCHS_PER_TX: usize = 16;
+
 impl ClaimCommand {
     pub async fn try_into_execute(self) -> Result<()> {
+        if self.subscription_epochs.len() > MAX_CLAIM_EPOCHS_PER_TX {
+            bail!(
+                "too many --subscription-epoch values ({}); max {} per tx. Split into multiple `claim` calls.",
+                self.subscription_epochs.len(),
+                MAX_CLAIM_EPOCHS_PER_TX
+            );
+        }
+
         let dz_connection = self
             .solana_payer_options
             .connection_options
@@ -150,24 +165,25 @@ impl ClaimCommand {
                 }
             }
         }
-        if !missing.is_empty() {
-            bail!(
-                "claim holdings not initialized for epochs: {:?}. Run `shreds validator-client-rewards init-holding ...` first.",
-                missing
-            );
-        }
-        if !wrong_owner.is_empty() {
-            bail!(
-                "claim holdings for epochs {:?} are not SPL token accounts (owners: {:?})",
-                wrong_owner.iter().map(|(e, _)| *e).collect::<Vec<_>>(),
-                wrong_owner
-            );
-        }
-        if !wrong_mint.is_empty() {
-            bail!(
-                "claim holdings for the following epochs are for the wrong mint: {:?}",
-                wrong_mint
-            );
+        if !missing.is_empty() || !wrong_owner.is_empty() || !wrong_mint.is_empty() {
+            let mut issues: Vec<String> = Vec::new();
+            if !missing.is_empty() {
+                issues.push(format!(
+                    "  - holdings not initialized for epochs: {missing:?}. Run `shreds validator-client-rewards init-holding ...` first."
+                ));
+            }
+            if !wrong_owner.is_empty() {
+                let epochs: Vec<u64> = wrong_owner.iter().map(|(e, _)| *e).collect();
+                issues.push(format!(
+                    "  - holdings for epochs {epochs:?} are not SPL token accounts (epoch, owner): {wrong_owner:?}"
+                ));
+            }
+            if !wrong_mint.is_empty() {
+                issues.push(format!(
+                    "  - holdings for the following epochs are for the wrong mint (epoch, found_mint): {wrong_mint:?}"
+                ));
+            }
+            bail!("claim holdings have issues:\n{}", issues.join("\n"));
         }
         for epoch in &zero_balance {
             eprintln!(
@@ -257,7 +273,7 @@ impl ClaimCommand {
         let mut instructions = vec![super::super::build_check_cli_version_instruction()?, ix];
 
         // ~30k CU per holding (token transfer + close + state decrement), plus
-        // the check-cli-version ix.
+        // the check-cli-version ix. Bounded by MAX_CLAIM_EPOCHS_PER_TX.
         let cu_limit: u32 = 30_000u32.saturating_mul(self.subscription_epochs.len() as u32 + 1);
         instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(cu_limit));
         if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
@@ -270,11 +286,14 @@ impl ClaimCommand {
         if let TransactionOutcome::Executed(tx_sig) = tx_outcome {
             println!("Claimed: {tx_sig}");
             // The on-chain handler transfers the full balance of each holding,
-            // so the pre-claim balance equals what was drained.
+            // but the balances reported here were read pre-tx — if a top-up
+            // landed between the read and our claim, the actual drained amount
+            // is higher. To get the authoritative number, diff the destination
+            // ATA balance before and after.
             for (epoch, holding_pda, drained) in &pre_claim_balances {
-                println!("  epoch {epoch}: {drained} from {holding_pda}");
+                println!("  epoch {epoch}: {drained} from {holding_pda} (pre-claim)");
             }
-            println!("Total claimed: {total_drained}");
+            println!("Pre-claim total: {total_drained}");
 
             // Re-fetch the VCR to report the post-tx claim_holding_count.
             let post_count = match wallet
@@ -399,5 +418,22 @@ mod tests {
             &mint.to_string(),
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn max_claim_epochs_keeps_tx_under_packet_limit() {
+        // Sanity-check the cap: at MAX_CLAIM_EPOCHS_PER_TX, the holding-id
+        // payload + per-holding account metas should stay well under the
+        // 1232-byte Solana packet limit (accounting for the ~256 bytes of
+        // fixed overhead from signature/header/fixed-accounts/blockhash).
+        let payload_per_epoch = 9; // ClaimHoldingId = u64 + u8
+        let account_meta_per_epoch = 32; // one Pubkey per holding
+        let approx_per_epoch = payload_per_epoch + account_meta_per_epoch;
+        let approx_overhead = 256;
+        let total = approx_overhead + approx_per_epoch * MAX_CLAIM_EPOCHS_PER_TX;
+        assert!(
+            total < 1232,
+            "MAX_CLAIM_EPOCHS_PER_TX={MAX_CLAIM_EPOCHS_PER_TX} produces approx tx size {total} >= 1232"
+        );
     }
 }

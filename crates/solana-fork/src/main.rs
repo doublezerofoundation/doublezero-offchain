@@ -8,7 +8,7 @@ use doublezero_solana_client_tools::{
     rpc::{SolanaConnection, SolanaConnectionOptions},
 };
 use doublezero_solana_sdk::{
-    DISCRIMINATOR_LEN, NetworkEnvironment, PrecomputedDiscriminator, environment_2z_token_mint_key,
+    NetworkEnvironment, PrecomputedDiscriminator, environment_2z_token_mint_key,
     passport::{ID as PASSPORT_PROGRAM_ID, state::ProgramConfig as PassportProgramConfig},
     revenue_distribution::{
         self, ID as REVENUE_DISTRIBUTION_PROGRAM_ID,
@@ -676,35 +676,55 @@ fn try_write_synthetic_validator_client_rewards_account(
     use doublezero_solana_sdk::shred_subscription::{
         ID as SHRED_SUBSCRIPTION_PROGRAM_ID,
         state::{
-            VALIDATOR_CLIENT_REWARDS_DISCRIMINATOR, VCR_CLIENT_ID_OFFSET, VCR_MANAGER_KEY_OFFSET,
-            find_validator_client_rewards_address,
+            VALIDATOR_CLIENT_REWARDS_DISCRIMINATOR, VCR_ACCOUNT_DATA_LEN, VCR_BUMP_SEED_OFFSET,
+            VCR_CLIENT_ID_OFFSET, VCR_MANAGER_KEY_OFFSET, find_validator_client_rewards_address,
+            parse_validator_client_rewards,
         },
     };
     use solana_sdk::rent::Rent;
 
-    // Account size = discriminator (8) + struct body. The struct body is 176
-    // bytes: header (8: client_id + bump + padding) + manager (32) + desc (64) +
-    // claim_holding_count (4) + padding (4) + StorageGap<2> (64). Total
-    // account size = 8 + 176 = 184. Note: StorageGap<N> is [[u8; 32]; N], so
-    // StorageGap<2> = 64 bytes. The on-chain processor enforces this layout
-    // via `const _: () = assert!(zero_copy::data_end::<ValidatorClientRewards>() == 184);`.
-    const DATA_LEN: usize = 184;
-
+    // The total account size and per-field offsets are owned by the SDK
+    // (`VCR_ACCOUNT_DATA_LEN`, `VCR_*_OFFSET`). The on-chain processor
+    // enforces the same total via
+    // `const _: () = assert!(zero_copy::data_end::<ValidatorClientRewards>() == 184);`.
+    // After construction we round-trip through `parse_validator_client_rewards`
+    // as a runtime sanity check — if the SDK and on-chain layouts ever drift,
+    // we fail loudly at fork-load time instead of silently producing broken
+    // bytes.
     let (vcr_key, bump) = find_validator_client_rewards_address(SYNTHETIC_VCR_CLIENT_ID);
-    let mut data = vec![0u8; DATA_LEN];
+    let mut data = vec![0u8; VCR_ACCOUNT_DATA_LEN];
     let disc_bytes = borsh::to_vec(&VALIDATOR_CLIENT_REWARDS_DISCRIMINATOR)
         .expect("discriminator serialization");
     data[..disc_bytes.len()].copy_from_slice(&disc_bytes);
     data[VCR_CLIENT_ID_OFFSET..VCR_CLIENT_ID_OFFSET + 2]
         .copy_from_slice(&SYNTHETIC_VCR_CLIENT_ID.to_le_bytes());
-    // bump_seed lives at offset (discriminator + 2).
-    data[DISCRIMINATOR_LEN + 2] = bump;
+    data[VCR_BUMP_SEED_OFFSET] = bump;
     data[VCR_MANAGER_KEY_OFFSET..VCR_MANAGER_KEY_OFFSET + 32].copy_from_slice(manager_key.as_ref());
     // short_description stays zero (no description). claim_holding_count starts
     // at 0. Both are covered by the initial vec![0; ...].
 
+    let parsed = parse_validator_client_rewards(&data).with_context(|| {
+        "synthetic ValidatorClientRewards bytes failed to parse — \
+         SDK layout constants and the on-chain struct may have drifted"
+    })?;
+    ensure!(
+        parsed.client_id == SYNTHETIC_VCR_CLIENT_ID,
+        "synthetic VCR client_id round-trip mismatch: wrote {SYNTHETIC_VCR_CLIENT_ID}, parsed {}",
+        parsed.client_id
+    );
+    ensure!(
+        parsed.manager_key == *manager_key,
+        "synthetic VCR manager_key round-trip mismatch: wrote {manager_key}, parsed {}",
+        parsed.manager_key
+    );
+    ensure!(
+        parsed.claim_holding_count == 0,
+        "synthetic VCR claim_holding_count round-trip mismatch: wrote 0, parsed {}",
+        parsed.claim_holding_count
+    );
+
     let rent = Rent::default();
-    let lamports = rent.minimum_balance(DATA_LEN);
+    let lamports = rent.minimum_balance(VCR_ACCOUNT_DATA_LEN);
 
     let account = Account {
         lamports,

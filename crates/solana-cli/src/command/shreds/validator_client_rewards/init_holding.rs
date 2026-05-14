@@ -24,6 +24,13 @@ use solana_sdk::{
        --subscription-epoch <EPOCH> [--subscription-epoch <EPOCH> ...]
 */
 
+/// Upper bound on epochs per init tx. Each init adds one instruction
+/// (~22 bytes incl. accounts/data) plus two new holding/mint-token accounts
+/// to the message; beyond ~20 the tx blows past the 1232-byte packet limit.
+/// 16 leaves headroom for the CheckCliVersion ix and the fee-payer/system
+/// account metas.
+pub(crate) const MAX_INIT_HOLDING_EPOCHS_PER_TX: usize = 16;
+
 #[derive(Debug, Args)]
 pub struct InitHoldingCommand {
     /// Validator client ID.
@@ -41,6 +48,14 @@ pub struct InitHoldingCommand {
 
 impl InitHoldingCommand {
     pub async fn try_into_execute(self) -> Result<()> {
+        if self.subscription_epochs.len() > MAX_INIT_HOLDING_EPOCHS_PER_TX {
+            bail!(
+                "too many --subscription-epoch values ({}); max {} per tx. Split into multiple `init-holding` calls.",
+                self.subscription_epochs.len(),
+                MAX_INIT_HOLDING_EPOCHS_PER_TX
+            );
+        }
+
         let dz_connection = self
             .solana_payer_options
             .connection_options

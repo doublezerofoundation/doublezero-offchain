@@ -51,20 +51,78 @@ pub(crate) fn render_vcr_summary(
     out
 }
 
-// Format is grep'd by sh/test_doublezero_solana_fork.sh — keep
-// "  epoch <num>  <pda>  balance=<n>" stable or update the grep.
-pub(crate) fn render_holding_row(epoch: u64, holding_key: &Pubkey, amount: Option<u64>) -> String {
-    match amount {
-        Some(amt) => format!("  epoch {epoch:>5}  {holding_key}  balance={amt}"),
-        None => format!("  epoch {epoch:>5}  {holding_key}  (not initialized)"),
+/// Status of a token-bearing account (manager ATA or per-epoch holding PDA)
+/// for display purposes. Splits the cases that `Option<u64>` previously
+/// collapsed so the user can tell apart "wasn't created" from "wrong owner /
+/// malformed".
+pub(crate) enum TokenAccountStatus {
+    Balance(u64),
+    DoesNotExist,
+    WrongOwner(Pubkey),
+    Malformed,
+    WrongMint(Pubkey),
+}
+
+impl TokenAccountStatus {
+    fn render_tail(&self, expected_mint: Option<&Pubkey>) -> String {
+        match self {
+            TokenAccountStatus::Balance(amt) => format!("balance={amt}"),
+            TokenAccountStatus::DoesNotExist => "(does not exist)".to_string(),
+            TokenAccountStatus::WrongOwner(owner) => format!("(wrong owner: {owner})"),
+            TokenAccountStatus::Malformed => "(malformed token account)".to_string(),
+            TokenAccountStatus::WrongMint(found) => match expected_mint {
+                Some(expected) => {
+                    format!("(wrong mint: found {found}, expected {expected})")
+                }
+                None => format!("(wrong mint: found {found})"),
+            },
+        }
     }
 }
 
-pub(crate) fn render_manager_ata_row(ata: &Pubkey, amount: Option<u64>) -> String {
-    match amount {
-        Some(amt) => format!("  manager ATA  {ata}  balance={amt}"),
-        None => format!("  manager ATA  {ata}  (not initialized)"),
+/// Classify a fetched token account against the expected mint (when known).
+pub(crate) fn classify_token_account(
+    account: Option<&solana_sdk::account::Account>,
+    expected_mint: Option<&Pubkey>,
+) -> TokenAccountStatus {
+    let Some(account) = account else {
+        return TokenAccountStatus::DoesNotExist;
+    };
+    if account.owner != spl_token_interface::ID {
+        return TokenAccountStatus::WrongOwner(account.owner);
     }
+    match spl_token_interface::state::Account::unpack(&account.data) {
+        Err(_) => TokenAccountStatus::Malformed,
+        Ok(token) => match expected_mint {
+            Some(expected) if token.mint != *expected => TokenAccountStatus::WrongMint(token.mint),
+            _ => TokenAccountStatus::Balance(token.amount),
+        },
+    }
+}
+
+// Format is grep'd by sh/test_doublezero_solana_fork.sh — keep
+// "  epoch <num>  <pda>  balance=<n>" stable or update the grep.
+pub(crate) fn render_holding_row(
+    epoch: u64,
+    holding_key: &Pubkey,
+    status: &TokenAccountStatus,
+    expected_mint: Option<&Pubkey>,
+) -> String {
+    format!(
+        "  epoch {epoch:>5}  {holding_key}  {}",
+        status.render_tail(expected_mint)
+    )
+}
+
+pub(crate) fn render_manager_ata_row(
+    ata: &Pubkey,
+    status: &TokenAccountStatus,
+    expected_mint: Option<&Pubkey>,
+) -> String {
+    format!(
+        "  manager ATA  {ata}  {}",
+        status.render_tail(expected_mint)
+    )
 }
 
 impl ShowCommand {
@@ -114,15 +172,11 @@ impl ShowCommand {
                 .await
                 .with_context(|| format!("fetching manager ATA {manager_ata}"))?
                 .value;
-            let ata_amount = match ata_account {
-                Some(acct) if acct.owner == spl_token_interface::ID => {
-                    spl_token_interface::state::Account::unpack(&acct.data)
-                        .ok()
-                        .map(|t| t.amount)
-                }
-                _ => None,
-            };
-            println!("{}", render_manager_ata_row(&manager_ata, ata_amount));
+            let ata_status = classify_token_account(ata_account.as_ref(), Some(&mint));
+            println!(
+                "{}",
+                render_manager_ata_row(&manager_ata, &ata_status, Some(&mint))
+            );
 
             if !self.subscription_epochs.is_empty() {
                 let holding_keys: Vec<Pubkey> = self
@@ -141,15 +195,8 @@ impl ShowCommand {
                     .zip(holding_keys.iter())
                     .zip(holding_accounts.into_iter())
                 {
-                    let amount = match maybe_acct {
-                        Some(acct) if acct.owner == spl_token_interface::ID => {
-                            spl_token_interface::state::Account::unpack(&acct.data)
-                                .ok()
-                                .map(|t| t.amount)
-                        }
-                        _ => None,
-                    };
-                    println!("{}", render_holding_row(*epoch, key, amount));
+                    let status = classify_token_account(maybe_acct.as_ref(), Some(&mint));
+                    println!("{}", render_holding_row(*epoch, key, &status, Some(&mint)));
                 }
             }
         }
@@ -228,25 +275,60 @@ mod tests {
     }
 
     #[test]
-    fn render_holding_row_present_and_absent() {
+    fn render_holding_row_distinguishes_statuses() {
         let key = Pubkey::new_from_array([3u8; 32]);
-        let present = render_holding_row(100, &key, Some(1_234_567));
-        let absent = render_holding_row(101, &key, None);
-        assert!(present.contains("epoch   100"));
-        assert!(present.contains("balance=1234567"));
-        assert!(absent.contains("(not initialized)"));
+        let expected_mint = Pubkey::new_from_array([5u8; 32]);
+        let other_mint = Pubkey::new_from_array([6u8; 32]);
+        let wrong_owner = Pubkey::new_from_array([7u8; 32]);
+
+        let balance = render_holding_row(100, &key, &TokenAccountStatus::Balance(1_234_567), None);
+        assert!(balance.contains("epoch   100"));
+        assert!(balance.contains("balance=1234567"));
+
+        let missing = render_holding_row(101, &key, &TokenAccountStatus::DoesNotExist, None);
+        assert!(missing.contains("(does not exist)"));
+
+        let bad_owner = render_holding_row(
+            102,
+            &key,
+            &TokenAccountStatus::WrongOwner(wrong_owner),
+            None,
+        );
+        assert!(bad_owner.contains("(wrong owner:"));
+        assert!(bad_owner.contains(&wrong_owner.to_string()));
+
+        let malformed = render_holding_row(103, &key, &TokenAccountStatus::Malformed, None);
+        assert!(malformed.contains("(malformed token account)"));
+
+        let wrong_mint = render_holding_row(
+            104,
+            &key,
+            &TokenAccountStatus::WrongMint(other_mint),
+            Some(&expected_mint),
+        );
+        assert!(wrong_mint.contains("(wrong mint: found"));
+        assert!(wrong_mint.contains(&other_mint.to_string()));
+        assert!(wrong_mint.contains(&expected_mint.to_string()));
     }
 
     #[test]
-    fn render_manager_ata_row_present_and_absent() {
+    fn render_manager_ata_row_distinguishes_statuses() {
         let ata = Pubkey::new_from_array([4u8; 32]);
-        let present = render_manager_ata_row(&ata, Some(9_876_543));
-        let absent = render_manager_ata_row(&ata, None);
+        let present = render_manager_ata_row(&ata, &TokenAccountStatus::Balance(9_876_543), None);
+        let missing = render_manager_ata_row(&ata, &TokenAccountStatus::DoesNotExist, None);
+        let wrong_owner_key = Pubkey::new_from_array([8u8; 32]);
+        let wrong_owner =
+            render_manager_ata_row(&ata, &TokenAccountStatus::WrongOwner(wrong_owner_key), None);
+
         assert!(present.contains("manager ATA"));
         assert!(present.contains(&ata.to_string()));
         assert!(present.contains("balance=9876543"));
-        assert!(absent.contains("manager ATA"));
-        assert!(absent.contains(&ata.to_string()));
-        assert!(absent.contains("(not initialized)"));
+
+        assert!(missing.contains("manager ATA"));
+        assert!(missing.contains(&ata.to_string()));
+        assert!(missing.contains("(does not exist)"));
+
+        assert!(wrong_owner.contains("(wrong owner:"));
+        assert!(wrong_owner.contains(&wrong_owner_key.to_string()));
     }
 }
