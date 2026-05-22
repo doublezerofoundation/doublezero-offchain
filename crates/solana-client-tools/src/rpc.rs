@@ -211,15 +211,20 @@ impl SolanaConnection {
         Ok(account_infos)
     }
 
+    /// Returns one slot per input key. Missing accounts and accounts whose
+    /// bytes fail discriminator/layout checks both surface as `None`, so a
+    /// single bad slot can't poison the entire batch. Callers that need to
+    /// distinguish missing-vs-invalid or that want to fail-loud should
+    /// handle the `None`s themselves (and log with their own context).
     pub async fn try_fetch_multiple_zero_copy_data<T: Pod + PrecomputedDiscriminator>(
         &self,
         keys: &[Pubkey],
-    ) -> Result<Vec<ZeroCopyAccountOwnedData<T>>> {
-        self.try_fetch_multiple_accounts(keys)
+    ) -> Result<Vec<Option<ZeroCopyAccountOwnedData<T>>>> {
+        Ok(try_fetch_multiple_accounts(&self.0, keys)
             .await?
             .into_iter()
-            .map(TryInto::try_into)
-            .collect()
+            .map(|opt| opt.and_then(|a| ZeroCopyAccountOwnedData::from_account(&a)))
+            .collect())
     }
 }
 
