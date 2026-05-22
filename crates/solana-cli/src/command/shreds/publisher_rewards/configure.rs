@@ -3,7 +3,6 @@ use std::str::FromStr;
 use anyhow::{Context, Result, bail};
 use clap::Args;
 use doublezero_solana_client_tools::{
-    account::zero_copy::ZeroCopyAccountOwnedData,
     payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
     rpc::SolanaConnection,
 };
@@ -18,10 +17,7 @@ use doublezero_solana_sdk::{
                 InitializeValidatorPublisherRewardsAccounts,
             },
         },
-        state::{
-            ShredRewardToken, find_shred_reward_token_address,
-            find_validator_publisher_rewards_address,
-        },
+        state::{find_shred_reward_token_address, find_validator_publisher_rewards_address},
     },
     try_build_instruction,
 };
@@ -95,17 +91,19 @@ impl ResolvedAuth {
 
 /// Resolve `ResolvedAuth` from CLI inputs. Pure: no I/O, no network.
 ///
-/// - `node_id`: from `--node-id`, used to validate the direct-path fee-payer match.
-/// - `fee_payer_pubkey`: the pubkey of the wallet that pays for the transaction.
+/// - `node_id`: from `--node-id`, used to validate the direct-path signer match.
+/// - `signer_pubkey`: the pubkey of the keypair that signs the transaction
+///   (`-k`). With `--fee-payer` overriding the fee payer, this is the
+///   signer-of-record, not necessarily the fee payer.
 /// - `offchain`: `(--signature, --deadline-slot)` zipped — both present means
 ///   offchain path, both absent means direct path. Clap's `requires` enforces
 ///   both-or-neither, so the awkward middle case is unreachable.
 ///
-/// In the direct path (`offchain.is_none()`), the fee-payer signs as the
-/// validator identity, so `--node-id` must equal `fee_payer_pubkey`.
+/// In the direct path (`offchain.is_none()`), the signer signs as the
+/// validator identity, so `--node-id` must equal `signer_pubkey`.
 pub(crate) fn resolve_auth(
     node_id: Pubkey,
-    fee_payer_pubkey: Pubkey,
+    signer_pubkey: Pubkey,
     offchain: Option<(&str, u64)>,
 ) -> Result<ResolvedAuth> {
     match offchain {
@@ -124,12 +122,21 @@ pub(crate) fn resolve_auth(
             }))
         }
         None => {
-            if node_id != fee_payer_pubkey {
+            if node_id != signer_pubkey {
                 bail!(
-                    "in the direct path the fee-payer keypair signs as the validator identity, \
-                     but its pubkey {fee_payer_pubkey} does not match --node-id {node_id}. \
-                     Either pass a fee-payer keypair (-k) whose pubkey is {node_id}, \
-                     or use the offchain path with --signature + --deadline-slot."
+                    "in the direct path the signer keypair (-k) must be the validator \
+                     identity, but its pubkey {signer_pubkey} does not match --node-id {node_id}. \
+                     The validator identity keypair lives on the validator host, so the offchain \
+                     workflow is usually what you want: \n  \
+                     1. Workstation: \
+                     `doublezero-solana shreds publisher-rewards prepare-offchain-message ...` \
+                     to print the hex blob.\n  \
+                     2. Validator host: `solana sign-offchain-message <HEX> \
+                     --keypair <validator-identity>` to produce the base58 signature.\n  \
+                     3. Workstation: re-run `configure` with \
+                     `--signature <BASE58> --deadline-slot <ABS>`.\n\
+                     Or, if the validator identity keypair is accessible locally, pass it as \
+                     `-k` so its pubkey equals {node_id}."
                 );
             }
             Ok(ResolvedAuth::Direct)
@@ -139,6 +146,9 @@ pub(crate) fn resolve_auth(
 
 impl ConfigureCommand {
     pub async fn try_into_execute(self) -> Result<()> {
+        if self.node_id == Pubkey::default() {
+            bail!("--node-id must not be the default pubkey");
+        }
         if self.rewards_token_owner == Pubkey::default() {
             bail!("--rewards-token-owner must not be the default pubkey");
         }
@@ -152,8 +162,7 @@ impl ConfigureCommand {
             .connection_options
             .clone()
             .into_shred_subscription_connection();
-        let mut wallet = Wallet::try_from(self.solana_payer_options)?;
-        wallet.connection = dz_connection;
+        let wallet = Wallet::try_new(self.solana_payer_options, Some(dz_connection))?;
         let wallet_key = wallet.pubkey();
 
         let offchain = self.signature.as_deref().zip(self.deadline_slot);
@@ -174,27 +183,21 @@ impl ConfigureCommand {
         );
 
         // Pre-flight: shred_reward_token must exist + be enabled; auto-init
-        // validator publisher rewards if it doesn't exist yet.
+        // validator publisher rewards if it doesn't exist yet; only push the
+        // ATA-create instruction if the ATA isn't already there. Batched into
+        // one RPC call.
         let srt_pda = find_shred_reward_token_address(&rewards_token_mint).0;
         let vpr_pda = find_validator_publisher_rewards_address(&self.node_id).0;
         let accounts = wallet
             .connection
-            .get_multiple_accounts(&[srt_pda, vpr_pda])
+            .get_multiple_accounts(&[srt_pda, vpr_pda, rewards_token_ata])
             .await
             .context("failed to read pre-flight accounts")?;
 
-        let srt_account = accounts.first().and_then(|a| a.as_ref()).with_context(|| {
-            format!("rewards token mint {rewards_token_mint} is not a registered ShredRewardToken")
-        })?;
-        let srt = ZeroCopyAccountOwnedData::<ShredRewardToken>::from_account(srt_account)
-            .with_context(|| format!("ShredRewardToken account at {srt_pda} is malformed"))?;
-        if !srt.is_enabled() {
-            bail!(
-                "rewards token mint {rewards_token_mint} is registered but disabled — \
-                 pick an enabled mint or wait for the admin to re-enable it"
-            );
-        }
+        let srt_account = accounts.first().and_then(|a| a.as_ref());
+        super::validate_shred_reward_token(&rewards_token_mint, &srt_pda, srt_account)?;
         let vpr_exists = accounts.get(1).and_then(|a| a.as_ref()).is_some();
+        let ata_exists = accounts.get(2).and_then(|a| a.as_ref()).is_some();
 
         // Build instructions.
         let mut instructions = vec![super::super::build_check_cli_version_instruction()?];
@@ -231,15 +234,21 @@ impl ConfigureCommand {
         )?;
         instructions.push(configure_ix);
 
-        // Ensure the rewards ATA exists so payouts to this validator are
-        // deliverable. Idempotent: no-op if the ATA is already there. The
-        // fee-payer pays the rent; the account is owned by --rewards-token-owner.
-        instructions.push(create_associated_token_account_idempotent(
-            &wallet_key,
-            &self.rewards_token_owner,
-            &rewards_token_mint,
-            &spl_token_interface::ID,
-        ));
+        // Push the ATA-create only when the account doesn't already exist.
+        // The idempotent variant is the on-chain race-condition safety net
+        // (someone could race us between the read and the submit), not the
+        // primary mechanism — skipping it on the happy path keeps the
+        // transaction smaller and burns less compute. The fee-payer pays the
+        // rent; the account is owned by --rewards-token-owner.
+        if !ata_exists {
+            println!("Rewards ATA missing; will create as part of this transaction.");
+            instructions.push(create_associated_token_account_idempotent(
+                &wallet_key,
+                &self.rewards_token_owner,
+                &rewards_token_mint,
+                &spl_token_interface::ID,
+            ));
+        }
 
         // CU budget: init (~20k) + configure (~20k baseline) + ed25519 verify
         // (~150k headroom) + create-ATA (~25k). Conservative single budget.
@@ -316,31 +325,36 @@ mod tests {
     }
 
     #[test]
-    fn resolve_auth_direct_path_matches_fee_payer() {
-        let fee_payer = Pubkey::new_unique();
-        let auth =
-            resolve_auth(fee_payer, fee_payer, None).expect("matching pubkey resolves to Direct");
+    fn resolve_auth_direct_path_matches_signer() {
+        let signer = Pubkey::new_unique();
+        let auth = resolve_auth(signer, signer, None).expect("matching pubkey resolves to Direct");
         assert!(auth.is_node_signer());
         assert!(matches!(auth, ResolvedAuth::Direct));
     }
 
     #[test]
-    fn resolve_auth_direct_path_node_id_fee_payer_mismatch_errors() {
-        let fee_payer = Pubkey::new_unique();
+    fn resolve_auth_direct_path_node_id_signer_mismatch_errors() {
+        let signer = Pubkey::new_unique();
         let other = Pubkey::new_unique();
-        let err = resolve_auth(other, fee_payer, None).expect_err("mismatched node_id must error");
+        let err = resolve_auth(other, signer, None).expect_err("mismatched node_id must error");
         let msg = err.to_string();
         assert!(msg.contains("does not match --node-id"), "got: {msg}");
+        // The remedy must lead with the offchain workflow because the
+        // validator identity keypair lives on the validator host.
+        assert!(
+            msg.contains("prepare-offchain-message"),
+            "expected message to point at prepare-offchain-message, got: {msg}"
+        );
     }
 
     #[test]
     fn resolve_auth_offchain_path_happy() {
         let node_id = Pubkey::new_unique();
-        let fee_payer = Pubkey::new_unique();
+        let signer = Pubkey::new_unique();
         let kp = Keypair::new();
         let sig = kp.sign_message(b"anything");
         let sig_b58 = sig.to_string();
-        let auth = resolve_auth(node_id, fee_payer, Some((&sig_b58, 42_000)))
+        let auth = resolve_auth(node_id, signer, Some((&sig_b58, 42_000)))
             .expect("offchain path resolves");
         assert!(!auth.is_node_signer());
         match auth {
@@ -355,8 +369,8 @@ mod tests {
     #[test]
     fn resolve_auth_offchain_path_invalid_signature_errors() {
         let node_id = Pubkey::new_unique();
-        let fee_payer = Pubkey::new_unique();
-        let err = resolve_auth(node_id, fee_payer, Some(("not-base58!!", 1)))
+        let signer = Pubkey::new_unique();
+        let err = resolve_auth(node_id, signer, Some(("not-base58!!", 1)))
             .expect_err("bad base58 must error");
         assert!(err.to_string().contains("base58-encoded ed25519 signature"));
     }

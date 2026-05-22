@@ -305,10 +305,13 @@ impl std::ops::Deref for Wallet {
     }
 }
 
-impl TryFrom<SolanaPayerOptions> for Wallet {
-    type Error = anyhow::Error;
-
-    fn try_from(opts: SolanaPayerOptions) -> Result<Wallet> {
+impl Wallet {
+    /// Build a `Wallet` from CLI options, optionally overriding the default
+    /// `SolanaConnection` derived from `opts.connection_options`. Pass
+    /// `Some(connection)` when the wallet talks to a non-Solana endpoint such
+    /// as the DZ Ledger (`into_shred_subscription_connection()`) so callers
+    /// cannot forget the override after construction.
+    pub fn try_new(opts: SolanaPayerOptions, connection: Option<SolanaConnection>) -> Result<Self> {
         let SolanaPayerOptions {
             connection_options,
             signer_options:
@@ -337,7 +340,7 @@ impl TryFrom<SolanaPayerOptions> for Wallet {
         };
 
         Ok(Wallet {
-            connection: connection_options.into(),
+            connection: connection.unwrap_or_else(|| connection_options.into()),
             signer,
             compute_unit_price_ix: with_compute_unit_price
                 .map(ComputeBudgetInstruction::set_compute_unit_price),
@@ -345,6 +348,14 @@ impl TryFrom<SolanaPayerOptions> for Wallet {
             fee_payer,
             dry_run,
         })
+    }
+}
+
+impl TryFrom<SolanaPayerOptions> for Wallet {
+    type Error = anyhow::Error;
+
+    fn try_from(opts: SolanaPayerOptions) -> Result<Wallet> {
+        Wallet::try_new(opts, None)
     }
 }
 
