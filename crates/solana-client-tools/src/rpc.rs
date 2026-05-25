@@ -213,9 +213,13 @@ impl SolanaConnection {
 
     /// Returns one slot per input key. Missing accounts and accounts whose
     /// bytes fail discriminator/layout checks both surface as `None`, so a
-    /// single bad slot can't poison the entire batch. Callers that need to
-    /// distinguish missing-vs-invalid or that want to fail-loud should
-    /// handle the `None`s themselves (and log with their own context).
+    /// single bad slot can't poison the entire batch. The two reasons are
+    /// not distinguishable from the return value; a caller that needs the
+    /// distinction must re-fetch the raw account.
+    ///
+    /// The helper validates only discriminator and layout. Account ownership,
+    /// semantic validity of the parsed contents, and whether the key was
+    /// expected to exist at all are the caller's responsibility.
     pub async fn try_fetch_multiple_zero_copy_data<T: Pod + PrecomputedDiscriminator>(
         &self,
         keys: &[Pubkey],
