@@ -44,9 +44,10 @@ impl<T: Pod + PrecomputedDiscriminator> TryFrom<Account> for ZeroCopyAccountOwne
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use bytemuck::Zeroable;
     use doublezero_program_tools::Discriminator;
+
+    use super::*;
 
     #[repr(C)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
