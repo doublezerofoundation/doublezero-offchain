@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 - tolerate missing and unparseable accounts in try_fetch_multiple_zero_copy_data. Return type is now Result<Vec<Option<_>>> (breaking) ([#374](https://github.com/doublezerofoundation/doublezero-offchain/pull/374))
+- update solana-cli to handle defaults and tighten up error messages ([#373](https://github.com/doublezerofoundation/doublezero-offchain/pull/373))
 - support env var fallback for all CLI args ([#334](https://github.com/doublezerofoundation/doublezero-offchain/pull/334))
 - fix transaction batch size checks to include compute budget instructions ([#331](https://github.com/doublezerofoundation/doublezero-offchain/pull/331))
 - add in memos, transaction sizing ([#330](https://github.com/doublezerofoundation/doublezero-offchain/pull/330))
