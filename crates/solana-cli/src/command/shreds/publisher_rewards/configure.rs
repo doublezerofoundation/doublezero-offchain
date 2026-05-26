@@ -21,15 +21,18 @@ use doublezero_solana_sdk::{
     },
     try_build_instruction,
 };
-use solana_sdk::{compute_budget::ComputeBudgetInstruction, signature::Signature};
+use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction, signature::Signature, signer::Signer,
+};
 use spl_associated_token_account_interface::{
-    address::get_associated_token_address, instruction::create_associated_token_account_idempotent,
+    address::get_associated_token_address_and_bump_seed,
+    instruction::create_associated_token_account_idempotent,
 };
 
 use super::rewards_mint_arg::RewardsMintArg;
 
 /*
-   # Direct path (fee-payer keypair `-k` doubles as the validator identity)
+   # Direct path (the `-k` signer keypair must be the validator identity)
    doublezero-solana shreds publisher-rewards configure \
        --node-id <PUBKEY> --rewards-token-owner <WALLET> \
        [--rewards-token-mint <MINT|2z|usdc|wsol>] [-k <KEYPAIR>]
@@ -58,9 +61,9 @@ pub struct ConfigureCommand {
     pub rewards_token_owner: Pubkey,
 
     /// Base58-encoded ed25519 signature produced by the validator identity
-    /// keypair via `solana sign-offchain-message`. When omitted, the
-    /// fee-payer keypair (`-k`) is used as the validator identity and signs
-    /// the transaction directly.
+    /// keypair via `solana sign-offchain-message`. When omitted, the `-k`
+    /// signer keypair must equal `--node-id` and signs the transaction
+    /// directly as the validator identity.
     #[arg(long, requires = "deadline_slot")]
     pub signature: Option<String>,
 
@@ -164,13 +167,32 @@ impl ConfigureCommand {
             .into_shred_subscription_connection();
         let wallet = Wallet::try_new(self.solana_payer_options, Some(dz_connection))?;
         let wallet_key = wallet.pubkey();
+        // When `--fee-payer` is set, the ATA rent must come from the fee
+        // payer, not the signer. Otherwise an operator who passed
+        // `--fee-payer` because the validator identity is rent-poor would
+        // still see the transaction fail at submit. The `Wallet` does not
+        // expose a helper for "the pubkey that actually pays this tx", so
+        // re-derive it here; a follow-up will hoist this into `Wallet`.
+        let funding_key = wallet
+            .fee_payer
+            .as_ref()
+            .map(Signer::pubkey)
+            .unwrap_or(wallet_key);
 
         let offchain = self.signature.as_deref().zip(self.deadline_slot);
         let auth = resolve_auth(self.node_id, wallet_key, offchain)?;
         let is_node_signer = auth.is_node_signer();
 
-        let rewards_token_ata =
-            get_associated_token_address(&self.rewards_token_owner, &rewards_token_mint);
+        // Capture bumps so the CU budget can be sized from the actual cost
+        // of each PDA derivation rather than a single conservative ceiling.
+        let (srt_pda, srt_bump) = find_shred_reward_token_address(&rewards_token_mint);
+        let (vpr_pda, vpr_bump) = find_validator_publisher_rewards_address(&self.node_id);
+        let (rewards_token_ata, ata_bump) = get_associated_token_address_and_bump_seed(
+            &self.rewards_token_owner,
+            &rewards_token_mint,
+            &spl_associated_token_account_interface::program::ID,
+            &spl_token_interface::ID,
+        );
 
         println!("Shred subscription - Configure Validator Publisher Rewards");
         println!("Node ID:           {}", self.node_id);
@@ -186,8 +208,6 @@ impl ConfigureCommand {
         // validator publisher rewards if it doesn't exist yet; only push the
         // ATA-create instruction if the ATA isn't already there. Batched into
         // one RPC call.
-        let srt_pda = find_shred_reward_token_address(&rewards_token_mint).0;
-        let vpr_pda = find_validator_publisher_rewards_address(&self.node_id).0;
         let accounts = wallet
             .connection
             .get_multiple_accounts(&[srt_pda, vpr_pda, rewards_token_ata])
@@ -199,7 +219,17 @@ impl ConfigureCommand {
         let vpr_exists = accounts.get(1).and_then(|a| a.as_ref()).is_some();
         let ata_exists = accounts.get(2).and_then(|a| a.as_ref()).is_some();
 
-        // Build instructions.
+        // CU budget built incrementally per pushed instruction. The on-chain
+        // program re-derives each PDA, and the bump dominates the variation
+        // in CU cost — see `Wallet::compute_units_for_bump_seed`. Base costs
+        // come from prior runs of these instructions.
+        const INIT_VPR_CU_BASE: u32 = 20_000;
+        const CONFIGURE_VPR_CU_BASE: u32 = 20_000;
+        const ED25519_VERIFY_CU: u32 = 150_000;
+        const CREATE_ATA_CU_BASE: u32 = 25_000;
+        const CHECK_CLI_VERSION_CU: u32 = 5_000;
+
+        let mut compute_unit_limit: u32 = CHECK_CLI_VERSION_CU;
         let mut instructions = vec![super::super::build_check_cli_version_instruction()?];
 
         if !vpr_exists {
@@ -214,6 +244,7 @@ impl ConfigureCommand {
                 ),
             )?;
             instructions.push(init_ix);
+            compute_unit_limit += INIT_VPR_CU_BASE + Wallet::compute_units_for_bump_seed(vpr_bump);
         }
 
         let offchain_authorization = match &auth {
@@ -233,34 +264,46 @@ impl ConfigureCommand {
             },
         )?;
         instructions.push(configure_ix);
+        // Configure re-derives both the VPR and SRT PDAs; the offchain auth
+        // path additionally runs an ed25519 verify.
+        compute_unit_limit += CONFIGURE_VPR_CU_BASE
+            + Wallet::compute_units_for_bump_seed(vpr_bump)
+            + Wallet::compute_units_for_bump_seed(srt_bump);
+        if !is_node_signer {
+            compute_unit_limit += ED25519_VERIFY_CU;
+        }
 
         // Push the ATA-create only when the account doesn't already exist.
         // The idempotent variant is the on-chain race-condition safety net
         // (someone could race us between the read and the submit), not the
         // primary mechanism — skipping it on the happy path keeps the
-        // transaction smaller and burns less compute. The fee-payer pays the
-        // rent; the account is owned by --rewards-token-owner.
+        // transaction smaller and burns less compute. The fee-payer (or
+        // signer, if no `--fee-payer` is set) pays the rent; the account is
+        // owned by --rewards-token-owner.
         if !ata_exists {
             println!("Rewards ATA missing; will create as part of this transaction.");
             instructions.push(create_associated_token_account_idempotent(
-                &wallet_key,
+                &funding_key,
                 &self.rewards_token_owner,
                 &rewards_token_mint,
                 &spl_token_interface::ID,
             ));
+            compute_unit_limit +=
+                CREATE_ATA_CU_BASE + Wallet::compute_units_for_bump_seed(ata_bump);
         }
 
-        // CU budget: init (~20k) + configure (~20k baseline) + ed25519 verify
-        // (~150k headroom) + create-ATA (~25k). Conservative single budget.
-        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(250_000));
+        instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(
+            compute_unit_limit,
+        ));
         if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
             instructions.push(compute_unit_price_ix.clone());
         }
 
-        // Single-signer transaction: the fee-payer keypair signs both as
-        // fee-payer and (in the direct path) as the validator identity. In
-        // the offchain path the on-chain validator-identity authorization is
-        // carried in instruction data instead.
+        // In the direct path the `-k` signer signs both as the transaction
+        // signer-of-record (fee payer, when `--fee-payer` is not set) and as
+        // the validator identity. In the offchain path the validator
+        // identity authorization is carried in instruction data instead, so
+        // `-k` only needs to be a signer of the transaction.
         let transaction = wallet.new_transaction(&instructions).await?;
 
         let tx_outcome = wallet.send_or_simulate_transaction(&transaction).await?;

@@ -7,10 +7,7 @@ pub mod show;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand};
 use doublezero_solana_client_tools::account::zero_copy::ZeroCopyAccountOwnedData;
-use doublezero_solana_sdk::{
-    Pubkey,
-    shred_subscription::state::{ShredRewardToken, find_shred_reward_token_address},
-};
+use doublezero_solana_sdk::{Pubkey, shred_subscription::state::ShredRewardToken};
 use solana_sdk::account::Account;
 
 #[derive(Debug, Args)]
@@ -66,25 +63,6 @@ pub(crate) fn validate_shred_reward_token(
         );
     }
     Ok(())
-}
-
-/// Fetch the `ShredRewardToken` PDA for `rewards_token_mint` and validate it
-/// (registered + enabled). Used by `prepare-offchain-message`; `configure`
-/// uses [`validate_shred_reward_token`] directly because it batches the fetch.
-pub(crate) async fn ensure_shred_reward_token_enabled(
-    connection: &doublezero_solana_client_tools::rpc::SolanaConnection,
-    rewards_token_mint: &Pubkey,
-) -> Result<()> {
-    let srt_pda = find_shred_reward_token_address(rewards_token_mint).0;
-    let account = connection
-        .0
-        .get_account_with_commitment(&srt_pda, connection.0.commitment())
-        .await
-        .with_context(|| {
-            format!("failed to read ShredRewardToken account at {srt_pda} for pre-flight")
-        })?
-        .value;
-    validate_shred_reward_token(rewards_token_mint, &srt_pda, account.as_ref())
 }
 
 #[cfg(test)]

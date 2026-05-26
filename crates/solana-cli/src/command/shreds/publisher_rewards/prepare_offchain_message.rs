@@ -5,7 +5,10 @@ use clap::Args;
 use doublezero_solana_client_tools::rpc::{SolanaConnection, SolanaConnectionOptions};
 use doublezero_solana_sdk::{
     Pubkey,
-    shred_subscription::{ID, types::ConfigureValidatorPublisherRewardsAuthMessage},
+    shred_subscription::{
+        ID, state::find_shred_reward_token_address,
+        types::ConfigureValidatorPublisherRewardsAuthMessage,
+    },
 };
 
 use super::rewards_mint_arg::RewardsMintArg;
@@ -72,7 +75,16 @@ impl PrepareOffchainMessageCommand {
         // mints. Catching it here saves a full offline round-trip (hex →
         // validator-host signing → back → configure submit) for a mint that
         // would never succeed.
-        super::ensure_shred_reward_token_enabled(&connection, &rewards_token_mint).await?;
+        let srt_pda = find_shred_reward_token_address(&rewards_token_mint).0;
+        let srt_account = connection
+            .0
+            .get_account_with_commitment(&srt_pda, connection.0.commitment())
+            .await
+            .with_context(|| {
+                format!("failed to read ShredRewardToken account at {srt_pda} for pre-flight")
+            })?
+            .value;
+        super::validate_shred_reward_token(&rewards_token_mint, &srt_pda, srt_account.as_ref())?;
 
         let current_slot = connection
             .get_slot()
