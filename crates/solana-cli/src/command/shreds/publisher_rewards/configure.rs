@@ -21,9 +21,7 @@ use doublezero_solana_sdk::{
     },
     try_build_instruction,
 };
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, signature::Signature, signer::Signer,
-};
+use solana_sdk::{compute_budget::ComputeBudgetInstruction, signature::Signature, signer::Signer};
 use spl_associated_token_account_interface::{
     address::get_associated_token_address_and_bump_seed,
     instruction::create_associated_token_account_idempotent,
