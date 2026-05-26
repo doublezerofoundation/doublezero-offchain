@@ -227,6 +227,12 @@ impl PaymentsCommand {
                             )
                             | ShredSubscriptionInstructionData::InitializeClaimHolding(_)
                             | ShredSubscriptionInstructionData::ClaimValidatorClientRewards(_)
+                            | ShredSubscriptionInstructionData::InitializeValidatorPublisherRewards(
+                                _,
+                            )
+                            | ShredSubscriptionInstructionData::ConfigureValidatorPublisherRewards {
+                                ..
+                            }
                             | ShredSubscriptionInstructionData::CheckCliVersion { .. },
                         ) => {}
                         Ok(_) => {}

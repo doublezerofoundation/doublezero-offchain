@@ -305,9 +305,31 @@ impl ConfigureCommand {
         let transaction = wallet.new_transaction(&instructions).await?;
 
         let tx_outcome = wallet.send_or_simulate_transaction(&transaction).await?;
+        let configure_executed = matches!(tx_outcome, TransactionOutcome::Executed(_));
         if let TransactionOutcome::Executed(tx_sig) = tx_outcome {
             println!("Configured validator publisher rewards: {tx_sig}");
             wallet.print_verbose_output(&[tx_sig]).await?;
+        }
+
+        // Post-configure: distribute this validator's pending rewards for
+        // any recent subscription epoch where accumulation has completed
+        // but distribute hasn't run for this leaf yet. Skipped under
+        // dry-run (the configure tx never actually wrote the VPR state we
+        // would distribute under).
+        if configure_executed {
+            let network_env = wallet
+                .connection
+                .try_network_environment()
+                .await
+                .context("detecting network environment")?;
+            super::distribute::try_distribute_pending(
+                &wallet,
+                &self.node_id,
+                &self.rewards_token_owner,
+                &rewards_token_mint,
+                network_env,
+            )
+            .await?;
         }
 
         Ok(())

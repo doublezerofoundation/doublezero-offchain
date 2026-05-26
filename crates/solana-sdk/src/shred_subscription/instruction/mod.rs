@@ -5,6 +5,7 @@ use std::io;
 use borsh::{BorshDeserialize, BorshSerialize};
 use doublezero_program_tools::{DISCRIMINATOR_LEN, Discriminator};
 use solana_sdk::pubkey::Pubkey;
+use svm_hash::merkle::MerkleProof;
 
 /// Envelope for an offchain authorization produced by a validator operator
 /// via `solana sign-offchain-message`. Carries the ed25519 signature plus the
@@ -67,6 +68,15 @@ pub enum ShredSubscriptionInstructionData {
         rewards_token_owner_key: Pubkey,
         offchain_authorization: Option<ValidatorOffchainAuthorization>,
     },
+    /// Permissionless. Distribute a single validator's accumulated rewards
+    /// for one (subscription_epoch, journal) pair: transfers the publisher
+    /// share to the validator's destination ATA and the client share into
+    /// the per-epoch claim-holding account. Authenticates the leaf via the
+    /// merkle proof against the journal's root.
+    DistributeValidatorRewards {
+        leader_slots: u32,
+        proof: MerkleProof,
+    },
     /// Validates the provided CLI version against the onchain minimum.
     CheckCliVersion { major: u32, minor: u32, patch: u32 },
 }
@@ -96,6 +106,8 @@ impl ShredSubscriptionInstructionData {
         Discriminator::new_sha2(b"dz::ix::initialize_validator_publisher_rewards");
     pub const CONFIGURE_VALIDATOR_PUBLISHER_REWARDS: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::configure_validator_publisher_rewards");
+    pub const DISTRIBUTE_VALIDATOR_REWARDS: Discriminator<DISCRIMINATOR_LEN> =
+        Discriminator::new_sha2(b"dz::ix::distribute_validator_rewards");
     pub const CHECK_CLI_VERSION: Discriminator<DISCRIMINATOR_LEN> =
         Discriminator::new_sha2(b"dz::ix::check_cli_version");
 }
@@ -145,6 +157,14 @@ impl BorshSerialize for ShredSubscriptionInstructionData {
                 Self::CONFIGURE_VALIDATOR_PUBLISHER_REWARDS.serialize(writer)?;
                 rewards_token_owner_key.serialize(writer)?;
                 offchain_authorization.serialize(writer)
+            }
+            Self::DistributeValidatorRewards {
+                leader_slots,
+                proof,
+            } => {
+                Self::DISTRIBUTE_VALIDATOR_REWARDS.serialize(writer)?;
+                leader_slots.serialize(writer)?;
+                proof.serialize(writer)
             }
             Self::CheckCliVersion {
                 major,

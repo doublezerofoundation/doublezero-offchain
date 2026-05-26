@@ -1,12 +1,13 @@
-use std::net::Ipv4Addr;
+use std::{net::Ipv4Addr, ops::Range};
 
 use bytemuck::{Pod, Zeroable};
 use doublezero_program_tools::{
     DISCRIMINATOR_LEN, Discriminator, PrecomputedDiscriminator,
     types::{Flags, StorageGap},
 };
-use doublezero_revenue_distribution::types::UnitShare16;
+use doublezero_revenue_distribution::types::{DoubleZeroEpoch, UnitShare16};
 use solana_sdk::pubkey::Pubkey;
+use svm_hash::sha2::Hash;
 
 pub const PROGRAM_CONFIG_SEED_PREFIX: &[u8] = b"program_config";
 pub const EXECUTION_CONTROLLER_SEED_PREFIX: &[u8] = b"execution_controller";
@@ -21,6 +22,7 @@ pub const SHRED_REWARD_TOKEN_SEED_PREFIX: &[u8] = b"shred_reward_token";
 pub const INSTANT_ALLOCATION_REQUEST_SEED_PREFIX: &[u8] = b"instant_seat_allocation_request";
 pub const WITHDRAW_SEAT_REQUEST_SEED_PREFIX: &[u8] = b"withdraw_seat_request";
 pub const SHRED_DISTRIBUTION_SEED_PREFIX: &[u8] = b"shred_distribution";
+pub const SHRED_DISTRIBUTION_JOURNAL_SEED_PREFIX: &[u8] = b"shred_distribution_journal";
 pub const CLAIM_HOLDING_SEED_PREFIX: &[u8] = b"claim";
 
 pub fn find_program_config_address() -> (Pubkey, u8) {
@@ -137,6 +139,20 @@ pub fn find_shred_distribution_address(subscription_epoch: u64) -> (Pubkey, u8) 
         &[
             SHRED_DISTRIBUTION_SEED_PREFIX,
             &subscription_epoch.to_le_bytes(),
+        ],
+        &crate::shred_subscription::ID,
+    )
+}
+
+pub fn find_shred_distribution_journal_address(
+    subscription_epoch: u64,
+    mint_key: &Pubkey,
+) -> (Pubkey, u8) {
+    Pubkey::find_program_address(
+        &[
+            SHRED_DISTRIBUTION_JOURNAL_SEED_PREFIX,
+            &subscription_epoch.to_le_bytes(),
+            mint_key.as_ref(),
         ],
         &crate::shred_subscription::ID,
     )
@@ -681,6 +697,181 @@ pub struct ValidatorPublisherRewards {
 impl PrecomputedDiscriminator for ValidatorPublisherRewards {
     const DISCRIMINATOR: Discriminator<8> =
         Discriminator::new_sha2(b"dz::account::validator_publisher_rewards");
+}
+
+// ---------------------------------------------------------------------------
+// ShredDistribution + ShredDistributionJournal + the
+// ValidatorClientRewardsConfig field they nest. Layouts mirrored from
+// `malbeclabs/doublezero-shreds` (program crate). Vendored here so the
+// offchain CLI can `bytemuck::from_bytes` these accounts without depending
+// on the shreds program crate. Remove once the shreds repo is merged into
+// the monorepo. If the on-chain layout changes, update both sides together.
+// ---------------------------------------------------------------------------
+
+pub const MAX_VALIDATOR_CLIENT_REWARDS_PROPORTIONS: usize = 32;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C, align(4))]
+pub struct ValidatorClientRewardsProportion {
+    pub id: u16,
+    pub rewards_proportion: UnitShare16,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C, align(4))]
+pub struct ValidatorClientRewardProportions {
+    pub set_bitmap: u32,
+    pub proportions: [ValidatorClientRewardsProportion; MAX_VALIDATOR_CLIENT_REWARDS_PROPORTIONS],
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C, align(8))]
+pub struct ValidatorClientRewardsConfig {
+    pub default_proportion: UnitShare16,
+    _padding_0: [u8; 2],
+    pub proportions: ValidatorClientRewardProportions,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C, align(8))]
+pub struct ShredDistribution {
+    pub subscription_epoch: u64,
+    pub flags: Flags,
+    pub associated_dz_epoch: DoubleZeroEpoch,
+    pub bump_seed: u8,
+    pub ata_usdc_bump_seed: u8,
+    pub ata_2z_bump_seed: u8,
+    _padding_0: [u8; 1],
+    pub device_count: u16,
+    pub client_seat_count: u16,
+    pub journal_count: u16,
+    pub validator_rewards_proportion: UnitShare16,
+    pub total_publishing_validators: u32,
+    pub validator_rewards_merkle_root: Hash,
+    pub collected_usdc_payments: u64,
+    pub contributor_collected_2z_converted_from_usdc: u64,
+    pub contributor_usdc_swapped: u64,
+    pub validator_client_rewards_config: ValidatorClientRewardsConfig,
+    pub accumulated_validator_rewards_count: u32,
+    _padding_1: [u8; 28],
+    pub total_published_leader_slots: u32,
+    _padding_2: [u8; 28],
+    _gap: StorageGap<3>,
+}
+
+impl PrecomputedDiscriminator for ShredDistribution {
+    const DISCRIMINATOR: Discriminator<8> =
+        Discriminator::new_sha2(b"dz::account::shred_distribution");
+}
+
+impl ShredDistribution {
+    pub const FLAG_VALIDATOR_REWARDS_CALCULATION_FINALIZED_BIT: usize = 1;
+    pub const FLAG_VALIDATOR_REWARDS_ACCUMULATED_BIT: usize = 2;
+    pub const FLAG_INTEGRATION_FUNDED_BIT: usize = 3;
+
+    #[inline]
+    pub fn is_validator_rewards_calculation_finalized(&self) -> bool {
+        self.flags
+            .bit(Self::FLAG_VALIDATOR_REWARDS_CALCULATION_FINALIZED_BIT)
+    }
+
+    #[inline]
+    pub fn is_validator_rewards_accumulated(&self) -> bool {
+        self.flags.bit(Self::FLAG_VALIDATOR_REWARDS_ACCUMULATED_BIT)
+    }
+
+    #[inline]
+    pub fn is_integration_funded(&self) -> bool {
+        self.flags.bit(Self::FLAG_INTEGRATION_FUNDED_BIT)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C, align(8))]
+pub struct ShredDistributionJournal {
+    pub subscription_epoch: u64,
+    pub mint_key: Pubkey,
+    pub reward_mint_key: Pubkey,
+    flags: Flags,
+    pub usdc_swapped_amount: u64,
+    pub tokens_received_amount: u64,
+    pub publisher_accumulation_bitmap_start_index: u32,
+    pub publisher_accumulation_bitmap_end_index: u32,
+    pub client_accumulation_bitmap_start_index: u32,
+    pub client_accumulation_bitmap_end_index: u32,
+    pub validator_pool: u64,
+    pub total_leader_slots: u32,
+    _padding_0: [u8; 4],
+    pub accumulated_publisher_slots_scaled: u64,
+    pub accumulated_client_slots_scaled: u64,
+    pub accumulated_publisher_leaf_count: u32,
+    pub distributed_publisher_leaf_count: u32,
+    pub distributed_amount: u64,
+    pub accumulated_client_leaf_count: u32,
+    pub distributed_client_leaf_count: u32,
+    _padding_1: [u8; 16],
+    pub first_distribute_timestamp: i64,
+    _gap: StorageGap<3>,
+}
+
+impl PrecomputedDiscriminator for ShredDistributionJournal {
+    const DISCRIMINATOR: Discriminator<8> =
+        Discriminator::new_sha2(b"dz::account::shred_distribution_journal");
+}
+
+impl ShredDistributionJournal {
+    pub const FLAG_SWAP_BYPASSED_BIT: usize = 0;
+    pub const FLAG_SWEPT_BIT: usize = 1;
+
+    #[inline]
+    pub fn is_swap_bypassed(&self) -> bool {
+        self.flags.bit(Self::FLAG_SWAP_BYPASSED_BIT)
+    }
+
+    #[inline]
+    pub fn is_swept(&self) -> bool {
+        self.flags.bit(Self::FLAG_SWEPT_BIT)
+    }
+
+    #[inline]
+    pub fn checked_publisher_accumulation_bitmap_range(&self) -> Option<Range<usize>> {
+        let has_end_index = self.publisher_accumulation_bitmap_end_index != 0;
+        let range = self.publisher_accumulation_bitmap_start_index as usize
+            ..self.publisher_accumulation_bitmap_end_index as usize;
+        has_end_index.then_some(range)
+    }
+
+    #[inline]
+    pub fn checked_client_accumulation_bitmap_range(&self) -> Option<Range<usize>> {
+        let has_end_index = self.client_accumulation_bitmap_end_index != 0;
+        let range = self.client_accumulation_bitmap_start_index as usize
+            ..self.client_accumulation_bitmap_end_index as usize;
+        has_end_index.then_some(range)
+    }
+
+    #[inline]
+    pub fn checked_usdc_swap_budget(&self) -> Option<u64> {
+        if self.total_leader_slots == 0 {
+            return None;
+        }
+        let accumulated_slots_scaled =
+            self.accumulated_publisher_slots_scaled + self.accumulated_client_slots_scaled;
+        let total_slots_scaled = u64::from(self.total_leader_slots) * u64::from(UnitShare16::MAX);
+        let budget = u128::from(self.validator_pool) * u128::from(accumulated_slots_scaled)
+            / u128::from(total_slots_scaled);
+        Some(budget as u64)
+    }
+
+    #[inline]
+    pub fn is_swap_complete(&self) -> bool {
+        if self.is_swap_bypassed() {
+            return true;
+        }
+        match self.checked_usdc_swap_budget() {
+            Some(budget) => self.usdc_swapped_amount == budget,
+            None => true,
+        }
+    }
 }
 
 #[cfg(test)]
