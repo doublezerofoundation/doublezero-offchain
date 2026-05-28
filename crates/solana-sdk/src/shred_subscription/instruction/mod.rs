@@ -223,6 +223,14 @@ impl BorshDeserialize for ShredSubscriptionInstructionData {
                     offchain_authorization,
                 })
             }
+            Self::DISTRIBUTE_VALIDATOR_REWARDS => {
+                let leader_slots = u32::deserialize_reader(reader)?;
+                let proof = MerkleProof::deserialize_reader(reader)?;
+                Ok(Self::DistributeValidatorRewards {
+                    leader_slots,
+                    proof,
+                })
+            }
             Self::CHECK_CLI_VERSION => {
                 let major = u32::deserialize_reader(reader)?;
                 let minor = u32::deserialize_reader(reader)?;
@@ -368,6 +376,18 @@ mod tests {
                     deadline_slot: 999_888,
                     signature: [7u8; 64],
                 }),
+            },
+        );
+    }
+
+    #[test]
+    fn round_trip_distribute_validator_rewards() {
+        let leaves: [&[u8]; 2] = [b"leaf_a", b"leaf_b"];
+        let proof = MerkleProof::from_leaves(&leaves, 0, None).expect("two-leaf proof at index 0");
+        round_trip(
+            &ShredSubscriptionInstructionData::DistributeValidatorRewards {
+                leader_slots: 1_234,
+                proof,
             },
         );
     }

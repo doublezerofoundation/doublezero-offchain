@@ -705,7 +705,19 @@ impl PrecomputedDiscriminator for ValidatorPublisherRewards {
 // `malbeclabs/doublezero-shreds` (program crate). Vendored here so the
 // offchain CLI can `bytemuck::from_bytes` these accounts without depending
 // on the shreds program crate. Remove once the shreds repo is merged into
-// the monorepo. If the on-chain layout changes, update both sides together.
+// the monorepo.
+//
+// The compile-time `const _: () = assert!(...)` lines at the bottom of this
+// block mirror the on-chain `assert!(zero_copy::data_end::<T>() == N)` for
+// each Pod struct (`data_end::<T>() == DISCRIMINATOR_LEN + size_of::<T>()`).
+// Without them, a silent upstream drift in any field — or in
+// `Flags`/`StorageGap<N>`'s size against a different `program-tools` pin —
+// would shift `remaining_data`'s start by some number of bytes. Bitmap
+// reads via `publisher_accumulation_bitmap_{start,end}_index` would then
+// land on the wrong bytes and `bitmap_bit_set` would return garbage,
+// silently undercounting or duplicating distribute work. If on-chain
+// changes any of these layouts, update both sides together (offchain
+// struct + the expected size below + the on-chain `assert!`).
 // ---------------------------------------------------------------------------
 
 pub const MAX_VALIDATOR_CLIENT_REWARDS_PROPORTIONS: usize = 32;
@@ -873,6 +885,21 @@ impl ShredDistributionJournal {
         }
     }
 }
+
+// Mirror the on-chain
+// `assert!(zero_copy::data_end::<T>() == N)` lines in
+// `programs/shred-subscription/src/processor/mod.rs`. `data_end` is
+// `DISCRIMINATOR_LEN + size_of::<T>()`, so the offchain size assert is
+// `size_of::<T>() == N - DISCRIMINATOR_LEN`. If on-chain bumps either
+// value, update both sides together.
+const _: () = assert!(std::mem::size_of::<ShredDistribution>() == 400 - DISCRIMINATOR_LEN);
+const _: () = assert!(std::mem::size_of::<ShredDistributionJournal>() == 296 - DISCRIMINATOR_LEN);
+// `ValidatorClientRewardsConfig` is a field inside `ShredDistribution`,
+// not a top-level account, so the on-chain code has no separate
+// `data_end::<T>()` assert for it. Pin its size here directly so any
+// upstream layout shift breaks the build instead of silently relocating
+// later fields of `ShredDistribution`.
+const _: () = assert!(std::mem::size_of::<ValidatorClientRewardsConfig>() == 136);
 
 #[cfg(test)]
 mod tests {

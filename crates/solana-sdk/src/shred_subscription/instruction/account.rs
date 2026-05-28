@@ -628,9 +628,13 @@ pub struct DistributeValidatorRewardsAccountsInitializer<'a> {
     pub rewards_token_owner_key: &'a Pubkey,
     pub publisher_mint_key: &'a Pubkey,
     pub publisher_reward_mint_key: &'a Pubkey,
-    // 2Z mint for the standard configuration; `None` when the publisher
-    // journal also plays the client role (omit-rule).
-    pub client_mint_key: Option<&'a Pubkey>,
+    /// Mint that identifies the client-side journal. In the current
+    /// protocol this is always the 2Z mint (client rewards are routed
+    /// exclusively to the 2Z journal), so every caller today passes the
+    /// 2Z mint — but the field is a generic `&Pubkey` so a future
+    /// protocol version that routes client rewards to a different mint
+    /// works without an API change.
+    pub client_mint_key: &'a Pubkey,
 }
 
 impl DistributeValidatorRewardsAccounts {
@@ -650,15 +654,20 @@ impl DistributeValidatorRewardsAccounts {
         let validator_client_rewards_key =
             state::find_validator_client_rewards_address(client_id).0;
 
-        let validator_client_journal_key = client_mint_key
-            .filter(|client_mint| *client_mint != publisher_mint_key)
-            .map(|client_mint| {
-                state::find_shred_distribution_journal_address(subscription_epoch, client_mint).0
-            });
-
-        let client_addresses_mint_key = client_mint_key
-            .filter(|client_mint| *client_mint != publisher_mint_key)
-            .unwrap_or(publisher_reward_mint_key);
+        // Omit-rule: when the publisher journal IS the client journal
+        // (their mints match), the publisher journal plays both roles and
+        // the client-side journal account drops out of the meta list.
+        // Otherwise the client side has its own journal at the 2Z mint,
+        // and the client-side ATA / claim_holding use the 2Z mint too.
+        let client_side_present = client_mint_key != publisher_mint_key;
+        let validator_client_journal_key = client_side_present.then(|| {
+            state::find_shred_distribution_journal_address(subscription_epoch, client_mint_key).0
+        });
+        let client_addresses_mint_key = if client_side_present {
+            client_mint_key
+        } else {
+            publisher_reward_mint_key
+        };
 
         Self {
             program_config_key: state::find_program_config_address().0,

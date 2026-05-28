@@ -11,8 +11,9 @@
 //
 // Subscription epoch == Solana epoch in this codebase (the S3 export and
 // `ShredDistribution.subscription_epoch` use the same value), so we
-// resolve the current epoch via `getEpochInfo` on the connection that
-// hosts the program and scan `[current - lookback, current]`.
+// resolve the current epoch via `getEpochInfo` on a Solana RPC (NOT the
+// DZ-Ledger one that hosts the program — on testnet/localnet those are
+// distinct chains with independent epoch numbers).
 
 use std::collections::{HashMap, HashSet};
 
@@ -20,7 +21,8 @@ use anyhow::{Context, Result};
 use doublezero_solana_client_tools::{
     account::zero_copy::ZeroCopyAccountOwnedData,
     payer::{TransactionOutcome, Wallet},
-    rpc::NetworkEnvironment,
+    rpc::{NetworkEnvironment, SolanaConnection},
+    transaction::try_new_transaction,
 };
 use doublezero_solana_sdk::{
     Pubkey, environment_2z_token_mint_key, environment_usdc_token_mint_key,
@@ -43,8 +45,14 @@ use doublezero_solana_sdk::{
     },
     try_build_instruction,
 };
-use solana_sdk::{compute_budget::ComputeBudgetInstruction, instruction::Instruction};
-use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
+use futures::stream::{self, StreamExt};
+use solana_sdk::{
+    compute_budget::ComputeBudgetInstruction, hash::Hash, instruction::Instruction,
+    signature::Keypair, signer::Signer,
+};
+use spl_associated_token_account_interface::{
+    address::get_associated_token_address, instruction::create_associated_token_account_idempotent,
+};
 
 use super::s3;
 
@@ -53,11 +61,25 @@ use super::s3;
 /// `ShredDistribution` batch; journal batches at 3 mints fit in 3 chunks.
 const DISTRIBUTE_LOOKBACK_EPOCHS: u64 = 100;
 
+/// Max in-flight S3 fetches during the leaf-discovery fan-out. The full
+/// lookback at typical S3 latencies (~50-200 ms per request) is
+/// 5-20 seconds wall-clock when sequential; 8 concurrent fetches cuts
+/// that roughly 8x while staying polite to S3.
+const S3_FETCH_CONCURRENCY: usize = 8;
+
+/// Counters surfaced at the end of a distribute pass. The three counters
+/// have **different units** on purpose — read the summary line, not the
+/// raw struct:
+/// - `submits_succeeded` / `submits_failed`: per-`(epoch, mint)` tx
+///   submission. One epoch can contribute up to 3 of either.
+/// - `epochs_unsettled`: per-epoch. Fires when the pass ended without any
+///   successful distribute for this leaf in that epoch (covers both
+///   "nothing eligible to do" and "tried and all submits failed").
 #[derive(Debug, Default)]
 pub struct DistributeOutcome {
-    pub successful: u32,
-    pub skipped: u32,
-    pub failed: u32,
+    pub submits_succeeded: u32,
+    pub submits_failed: u32,
+    pub epochs_unsettled: u32,
 }
 
 /// Per-(epoch, leaf) bundle of everything needed to build a distribute tx
@@ -72,17 +94,20 @@ struct Candidate {
 
 pub async fn try_distribute_pending(
     wallet: &Wallet,
+    solana_connection: &SolanaConnection,
     node_id: &Pubkey,
     rewards_token_owner_key: &Pubkey,
-    rewards_token_mint_key: &Pubkey,
     network_env: NetworkEnvironment,
 ) -> Result<DistributeOutcome> {
-    let current_epoch = wallet
-        .connection
+    // `wallet.connection` is the DZ-Ledger RPC (program host). Its epoch
+    // is the DZ-Ledger epoch, which has no relation to the Solana epoch
+    // on testnet/localnet. `subscription_epoch` PDAs and S3 file names
+    // are Solana-epoch keyed, so we must ask a Solana RPC.
+    let current_epoch = solana_connection
         .0
         .get_epoch_info()
         .await
-        .context("fetching current epoch")?
+        .context("fetching current Solana epoch")?
         .epoch;
     let from_epoch = current_epoch.saturating_sub(DISTRIBUTE_LOOKBACK_EPOCHS);
 
@@ -96,9 +121,6 @@ pub async fn try_distribute_pending(
     let usdc_mint_key = environment_usdc_token_mint_key(network_env);
     let wsol_mint_key = spl_token_interface::native_mint::ID;
     let journal_mint_candidates = [dz_mint_key, usdc_mint_key, wsol_mint_key];
-    let _ = rewards_token_mint_key; // kept in signature for callers that want
-    // to log it; not load-bearing now that we
-    // probe all three mints.
 
     let mut outcome = DistributeOutcome::default();
 
@@ -138,45 +160,82 @@ pub async fn try_distribute_pending(
     // ----- Step 2: fan out S3 to find this validator's leaf per epoch -----
 
     let s3_client = s3::build_s3_client()?;
+
+    // Issue all S3 fetches concurrently (capped at `S3_FETCH_CONCURRENCY`),
+    // carrying the `shred_distribution` reference alongside the fetch
+    // result so the post-fetch loop doesn't have to re-scan
+    // `accumulated`. `reqwest::Client` clones are Arc-cheap. Each tuple
+    // element: `(epoch, &shred_distribution, fetch_result)`.
+    let mut fetch_results = stream::iter(accumulated.iter())
+        .map(|(epoch, shred_distribution)| {
+            let s3_client = s3_client.clone();
+            async move {
+                let result = s3::fetch_leader_slot_data(&s3_client, *epoch).await;
+                (*epoch, shred_distribution, result)
+            }
+        })
+        .buffer_unordered(S3_FETCH_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await;
+    // `buffer_unordered` yields in completion order; sort ascending by
+    // epoch so the per-epoch logs below print chronologically.
+    fetch_results.sort_by_key(|(epoch, _, _)| *epoch);
+
     let mut candidates: Vec<Candidate> = Vec::new();
-    for (epoch, _shred_distribution) in &accumulated {
-        let entries = match s3::fetch_leader_slot_data(&s3_client, *epoch).await {
+    for (epoch, shred_distribution, fetch_result) in fetch_results {
+        let entries = match fetch_result {
             Ok(entries) => entries,
             Err(err) => {
                 eprintln!("  epoch {epoch}: failed to fetch S3 leaves: {err:#}");
-                outcome.failed += 1;
+                outcome.epochs_unsettled += 1;
                 continue;
             }
         };
-        let leaves = match s3::compute_leaves_with_proofs(&entries) {
-            Ok(leaves) => leaves,
+        // Build the sorted leaf set once per epoch, then compute proofs
+        // ONLY for the leaves matching this validator. With ~1500
+        // validators per epoch × 100 epochs of lookback, computing all
+        // proofs up front would be tens of millions of SHA-256 ops per
+        // configure call; this restricts us to O(log N) work per matched
+        // leaf (typically 1, occasionally 2+ for multi-client-id
+        // validators).
+        let computed = match s3::compute_leaves(&entries) {
+            Ok(c) => c,
             Err(err) => {
-                eprintln!("  epoch {epoch}: failed to compute merkle proofs: {err:#}");
-                outcome.failed += 1;
+                eprintln!("  epoch {epoch}: failed to compute merkle leaves: {err:#}");
+                outcome.epochs_unsettled += 1;
                 continue;
             }
         };
-        let Some(leaf_index) = leaves
-            .leaves
-            .iter()
-            .position(|leaf| &leaf.node_id == node_id)
-        else {
-            // Validator wasn't a leader this epoch; silent skip (no work
-            // to do, not an error).
-            continue;
-        };
-        let shred_distribution = accumulated
-            .iter()
-            .find(|(e, _)| e == epoch)
-            .map(|(_, sd)| sd)
-            .expect("epoch was just iterated from `accumulated`");
-        candidates.push(Candidate {
-            subscription_epoch: *epoch,
-            associated_dz_epoch: shred_distribution.associated_dz_epoch.value(),
-            leaf_index,
-            leaf: leaves.leaves[leaf_index],
-            proof: leaves.proofs[leaf_index].clone(),
-        });
+        // A validator can legitimately appear under multiple client_ids
+        // in the same epoch — the leaf schema's dedup key is
+        // `(node_id, client_id)`, not `node_id` alone. Each `(node_id,
+        // client_id)` leaf has its own merkle proof and its own bit in
+        // the journal's bitmap, so we emit one `Candidate` per match
+        // here. Downstream batching and the per-leaf bitmap check
+        // already handle each `Candidate` independently.
+        for (leaf_index, leaf) in computed.leaves.iter().enumerate() {
+            if &leaf.node_id != node_id {
+                continue;
+            }
+            let proof = match s3::compute_proof_for_leaf(&computed.leaves, leaf_index) {
+                Ok(proof) => proof,
+                Err(err) => {
+                    eprintln!(
+                        "  epoch {epoch} leaf {leaf_index}: failed to compute proof: {err:#}"
+                    );
+                    continue;
+                }
+            };
+            candidates.push(Candidate {
+                subscription_epoch: epoch,
+                associated_dz_epoch: shred_distribution.associated_dz_epoch.value(),
+                leaf_index,
+                leaf: *leaf,
+                proof,
+            });
+        }
+        // If no leaves matched, the validator wasn't a leader this
+        // epoch — silent skip (no work to do, not an error).
     }
 
     if candidates.is_empty() {
@@ -248,14 +307,54 @@ pub async fn try_distribute_pending(
         .await
         .context("fetching claim holding accounts")?;
 
-    // ----- Step 6: in-memory decision loop, submit per (epoch, mint) -----
+    // ----- Step 6: pre-fetch destination ATAs + cache the blockhash -----
+    //
+    // Across the entire pass there are at most three distinct
+    // destination ATAs (one per candidate reward mint:
+    // `get_associated_token_address(rewards_token_owner_key, mint)`).
+    // Probe them once via a single `getMultipleAccounts` so per-tx
+    // we only emit `create_associated_token_account_idempotent` when
+    // the destination is actually missing — saves ~25k CU per tx that
+    // would otherwise pay the SPL Token existence check on a no-op
+    // create. The set is mutated as freshly-created ATAs land.
+    //
+    // The blockhash is also cached once. `new_transaction` normally
+    // calls `getLatestBlockhash` per tx; for ~300 distribute txs that's
+    // 300 redundant RPCs. Blockhashes stay valid for ~60-90 s, well
+    // above this pass's wall time; on `BlockhashNotFound` at submit the
+    // operator re-runs (the pass is idempotent).
+    let candidate_destination_atas: Vec<Pubkey> = journal_mint_candidates
+        .iter()
+        .map(|mint| get_associated_token_address(rewards_token_owner_key, mint))
+        .collect();
+    let candidate_destination_ata_accounts = wallet
+        .connection
+        .try_fetch_multiple_accounts(&candidate_destination_atas)
+        .await
+        .context("pre-fetching destination ATAs")?;
+    let mut known_existing_atas: HashSet<Pubkey> = candidate_destination_atas
+        .iter()
+        .zip(candidate_destination_ata_accounts.iter())
+        .filter_map(|(ata, account)| (!account.data.is_empty()).then_some(*ata))
+        .collect();
+
+    let cached_blockhash = wallet
+        .connection
+        .get_latest_blockhash()
+        .await
+        .context("fetching cached blockhash for distribute pass")?;
+
+    // ----- Step 7: in-memory decision loop, submit per (epoch, mint) -----
     //
     // `InitializeClaimHolding` is idempotent on-chain but a re-issued init
-    // still costs a CPI and tx bytes. Track which epochs we've already
-    // emitted an init for in this pass so subsequent (epoch, mint) txs
-    // skip it.
+    // still costs a CPI and tx bytes. Dedup by `(epoch, client_id)` —
+    // the claim_holding PDA is seeded by `validator_client_rewards_key`
+    // (per-client_id) + epoch + 2Z mint, so a validator that appears
+    // under two client_ids in the same epoch has TWO separate claim
+    // holdings and needs an init for each. Keying by epoch alone would
+    // wrongly skip the second init.
 
-    let mut emitted_init_for_epoch: HashSet<u64> = HashSet::new();
+    let mut emitted_init_for_holding: HashSet<(u64, u16)> = HashSet::new();
 
     for (candidate_index, candidate) in candidates.iter().enumerate() {
         // Parent distribution gate.
@@ -266,7 +365,7 @@ pub async fn try_distribute_pending(
                 "  epoch {}: skipped — parent distribution missing",
                 candidate.subscription_epoch
             );
-            outcome.skipped += 1;
+            outcome.epochs_unsettled += 1;
             continue;
         }
         let parent_distribution: ZeroCopyAccountOwnedData<ParentDistribution> =
@@ -277,7 +376,7 @@ pub async fn try_distribute_pending(
                         "  epoch {}: skipped — parent distribution malformed",
                         candidate.subscription_epoch
                     );
-                    outcome.skipped += 1;
+                    outcome.epochs_unsettled += 1;
                     continue;
                 }
             };
@@ -286,7 +385,7 @@ pub async fn try_distribute_pending(
                 "  epoch {}: skipped — parent rewards not finalized",
                 candidate.subscription_epoch
             );
-            outcome.skipped += 1;
+            outcome.epochs_unsettled += 1;
             continue;
         }
 
@@ -322,8 +421,13 @@ pub async fn try_distribute_pending(
                 continue;
             }
 
-            let needs_init = !claim_holding_exists
-                && !emitted_init_for_epoch.contains(&candidate.subscription_epoch);
+            let init_key = (candidate.subscription_epoch, candidate.leaf.client_id);
+            let needs_init = !claim_holding_exists && !emitted_init_for_holding.contains(&init_key);
+            let destination_ata = get_associated_token_address(
+                rewards_token_owner_key,
+                &publisher_journal.reward_mint_key,
+            );
+            let needs_ata_create = !known_existing_atas.contains(&destination_ata);
             match submit_distribute_tx(
                 wallet,
                 candidate,
@@ -333,14 +437,20 @@ pub async fn try_distribute_pending(
                 node_id,
                 &dz_mint_key,
                 needs_init,
+                needs_ata_create,
+                cached_blockhash,
             )
             .await
             {
                 Ok(()) => {
-                    outcome.successful += 1;
+                    outcome.submits_succeeded += 1;
                     any_distributed_this_epoch = true;
                     if needs_init {
-                        emitted_init_for_epoch.insert(candidate.subscription_epoch);
+                        emitted_init_for_holding.insert(init_key);
+                    }
+                    if needs_ata_create {
+                        // Now-created ATA exists for the rest of the pass.
+                        known_existing_atas.insert(destination_ata);
                     }
                 }
                 Err(error) => {
@@ -348,23 +458,25 @@ pub async fn try_distribute_pending(
                         "  epoch {} mint {publisher_mint}: failed: {error:#}",
                         candidate.subscription_epoch
                     );
-                    outcome.failed += 1;
+                    outcome.submits_failed += 1;
                 }
             }
         }
 
         if !any_distributed_this_epoch {
-            outcome.skipped += 1;
+            outcome.epochs_unsettled += 1;
         }
     }
 
-    println!(
-        "\nDistribute pass complete: {} succeeded, {} skipped, {} failed.",
-        outcome.successful, outcome.skipped, outcome.failed,
-    );
     Ok(outcome)
 }
 
+// Builds and submits one distribute tx. The CLI version check is NOT
+// prepended here — the configure tx that ran before this pass already
+// enforced version compatibility for the operator session, so re-running
+// it ~300 times during the pass is wasted CU. Future callers that invoke
+// `try_distribute_pending` outside the configure flow are responsible for
+// running their own version gate at the top of the pass.
 #[allow(clippy::too_many_arguments)]
 async fn submit_distribute_tx(
     wallet: &Wallet,
@@ -375,9 +487,10 @@ async fn submit_distribute_tx(
     node_id: &Pubkey,
     dz_mint_key: &Pubkey,
     needs_init: bool,
+    needs_ata_create: bool,
+    recent_blockhash: Hash,
 ) -> Result<()> {
-    let mut instructions: Vec<Instruction> =
-        vec![super::super::build_check_cli_version_instruction()?];
+    let mut instructions: Vec<Instruction> = Vec::new();
 
     if needs_init {
         let init_ix = try_build_instruction(
@@ -398,22 +511,17 @@ async fn submit_distribute_tx(
     // configured mint when we're distributing from a journal seeded
     // historically against a different mint. `configure` only creates the
     // ATA for the current mint, so we (idempotently) create whatever
-    // destination this specific tx needs. No-op when it already exists.
-    instructions.push(create_associated_token_account_idempotent(
-        &wallet.pubkey(),
-        rewards_token_owner_key,
-        &publisher_journal.reward_mint_key,
-        &spl_token_interface::ID,
-    ));
-
-    // Omit-rule: when the validator's publisher mint is already 2Z, the
-    // publisher journal also plays the client role. Signal that to the
-    // account-builder by passing `None`.
-    let client_mint_arg = if publisher_mint_key == dz_mint_key {
-        None
-    } else {
-        Some(dz_mint_key)
-    };
+    // destination this specific tx needs. Skipped when we already know
+    // the destination ATA exists (pre-fetched at the top of the pass,
+    // plus any ATA freshly created earlier in the same pass).
+    if needs_ata_create {
+        instructions.push(create_associated_token_account_idempotent(
+            &wallet.pubkey(),
+            rewards_token_owner_key,
+            &publisher_journal.reward_mint_key,
+            &spl_token_interface::ID,
+        ));
+    }
 
     let distribute_ix = try_build_instruction(
         &ID,
@@ -425,7 +533,9 @@ async fn submit_distribute_tx(
             rewards_token_owner_key,
             publisher_mint_key,
             publisher_reward_mint_key: &publisher_journal.reward_mint_key,
-            client_mint_key: client_mint_arg,
+            // Builder applies the omit-rule when this equals
+            // `publisher_mint_key`.
+            client_mint_key: dz_mint_key,
         },
         &ShredSubscriptionInstructionData::DistributeValidatorRewards {
             leader_slots: candidate.leaf.leader_slots,
@@ -435,16 +545,33 @@ async fn submit_distribute_tx(
     instructions.push(distribute_ix);
 
     // Per-ix headroom: ~30k init_claim_holding (only when `needs_init`),
-    // ~25k create_ata_idempotent (no-op if the ATA already exists, but the
-    // SPL Token program's existence check still costs some CU), ~150k
+    // ~25k create_ata_idempotent (only when `needs_ata_create`), ~150k
     // distribute. Same upper bounds as the admin command's submission loop.
-    let cu_limit = if needs_init { 205_000 } else { 175_000 };
+    let cu_limit =
+        150_000 + if needs_init { 30_000 } else { 0 } + if needs_ata_create { 25_000 } else { 0 };
     instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(cu_limit));
     if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
         instructions.push(compute_unit_price_ix.clone());
     }
 
-    let transaction = wallet.new_transaction(&instructions).await?;
+    // Inlined tx build (replaces `wallet.new_transaction`) so we can reuse
+    // the cached blockhash and skip the per-tx `getLatestBlockhash` RPC.
+    // Signer assembly mirrors `Wallet::new_transaction_with_additional_signers_and_lookup_tables`:
+    // when `--fee-payer` is set it signs first; the `-k` signer is added
+    // only if its pubkey differs from the fee payer's.
+    let mut signers: Vec<&Keypair> = Vec::with_capacity(2);
+    match wallet.fee_payer {
+        Some(ref fee_payer) => {
+            signers.push(fee_payer);
+            if wallet.signer.pubkey() != fee_payer.pubkey() {
+                signers.push(&wallet.signer);
+            }
+        }
+        None => {
+            signers.push(&wallet.signer);
+        }
+    }
+    let transaction = try_new_transaction(&instructions, &signers, &[], recent_blockhash)?;
     let tx_outcome = wallet.send_or_simulate_transaction(&transaction).await?;
     if let TransactionOutcome::Executed(tx_sig) = tx_outcome {
         println!(
@@ -490,5 +617,40 @@ mod tests {
     #[test]
     fn test_bitmap_bit_set_empty() {
         assert!(!bitmap_bit_set(&[], 0));
+    }
+
+    /// Mirrors on-chain `try_process_remaining_data_leaf_index` (see
+    /// `programs/shred-subscription/src/processor/common.rs`) byte-for-byte:
+    /// `bitmap[leaf_index / 8] |= 1 << (leaf_index % 8)` (LSB-first within
+    /// the byte, via `ByteFlags::set_bit`). If the on-chain accumulate ix
+    /// ever changes either the byte indexing or the bit ordering, update
+    /// this helper to match — the parity test below will then fail until
+    /// `bitmap_bit_set` is brought back in sync.
+    fn set_leaf_accumulated_onchain_style(bitmap: &mut [u8], leaf_index: u32) {
+        let byte_index = (leaf_index as usize) / 8;
+        let bit_index = (leaf_index as usize) % 8;
+        bitmap[byte_index] |= 1 << bit_index;
+    }
+
+    #[test]
+    fn bitmap_bit_set_matches_onchain_accumulate_convention() {
+        // Build a bitmap by following the on-chain accumulate steps for a
+        // chosen set of leaf indices, then verify our reader sees exactly
+        // those bits set. Indices are deliberately sparse across byte
+        // boundaries (0, 7, 8 hit the byte-boundary edge; 64, 100, 127
+        // exercise sparse high indices).
+        let mut bitmap = vec![0u8; 16];
+        let accumulated_indices: &[u32] = &[0, 3, 7, 8, 9, 17, 64, 100, 127];
+        for &leaf_index in accumulated_indices {
+            set_leaf_accumulated_onchain_style(&mut bitmap, leaf_index);
+        }
+        for leaf_index in 0u32..128 {
+            let expected = accumulated_indices.contains(&leaf_index);
+            assert_eq!(
+                bitmap_bit_set(&bitmap, leaf_index as usize),
+                expected,
+                "leaf_index {leaf_index}"
+            );
+        }
     }
 }
