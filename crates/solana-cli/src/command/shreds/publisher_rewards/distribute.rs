@@ -68,19 +68,20 @@ const DISTRIBUTE_LOOKBACK_EPOCHS: u64 = 100;
 /// that roughly 8x while staying polite to S3.
 const S3_FETCH_CONCURRENCY: usize = 8;
 
-/// Counters surfaced at the end of a distribute pass. The three counters
-/// have **different units** on purpose — read the summary line, not the
-/// raw struct:
-/// - `submits_succeeded` / `submits_failed`: per-`(epoch, mint)` tx
-///   submission. One epoch can contribute up to 3 of either.
-/// - `epochs_unsettled`: per-epoch. Fires when the pass ended without any
-///   successful distribute for this leaf in that epoch (covers both
-///   "nothing eligible to do" and "tried and all submits failed").
+/// Counters surfaced at the end of a distribute pass.
+/// - `distributed`: distribute txs that landed.
+/// - `failed`: distribute txs that errored, plus epochs we couldn't even
+///   evaluate (S3 fetch / merkle-leaf failures). Each has a logged reason.
+///
+/// Epochs with nothing to do — the leaf's bitmap bit is already clear
+/// because it was distributed in a prior run or never routed to this
+/// journal — are intentionally NOT counted. A clear bit means "settled",
+/// so counting it would make every re-run report a growing pile of
+/// phantom "unsettled" epochs.
 #[derive(Debug, Default)]
 pub struct DistributeOutcome {
-    pub submits_succeeded: u32,
-    pub submits_failed: u32,
-    pub epochs_unsettled: u32,
+    pub distributed: u32,
+    pub failed: u32,
 }
 
 /// Per-(epoch, leaf) bundle of everything needed to build a distribute tx
@@ -204,7 +205,7 @@ pub async fn try_distribute_pending(
             Ok(entries) => entries,
             Err(err) => {
                 eprintln!("  epoch {epoch}: failed to fetch S3 leaves: {err:#}");
-                outcome.epochs_unsettled += 1;
+                outcome.failed += 1;
                 continue;
             }
         };
@@ -219,7 +220,7 @@ pub async fn try_distribute_pending(
             Ok(c) => c,
             Err(err) => {
                 eprintln!("  epoch {epoch}: failed to compute merkle leaves: {err:#}");
-                outcome.epochs_unsettled += 1;
+                outcome.failed += 1;
                 continue;
             }
         };
@@ -382,7 +383,6 @@ pub async fn try_distribute_pending(
                 "  epoch {}: skipped — parent distribution missing",
                 candidate.subscription_epoch
             );
-            outcome.epochs_unsettled += 1;
             continue;
         }
         let parent_distribution: ZeroCopyAccountOwnedData<ParentDistribution> =
@@ -393,7 +393,6 @@ pub async fn try_distribute_pending(
                         "  epoch {}: skipped — parent distribution malformed",
                         candidate.subscription_epoch
                     );
-                    outcome.epochs_unsettled += 1;
                     continue;
                 }
             };
@@ -402,12 +401,10 @@ pub async fn try_distribute_pending(
                 "  epoch {}: skipped — parent rewards not finalized",
                 candidate.subscription_epoch
             );
-            outcome.epochs_unsettled += 1;
             continue;
         }
 
         let claim_holding_exists = !claim_holding_accounts[candidate_index].data.is_empty();
-        let mut any_distributed_this_epoch = false;
 
         for (mint_index, publisher_mint) in journal_mint_candidates.iter().enumerate() {
             let journal_account = &journal_accounts[candidate_index * 3 + mint_index];
@@ -460,8 +457,7 @@ pub async fn try_distribute_pending(
             .await
             {
                 Ok(()) => {
-                    outcome.submits_succeeded += 1;
-                    any_distributed_this_epoch = true;
+                    outcome.distributed += 1;
                     if needs_init {
                         emitted_init_for_holding.insert(init_key);
                     }
@@ -477,13 +473,9 @@ pub async fn try_distribute_pending(
                         "  epoch {} mint {publisher_mint}: failed: {summary}",
                         candidate.subscription_epoch
                     );
-                    outcome.submits_failed += 1;
+                    outcome.failed += 1;
                 }
             }
-        }
-
-        if !any_distributed_this_epoch {
-            outcome.epochs_unsettled += 1;
         }
     }
 

@@ -336,10 +336,8 @@ impl ConfigureCommand {
             match distribute_result {
                 Ok(outcome) => {
                     println!(
-                        "\nDistribute pass complete:\n  \
-                         submits: {} succeeded, {} failed\n  \
-                         epochs:  {} still unsettled for this leaf",
-                        outcome.submits_succeeded, outcome.submits_failed, outcome.epochs_unsettled,
+                        "\nDistribute pass complete: {} distributed, {} failed.",
+                        outcome.distributed, outcome.failed,
                     );
                 }
                 Err(error) => {
