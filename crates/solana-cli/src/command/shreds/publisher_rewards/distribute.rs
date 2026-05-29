@@ -38,8 +38,9 @@ use doublezero_solana_sdk::{
         },
         state::{
             ShredDistribution, ShredDistributionJournal, find_claim_holding_address,
-            find_shred_distribution_address, find_shred_distribution_journal_address,
-            find_validator_client_rewards_address,
+            find_program_config_address, find_shred_distribution_address,
+            find_shred_distribution_journal_address, find_validator_client_rewards_address,
+            is_distribute_validator_rewards_enabled,
         },
         types::ValidatorRewardsLeaf,
     },
@@ -99,6 +100,24 @@ pub async fn try_distribute_pending(
     rewards_token_owner_key: &Pubkey,
     network_env: NetworkEnvironment,
 ) -> Result<DistributeOutcome> {
+    let mut outcome = DistributeOutcome::default();
+
+    // Check if distribute flag is enabled in ProgramConfig.
+    let program_config_account = wallet
+        .connection
+        .try_fetch_multiple_accounts(&[find_program_config_address().0])
+        .await
+        .context("fetching program config")?;
+    let distribute_enabled = program_config_account
+        .first()
+        .is_some_and(|account| is_distribute_validator_rewards_enabled(&account.data));
+    if !distribute_enabled {
+        println!(
+            "\nDistribute is not enabled on this cluster yet; skipping pending-rewards distribution."
+        );
+        return Ok(outcome);
+    }
+
     // `wallet.connection` is the DZ-Ledger RPC (program host). Its epoch
     // is the DZ-Ledger epoch, which has no relation to the Solana epoch
     // on testnet/localnet. `subscription_epoch` PDAs and S3 file names
@@ -121,8 +140,6 @@ pub async fn try_distribute_pending(
     let usdc_mint_key = environment_usdc_token_mint_key(network_env);
     let wsol_mint_key = spl_token_interface::native_mint::ID;
     let journal_mint_candidates = [dz_mint_key, usdc_mint_key, wsol_mint_key];
-
-    let mut outcome = DistributeOutcome::default();
 
     // ----- Step 1: batch fetch ShredDistribution accounts in the window -----
 
@@ -454,8 +471,10 @@ pub async fn try_distribute_pending(
                     }
                 }
                 Err(error) => {
+                    let full = format!("{error:#}");
+                    let summary = full.lines().next().unwrap_or(&full);
                     eprintln!(
-                        "  epoch {} mint {publisher_mint}: failed: {error:#}",
+                        "  epoch {} mint {publisher_mint}: failed: {summary}",
                         candidate.subscription_epoch
                     );
                     outcome.submits_failed += 1;

@@ -191,6 +191,7 @@ pub const PROGRAM_CONFIG_FLAGS_OFFSET: usize = DISCRIMINATOR_LEN;
 pub const PROGRAM_CONFIG_SHRED_ORACLE_KEY_OFFSET: usize = DISCRIMINATOR_LEN + 48;
 
 const PROGRAM_CONFIG_FLAG_IS_PRORATED_SERVICE_ENABLED_BIT: u64 = 1 << 2;
+const PROGRAM_CONFIG_FLAG_DISTRIBUTE_VALIDATOR_REWARDS_ENABLED_BIT: u64 = 1 << 5;
 
 /// Returns `true` if the `is_prorated_service_enabled` bit is set on the
 /// raw `ProgramConfig` account data. Returns `false` for accounts that are
@@ -207,6 +208,26 @@ pub fn is_prorated_service_enabled(data: &[u8]) -> bool {
     };
     let flags = u64::from_le_bytes(flags_bytes);
     flags & PROGRAM_CONFIG_FLAG_IS_PRORATED_SERVICE_ENABLED_BIT != 0
+}
+
+/// Returns `true` if the `distribute_validator_rewards_enabled` bit is set
+/// on the raw `ProgramConfig` account data. Mirrors the on-chain
+/// `ProgramConfig::FLAG_DISTRIBUTE_VALIDATOR_REWARDS_ENABLED_BIT` (bit 5).
+/// Returns `false` when the account is too short or the flag is unset —
+/// the on-chain `DistributeValidatorRewards` handler rejects with
+/// "Distribute validator rewards is disabled" in that state, so callers
+/// should skip distribute attempts when this returns `false`.
+pub fn is_distribute_validator_rewards_enabled(data: &[u8]) -> bool {
+    if data.len() < PROGRAM_CONFIG_FLAGS_OFFSET + 8 {
+        return false;
+    }
+    let Ok(flags_bytes) =
+        <[u8; 8]>::try_from(&data[PROGRAM_CONFIG_FLAGS_OFFSET..PROGRAM_CONFIG_FLAGS_OFFSET + 8])
+    else {
+        return false;
+    };
+    let flags = u64::from_le_bytes(flags_bytes);
+    flags & PROGRAM_CONFIG_FLAG_DISTRIBUTE_VALIDATOR_REWARDS_ENABLED_BIT != 0
 }
 
 /// Parse the `shred_oracle_key` from a `ProgramConfig` account. Returns
@@ -943,6 +964,28 @@ mod tests {
     #[test]
     fn prorated_enabled_empty_buffer_returns_false() {
         assert!(!is_prorated_service_enabled(&[]));
+    }
+
+    #[test]
+    fn distribute_validator_rewards_enabled_bit_set() {
+        let data = program_config_data_with_flags(
+            PROGRAM_CONFIG_FLAG_DISTRIBUTE_VALIDATOR_REWARDS_ENABLED_BIT,
+        );
+        assert!(is_distribute_validator_rewards_enabled(&data));
+    }
+
+    #[test]
+    fn distribute_validator_rewards_disabled_when_unset() {
+        // All lower bits set (paused, prorated, accumulate, jupiter) but
+        // not bit 5 — must not be mistaken for distribute-enabled.
+        let data = program_config_data_with_flags(0b01_1111);
+        assert!(!is_distribute_validator_rewards_enabled(&data));
+    }
+
+    #[test]
+    fn distribute_validator_rewards_enabled_short_buffer_returns_false() {
+        let data = vec![0u8; PROGRAM_CONFIG_FLAGS_OFFSET + 4];
+        assert!(!is_distribute_validator_rewards_enabled(&data));
     }
 
     fn client_seat_data_with_last_price(price_dollars: u16) -> Vec<u8> {
