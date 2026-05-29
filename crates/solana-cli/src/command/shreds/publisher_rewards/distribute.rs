@@ -22,7 +22,6 @@ use doublezero_solana_client_tools::{
     account::zero_copy::ZeroCopyAccountOwnedData,
     payer::{TransactionOutcome, Wallet},
     rpc::{NetworkEnvironment, SolanaConnection},
-    transaction::try_new_transaction,
 };
 use doublezero_solana_sdk::{
     Pubkey, environment_2z_token_mint_key, environment_usdc_token_mint_key,
@@ -47,10 +46,7 @@ use doublezero_solana_sdk::{
     try_build_instruction,
 };
 use futures::stream::{self, StreamExt};
-use solana_sdk::{
-    compute_budget::ComputeBudgetInstruction, hash::Hash, instruction::Instruction,
-    signature::Keypair, signer::Signer,
-};
+use solana_sdk::{compute_budget::ComputeBudgetInstruction, instruction::Instruction};
 use spl_associated_token_account_interface::{
     address::get_associated_token_address, instruction::create_associated_token_account_idempotent,
 };
@@ -325,7 +321,7 @@ pub async fn try_distribute_pending(
         .await
         .context("fetching claim holding accounts")?;
 
-    // ----- Step 6: pre-fetch destination ATAs + cache the blockhash -----
+    // ----- Step 6: pre-fetch destination ATAs -----
     //
     // Across the entire pass there are at most three distinct
     // destination ATAs (one per candidate reward mint:
@@ -335,12 +331,6 @@ pub async fn try_distribute_pending(
     // the destination is actually missing — saves ~25k CU per tx that
     // would otherwise pay the SPL Token existence check on a no-op
     // create. The set is mutated as freshly-created ATAs land.
-    //
-    // The blockhash is also cached once. `new_transaction` normally
-    // calls `getLatestBlockhash` per tx; for ~300 distribute txs that's
-    // 300 redundant RPCs. Blockhashes stay valid for ~60-90 s, well
-    // above this pass's wall time; on `BlockhashNotFound` at submit the
-    // operator re-runs (the pass is idempotent).
     let candidate_destination_atas: Vec<Pubkey> = journal_mint_candidates
         .iter()
         .map(|mint| get_associated_token_address(rewards_token_owner_key, mint))
@@ -355,12 +345,6 @@ pub async fn try_distribute_pending(
         .zip(candidate_destination_ata_accounts.iter())
         .filter_map(|(ata, account)| (!account.data.is_empty()).then_some(*ata))
         .collect();
-
-    let cached_blockhash = wallet
-        .connection
-        .get_latest_blockhash()
-        .await
-        .context("fetching cached blockhash for distribute pass")?;
 
     // ----- Step 7: in-memory decision loop, submit per (epoch, mint) -----
     //
@@ -452,7 +436,6 @@ pub async fn try_distribute_pending(
                 &dz_mint_key,
                 needs_init,
                 needs_ata_create,
-                cached_blockhash,
             )
             .await
             {
@@ -499,7 +482,6 @@ async fn submit_distribute_tx(
     dz_mint_key: &Pubkey,
     needs_init: bool,
     needs_ata_create: bool,
-    recent_blockhash: Hash,
 ) -> Result<()> {
     let mut instructions: Vec<Instruction> = Vec::new();
 
@@ -565,24 +547,11 @@ async fn submit_distribute_tx(
         instructions.push(compute_unit_price_ix.clone());
     }
 
-    // Inlined tx build (replaces `wallet.new_transaction`) so we can reuse
-    // the cached blockhash and skip the per-tx `getLatestBlockhash` RPC.
-    // Signer assembly mirrors `Wallet::new_transaction_with_additional_signers_and_lookup_tables`:
-    // when `--fee-payer` is set it signs first; the `-k` signer is added
-    // only if its pubkey differs from the fee payer's.
-    let mut signers: Vec<&Keypair> = Vec::with_capacity(2);
-    match wallet.fee_payer {
-        Some(ref fee_payer) => {
-            signers.push(fee_payer);
-            if wallet.signer.pubkey() != fee_payer.pubkey() {
-                signers.push(&wallet.signer);
-            }
-        }
-        None => {
-            signers.push(&wallet.signer);
-        }
-    }
-    let transaction = try_new_transaction(&instructions, &signers, &[], recent_blockhash)?;
+    // Fetch a fresh blockhash per tx. The pass submits sequentially and a
+    // validator with many pending epochs can run long enough that a single
+    // blockhash cached up front ages out of the cluster's validity window
+    // mid-pass — every later tx then fails with "Blockhash not found".
+    let transaction = wallet.new_transaction(&instructions).await?;
     let tx_outcome = wallet.send_or_simulate_transaction(&transaction).await?;
     if let TransactionOutcome::Executed(tx_sig) = tx_outcome {
         println!(
