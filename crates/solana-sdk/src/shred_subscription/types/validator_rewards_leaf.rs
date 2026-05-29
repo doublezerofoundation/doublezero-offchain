@@ -16,6 +16,12 @@ pub struct ValidatorRewardsLeaf {
     _reserved: [u8; 2],
 }
 
+// Mirror the canonical impl's `assert_eq!(size_of::<ValidatorRewardsLeaf>(), 40)`.
+// This leaf is hashed into the merkle tree the on-chain program verifies
+// proofs against, so any field-order or padding drift must break the build
+// here rather than silently produce non-matching proofs.
+const _: () = assert!(std::mem::size_of::<ValidatorRewardsLeaf>() == 40);
+
 impl ValidatorRewardsLeaf {
     pub const LEAF_PREFIX: &'static [u8] = b"dz::validator_rewards";
 
