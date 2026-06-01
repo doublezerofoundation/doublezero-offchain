@@ -1,9 +1,13 @@
-use std::{str::FromStr, sync::Arc};
+use std::{io::Write, str::FromStr, sync::Arc};
 
 use anyhow::{Result, bail};
 use clap::Args;
+use doublezero_cli_core::CliContext;
 use doublezero_ledger_sentinel::client::solana::SolRpcClient;
-use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutcome, Wallet};
+use doublezero_solana_client_tools::{
+    payer::{SolanaPayerOptions, SolanaSignerOptions, TransactionOutcome, Wallet},
+    rpc::{SolanaConnection, SolanaConnectionOptions},
+};
 use doublezero_solana_sdk::{
     passport::{
         ID,
@@ -22,44 +26,64 @@ use solana_sdk::{
 };
 use url::Url;
 
-use super::{
-    SharedAccessArgs,
+use crate::{
     access_validation::{should_continue_after_validation, validate_validator_access},
+    shared::SharedAccessArgs,
+    util::identify_cluster,
 };
-use crate::utils::identify_cluster;
-/*
-   doublezero-solana passport request-access --doublezero-address SSSS --primary-validator-id AAA --backup-validator-ids BBB,CCC --signature XXXXX
-*/
 
 #[derive(Debug, Args)]
-pub struct RequestValidatorAccessCommand {
+pub struct RequestValidatorAccessArgs {
     #[command(flatten)]
-    shared: SharedAccessArgs,
+    pub shared: SharedAccessArgs,
     /// Base58-encoded ed25519 signature of the access request message (service_key=AAA,backup_ids=BBBB,CCCC,DDDD)
     #[arg(long, short = 's', value_name = "BASE58_STRING")]
-    signature: String,
+    pub signature: String,
 
     /// Continue and submit transaction even if validation fails
     #[arg(long = "force", hide = true, default_value_t = false)]
-    force: bool,
+    pub force: bool,
 
     /// Offchain message version. ONLY 0 IS SUPPORTED.
     #[arg(long, value_name = "U8", default_value = "0")]
-    message_version: u8,
+    pub message_version: u8,
 
-    #[command(flatten)]
-    solana_payer_options: SolanaPayerOptions,
+    // --- Transaction-building knobs (per RFC-20 these are verb-owned, not
+    // global connection/identity config; connection + keypair come from
+    // `CliContext`). These mirror the legacy `SolanaSignerOptions` flags so the
+    // offchain CLI surface is unchanged.
+    /// Set the compute unit price for transaction in increments of 0.000001 lamports per compute unit.
+    #[arg(long, value_name = "MICROLAMPORTS", env)]
+    pub with_compute_unit_price: Option<u64>,
+
+    /// Print verbose output.
+    #[arg(long, short = 'v', value_name = "VERBOSE", default_value = "false", env)]
+    pub verbose: bool,
+
+    /// Filepath or URL to keypair to pay transaction fee.
+    #[arg(long = "fee-payer", value_name = "KEYPAIR", env)]
+    pub fee_payer_path: Option<String>,
+
+    /// Simulate transaction only.
+    #[arg(long, value_name = "DRY_RUN", env)]
+    pub dry_run: bool,
 }
 
-impl RequestValidatorAccessCommand {
-    pub async fn try_into_execute(self) -> Result<()> {
-        let wallet = Wallet::try_from(self.solana_payer_options.clone())?;
+impl RequestValidatorAccessArgs {
+    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> eyre::Result<()> {
+        self.run(ctx, out).await.map_err(|e| eyre::eyre!("{e:#}"))
+    }
 
-        println!("DoubleZero Passport - Request Validator Access");
+    async fn run(self, ctx: &CliContext, out: &mut impl Write) -> Result<()> {
+        tracing::debug!(env = %ctx.env, "passport request-validator-access");
+
+        let wallet = self.build_wallet(ctx)?;
+
+        writeln!(out, "DoubleZero Passport - Request Validator Access")?;
 
         let cluster = identify_cluster(&wallet.connection).await;
-        println!("Connected to Solana: {:}", cluster);
-        println!("\nDoubleZero Address: {}\n", self.shared.doublezero_address);
+        writeln!(out, "Connected to Solana: {cluster}")?;
+        writeln!(out, "\nDoubleZero Address: {}\n", self.shared.doublezero_address)?;
 
         let sol_client = SolRpcClient::new(
             Url::parse(&wallet.connection.url()).unwrap(),
@@ -67,6 +91,7 @@ impl RequestValidatorAccessCommand {
         );
 
         let validation_errors = validate_validator_access(
+            out,
             &wallet.connection,
             &sol_client,
             &self.shared.primary_validator_id,
@@ -74,7 +99,7 @@ impl RequestValidatorAccessCommand {
             self.shared.leader_schedule_epochs,
         )
         .await?;
-        if !should_continue_after_validation(&validation_errors, self.force) {
+        if !should_continue_after_validation(out, &validation_errors, self.force)? {
             return Ok(());
         }
 
@@ -85,10 +110,10 @@ impl RequestValidatorAccessCommand {
             bail!("Access request already exists: {address}");
         }
 
-        let tx_sig = self.request_access(&wallet).await?;
+        let tx_sig = self.request_access(&wallet, out).await?;
 
         if let TransactionOutcome::Executed(tx_sig) = tx_sig {
-            println!("Request Solana validator access: {tx_sig}");
+            writeln!(out, "Request Solana validator access: {tx_sig}")?;
 
             wallet.print_verbose_output(&[tx_sig]).await?;
         }
@@ -96,18 +121,41 @@ impl RequestValidatorAccessCommand {
         Ok(())
     }
 
-    async fn request_access(&self, wallet: &Wallet) -> Result<TransactionOutcome> {
+    /// Build a `Wallet` from `CliContext` (connection URL + keypair path) plus
+    /// the verb-owned transaction knobs. Reuses the shared keypair-loading and
+    /// fee-payer logic in `Wallet::try_new`.
+    fn build_wallet(&self, ctx: &CliContext) -> Result<Wallet> {
+        let opts = SolanaPayerOptions {
+            connection_options: SolanaConnectionOptions::default(),
+            signer_options: SolanaSignerOptions {
+                keypair_path: ctx
+                    .keypair_path
+                    .as_ref()
+                    .map(|p| p.to_string_lossy().into_owned()),
+                with_compute_unit_price: self.with_compute_unit_price,
+                verbose: self.verbose,
+                fee_payer_path: self.fee_payer_path.clone(),
+                dry_run: self.dry_run,
+            },
+        };
+        let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
+        Wallet::try_new(opts, Some(connection))
+    }
+
+    async fn request_access(
+        &self,
+        wallet: &Wallet,
+        out: &mut impl Write,
+    ) -> Result<TransactionOutcome> {
         let ed25519_signature = Signature::from_str(&self.signature)?;
         let wallet_key = wallet.pubkey();
 
-        // Create attestation
         let attestation = SolanaValidatorAttestation {
             validator_id: self.shared.primary_validator_id,
             service_key: self.shared.doublezero_address,
             ed25519_signature: ed25519_signature.into(),
         };
 
-        // Verify the signature.
         let access_mode = if self.shared.backup_validator_ids.is_empty() {
             AccessMode::SolanaValidator(attestation)
         } else {
@@ -119,8 +167,8 @@ impl RequestValidatorAccessCommand {
 
         let raw_message = AccessRequest::access_request_message(&access_mode);
 
-        if self.solana_payer_options.signer_options.verbose {
-            println!("Raw message: {raw_message}");
+        if self.verbose {
+            writeln!(out, "Raw message: {raw_message}")?;
         }
 
         let message = OffchainMessage::new(self.message_version, raw_message.as_bytes())?;
@@ -131,11 +179,12 @@ impl RequestValidatorAccessCommand {
             &serialized_message,
         ) {
             bail!("Signature verification failed");
-        } else if self.solana_payer_options.signer_options.verbose {
-            println!(
+        } else if self.verbose {
+            writeln!(
+                out,
                 "Signature recovers node ID: {}",
                 self.shared.primary_validator_id
-            );
+            )?;
         }
 
         let request_access_ix = try_build_instruction(
