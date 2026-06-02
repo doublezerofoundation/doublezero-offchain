@@ -43,10 +43,14 @@ impl PrepareValidatorAccessArgs {
         } = self.shared;
 
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        let sol_client = SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
+        let sol_client =
+            SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
 
         let cluster = identify_cluster(&connection).await?;
-        writeln!(out, "DoubleZero Passport - Prepare Validator Access Request")?;
+        writeln!(
+            out,
+            "DoubleZero Passport - Prepare Validator Access Request"
+        )?;
         writeln!(out, "Connected to Solana: {cluster}")?;
         writeln!(out, "\nDoubleZero Address: {doublezero_address}\n")?;
 

@@ -36,11 +36,13 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use clap::CommandFactory;
 
+    use super::*;
+
     const PK: &str = "DZtnuQ839pSaDMFG5q1ad2V95G82S5EC4RrB3Ndw2Heb";
-    const SIG: &str = "5wHu1qwD4kLwd9DnXcAgkbdJVDQfqQfXY3xn2pxBYNqDjT9rh9XkVxqGc8gQH6w2xR8jKfP4t1pYqJ7sJ5h4wK2";
+    const SIG: &str =
+        "5wHu1qwD4kLwd9DnXcAgkbdJVDQfqQfXY3xn2pxBYNqDjT9rh9XkVxqGc8gQH6w2xR8jKfP4t1pYqJ7sJ5h4wK2";
 
     /// clap's own consistency checks for the whole command tree (no overlapping
     /// flags, valid arg config, etc.).

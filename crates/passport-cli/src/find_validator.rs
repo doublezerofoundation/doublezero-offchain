@@ -46,7 +46,8 @@ impl FindValidatorArgs {
         writeln!(out, "DoubleZero Passport - Find Validator")?;
 
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        let sol_client = SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
+        let sol_client =
+            SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
 
         let cluster = identify_cluster(&connection).await?;
         writeln!(out, "Connected to Solana: {cluster}\n")?;
@@ -102,11 +103,14 @@ impl FindValidatorArgs {
         tracing::debug!(env = %ctx.env, "passport find-validator (json)");
 
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        let sol_client = SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
+        let sol_client =
+            SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
 
         let mut view = ValidatorLookupView {
             cluster: identify_cluster(&connection).await?.to_string(),
-            doublezero_id: get_doublezero_pubkey().ok().map(|kp| kp.pubkey().to_string()),
+            doublezero_id: get_doublezero_pubkey()
+                .ok()
+                .map(|kp| kp.pubkey().to_string()),
             ..Default::default()
         };
 
@@ -138,7 +142,14 @@ impl FindValidatorArgs {
                         .unwrap_or_else(|| "<unknown>".to_string()),
                 );
                 view.in_leader_schedule = Some(in_leader_schedule);
-                view.role = Some(if in_leader_schedule { "primary" } else { "backup" }.to_string());
+                view.role = Some(
+                    if in_leader_schedule {
+                        "primary"
+                    } else {
+                        "backup"
+                    }
+                    .to_string(),
+                );
                 view.visible_in_gossip = true;
             }
             None => {
@@ -256,7 +267,10 @@ mod tests {
     fn dummy_client() -> SolRpcClient {
         // No network calls happen on the not-in-gossip paths (the node is never
         // found), so any well-formed URL works.
-        SolRpcClient::new(Url::parse("http://127.0.0.1:8899").unwrap(), Arc::new(Keypair::new()))
+        SolRpcClient::new(
+            Url::parse("http://127.0.0.1:8899").unwrap(),
+            Arc::new(Keypair::new()),
+        )
     }
 
     #[tokio::test]

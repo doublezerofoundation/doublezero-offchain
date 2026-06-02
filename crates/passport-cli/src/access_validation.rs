@@ -55,7 +55,10 @@ where
     let mut errors = Vec::<String>::new();
     let leader_schedule_epochs = leader_schedule_epochs.unwrap_or(ENV_PREVIOUS_LEADER_EPOCHS);
 
-    writeln!(out, "Primary validator 🖥️  💎:\n  ID: {primary_validator_id} ")?;
+    writeln!(
+        out,
+        "Primary validator 🖥️  💎:\n  ID: {primary_validator_id} "
+    )?;
     if let Some(node) = find_node_by_node_id(nodes, primary_validator_id) {
         writeln!(
             out,
@@ -211,7 +214,12 @@ mod tests {
 
         let mut out = Vec::new();
         let errors = validate_validator_access_with_nodes(
-            &mut out, &nodes, &client, &primary, &[backup], None,
+            &mut out,
+            &nodes,
+            &client,
+            &primary,
+            &[backup],
+            None,
         )
         .await
         .unwrap();
@@ -248,7 +256,12 @@ mod tests {
 
         let mut out = Vec::new();
         let errors = validate_validator_access_with_nodes(
-            &mut out, &nodes, &client, &primary, &[backup], None,
+            &mut out,
+            &nodes,
+            &client,
+            &primary,
+            &[backup],
+            None,
         )
         .await
         .unwrap();

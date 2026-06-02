@@ -57,9 +57,7 @@ struct FetchView {
 fn access_mode_label(access_request: &AccessRequest) -> &'static str {
     match access_request.checked_access_mode() {
         Some(AccessMode::SolanaValidator(_)) => "Solana validator",
-        Some(AccessMode::SolanaValidatorWithBackupIds { .. }) => {
-            "Solana validator with backup IDs"
-        }
+        Some(AccessMode::SolanaValidatorWithBackupIds { .. }) => "Solana validator with backup IDs",
         None => "Unknown",
     }
 }
@@ -152,14 +150,26 @@ fn write_program_config_human<W: Write>(
         out,
         "----------------------------------+-------------------------------------------------"
     )?;
-    writeln!(out, "Is program paused?                | {}", program_config.is_paused())?;
+    writeln!(
+        out,
+        "Is program paused?                | {}",
+        program_config.is_paused()
+    )?;
     writeln!(
         out,
         "Is request access paused?         | {}",
         program_config.is_request_access_paused()
     )?;
-    writeln!(out, "Admin key                         | {}", program_config.admin_key)?;
-    writeln!(out, "Sentinel key                      | {}", program_config.sentinel_key)?;
+    writeln!(
+        out,
+        "Admin key                         | {}",
+        program_config.admin_key
+    )?;
+    writeln!(
+        out,
+        "Sentinel key                      | {}",
+        program_config.sentinel_key
+    )?;
     writeln!(
         out,
         "Request deposit                   | {:.9} SOL",
@@ -190,7 +200,10 @@ fn write_access_request_human<W: Write>(
     writeln!(out, "Access request: {access_request_key}")?;
     writeln!(out)?;
     writeln!(out, "Field                | Value")?;
-    writeln!(out, "---------------------+-------------------------------------------------")?;
+    writeln!(
+        out,
+        "---------------------+-------------------------------------------------"
+    )?;
     writeln!(out, "Service key          | {}", access_request.service_key)?;
     writeln!(
         out,
@@ -207,9 +220,7 @@ fn write_access_request_human<W: Write>(
     Ok(())
 }
 
-async fn fetch_program_config(
-    connection: &SolanaConnection,
-) -> Result<(Pubkey, ProgramConfig)> {
+async fn fetch_program_config(connection: &SolanaConnection) -> Result<(Pubkey, ProgramConfig)> {
     let (program_config_key, _) = ProgramConfig::find_address();
 
     let program_config = connection

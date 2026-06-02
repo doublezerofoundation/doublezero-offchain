@@ -9,6 +9,8 @@
 //!
 //! New flags (`--json`, `--json-compact`) are additive on the read verbs.
 
+use std::path::PathBuf;
+
 use anyhow::Result;
 use clap::{Args, Subcommand};
 use doublezero_cli_core::{CliContext, CliContextBuilder, OutputFormat};
@@ -17,7 +19,6 @@ use doublezero_passport_cli as lib;
 use doublezero_solana_client_tools::rpc::{
     NetworkEnvironment, SolanaConnection, SolanaConnectionOptions,
 };
-use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub struct PassportCommand {
@@ -47,7 +48,11 @@ pub struct FetchAdapter {
     #[arg(long, default_value_t = false, conflicts_with = "json_compact")]
     json: bool,
     /// Output as single-line JSON suitable for piping
-    #[arg(long = "json-compact", default_value_t = false, conflicts_with = "json")]
+    #[arg(
+        long = "json-compact",
+        default_value_t = false,
+        conflicts_with = "json"
+    )]
     json_compact: bool,
 }
 
@@ -61,7 +66,11 @@ pub struct FindValidatorAdapter {
     #[arg(long, default_value_t = false, conflicts_with = "json_compact")]
     json: bool,
     /// Output as single-line JSON suitable for piping
-    #[arg(long = "json-compact", default_value_t = false, conflicts_with = "json")]
+    #[arg(
+        long = "json-compact",
+        default_value_t = false,
+        conflicts_with = "json"
+    )]
     json_compact: bool,
 }
 

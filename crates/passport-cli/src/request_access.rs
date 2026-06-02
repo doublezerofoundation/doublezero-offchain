@@ -57,7 +57,13 @@ pub struct RequestValidatorAccessArgs {
     pub with_compute_unit_price: Option<u64>,
 
     /// Print verbose output.
-    #[arg(long, short = 'v', value_name = "VERBOSE", default_value = "false", env)]
+    #[arg(
+        long,
+        short = 'v',
+        value_name = "VERBOSE",
+        default_value = "false",
+        env
+    )]
     pub verbose: bool,
 
     /// Filepath or URL to keypair to pay transaction fee.
@@ -83,7 +89,11 @@ impl RequestValidatorAccessArgs {
 
         let cluster = identify_cluster(&wallet.connection).await?;
         writeln!(out, "Connected to Solana: {cluster}")?;
-        writeln!(out, "\nDoubleZero Address: {}\n", self.shared.doublezero_address)?;
+        writeln!(
+            out,
+            "\nDoubleZero Address: {}\n",
+            self.shared.doublezero_address
+        )?;
 
         let sol_client = SolRpcClient::new(
             Url::parse(&wallet.connection.url())?,
