@@ -43,6 +43,12 @@ pub struct FetchAdapter {
     inner: lib::fetch::FetchArgs,
     #[command(flatten)]
     conn: SolanaConnectionOptions,
+    /// Output as pretty JSON
+    #[arg(long, default_value_t = false, conflicts_with = "json_compact")]
+    json: bool,
+    /// Output as single-line JSON suitable for piping
+    #[arg(long = "json-compact", default_value_t = false, conflicts_with = "json")]
+    json_compact: bool,
 }
 
 #[derive(Debug, Args)]
@@ -51,6 +57,12 @@ pub struct FindValidatorAdapter {
     inner: lib::find_validator::FindValidatorArgs,
     #[command(flatten)]
     conn: SolanaConnectionOptions,
+    /// Output as pretty JSON
+    #[arg(long, default_value_t = false, conflicts_with = "json_compact")]
+    json: bool,
+    /// Output as single-line JSON suitable for piping
+    #[arg(long = "json-compact", default_value_t = false, conflicts_with = "json")]
+    json_compact: bool,
 }
 
 #[derive(Debug, Args)]
@@ -77,18 +89,31 @@ impl PassportSubcommand {
         // Use the unlocked `Stdout` handle (Send across awaits); each write
         // locks internally, matching the pre-refactor `println!` behavior.
         let mut out = std::io::stdout();
+        // The library verbs return a typed `PassportCliError`; `?` lifts it into
+        // `anyhow::Error` via the blanket `From<E: Error>` impl, preserving the
+        // cause chain (no `"{e:#}"` flattening).
         match self {
-            PassportSubcommand::Fetch(FetchAdapter { inner, conn }) => {
-                let ctx = build_ctx(conn, None, inner.json, inner.json_compact)?;
-                inner.execute(&ctx, &mut out).await.map_err(into_anyhow)
+            PassportSubcommand::Fetch(FetchAdapter {
+                inner,
+                conn,
+                json,
+                json_compact,
+            }) => {
+                let ctx = build_ctx(conn, None, json, json_compact)?;
+                inner.execute(&ctx, &mut out).await?;
             }
-            PassportSubcommand::FindValidator(FindValidatorAdapter { inner, conn }) => {
-                let ctx = build_ctx(conn, None, inner.json, inner.json_compact)?;
-                inner.execute(&ctx, &mut out).await.map_err(into_anyhow)
+            PassportSubcommand::FindValidator(FindValidatorAdapter {
+                inner,
+                conn,
+                json,
+                json_compact,
+            }) => {
+                let ctx = build_ctx(conn, None, json, json_compact)?;
+                inner.execute(&ctx, &mut out).await?;
             }
             PassportSubcommand::PrepareValidatorAccess(PrepareAdapter { inner, conn }) => {
                 let ctx = build_ctx(conn, None, false, false)?;
-                inner.execute(&ctx, &mut out).await.map_err(into_anyhow)
+                inner.execute(&ctx, &mut out).await?;
             }
             PassportSubcommand::RequestValidatorAccess(RequestAdapter {
                 inner,
@@ -96,9 +121,10 @@ impl PassportSubcommand {
                 keypair_path,
             }) => {
                 let ctx = build_ctx(conn, keypair_path, false, false)?;
-                inner.execute(&ctx, &mut out).await.map_err(into_anyhow)
+                inner.execute(&ctx, &mut out).await?;
             }
         }
+        Ok(())
     }
 }
 
@@ -134,8 +160,4 @@ fn map_env(n: Option<NetworkEnvironment>) -> Environment {
         Some(NetworkEnvironment::Testnet) => Environment::Testnet,
         Some(NetworkEnvironment::Localnet) => Environment::Local,
     }
-}
-
-fn into_anyhow(e: eyre::Report) -> anyhow::Error {
-    anyhow::anyhow!("{e:#}")
 }

@@ -2536,18 +2536,17 @@ dependencies = [
 name = "doublezero-passport-cli"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "clap",
  "doublezero-cli-core",
  "doublezero-ledger-sentinel",
  "doublezero-solana-client-tools",
  "doublezero-solana-sdk",
  "doublezero_sdk",
- "eyre",
  "serde",
  "serde_json",
  "solana-client",
  "solana-sdk",
+ "thiserror 2.0.17",
  "tokio",
  "tracing",
  "url",

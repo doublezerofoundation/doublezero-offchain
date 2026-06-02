@@ -1,6 +1,5 @@
 use std::io::Write;
 
-use anyhow::{Result, bail};
 use doublezero_ledger_sentinel::{
     client::solana::SolRpcClientType, constants::ENV_PREVIOUS_LEADER_EPOCHS,
 };
@@ -8,7 +7,10 @@ use doublezero_solana_client_tools::rpc::SolanaConnection;
 use solana_client::rpc_response::RpcContactInfo;
 use solana_sdk::pubkey::Pubkey;
 
-use crate::util::find_node_by_node_id;
+use crate::{
+    error::{PassportCliError, Result},
+    util::find_node_by_node_id,
+};
 
 pub async fn validate_validator_access<C, W>(
     out: &mut W,
@@ -24,7 +26,7 @@ where
 {
     let nodes = connection.get_cluster_nodes().await?;
     if nodes.is_empty() {
-        bail!("Unable to fetch cluster nodes. Is your RPC endpoint correct?");
+        return Err(PassportCliError::ClusterNodesUnavailable);
     }
 
     validate_validator_access_with_nodes(

@@ -1,6 +1,5 @@
 use std::{io::Write, sync::Arc};
 
-use anyhow::Result;
 use clap::Args;
 use doublezero_cli_core::CliContext;
 use doublezero_ledger_sentinel::client::solana::SolRpcClient;
@@ -14,6 +13,7 @@ use url::Url;
 
 use crate::{
     access_validation::{should_continue_after_validation, validate_validator_access},
+    error::Result,
     shared::SharedAccessArgs,
     util::identify_cluster,
 };
@@ -28,8 +28,8 @@ pub struct PrepareValidatorAccessArgs {
 }
 
 impl PrepareValidatorAccessArgs {
-    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> eyre::Result<()> {
-        self.run(ctx, out).await.map_err(|e| eyre::eyre!("{e:#}"))
+    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> Result<()> {
+        self.run(ctx, out).await
     }
 
     async fn run(self, ctx: &CliContext, out: &mut impl Write) -> Result<()> {
@@ -43,12 +43,9 @@ impl PrepareValidatorAccessArgs {
         } = self.shared;
 
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        let sol_client = SolRpcClient::new(
-            Url::parse(&connection.url()).unwrap(),
-            Arc::new(Keypair::new()),
-        );
+        let sol_client = SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
 
-        let cluster = identify_cluster(&connection).await;
+        let cluster = identify_cluster(&connection).await?;
         writeln!(out, "DoubleZero Passport - Prepare Validator Access Request")?;
         writeln!(out, "Connected to Solana: {cluster}")?;
         writeln!(out, "\nDoubleZero Address: {doublezero_address}\n")?;

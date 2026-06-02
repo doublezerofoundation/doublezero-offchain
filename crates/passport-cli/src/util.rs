@@ -9,16 +9,17 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{Context, Result, bail};
 use solana_client::{nonblocking::rpc_client::RpcClient, rpc_response::RpcContactInfo};
 use solana_sdk::pubkey::Pubkey;
+
+use crate::error::{PassportCliError, Result};
 
 pub fn try_get_public_ipv4() -> Result<String> {
     // Resolve the host `ifconfig.me` to IPv4 addresses
     let socket_addr = "ifconfig.me:80"
         .to_socket_addrs()?
         .find(|addr| matches!(addr, SocketAddr::V4(_)))
-        .context("Failed to resolve an IPv4 address")?;
+        .ok_or(PassportCliError::Ipv4ResolutionFailed)?;
 
     // Establish a connection to the IPv4 address with a short timeout to avoid hanging CLI calls.
     let mut stream = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5))?;
@@ -41,7 +42,7 @@ pub fn try_get_public_ipv4() -> Result<String> {
         return Ok(ip.to_string());
     }
 
-    bail!("Failed to extract the IP from the response")
+    Err(PassportCliError::IpExtractionFailed)
 }
 
 #[derive(Debug, PartialEq)]
@@ -63,18 +64,15 @@ impl fmt::Display for Cluster {
     }
 }
 
-pub async fn identify_cluster(client: &RpcClient) -> Cluster {
-    let genesis_hash = client
-        .get_genesis_hash()
-        .await
-        .expect("Failed to fetch genesis hash");
+pub async fn identify_cluster(client: &RpcClient) -> Result<Cluster> {
+    let genesis_hash = client.get_genesis_hash().await?;
 
-    match genesis_hash.to_string().as_str() {
+    Ok(match genesis_hash.to_string().as_str() {
         "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d" => Cluster::MainnetBeta,
         "4uhcVJyU9pJkvQyS88uRDiswHXSCkY3zQawwpjk2NsNY" => Cluster::Testnet,
         "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG" => Cluster::Devnet,
         _ => Cluster::Unknown,
-    }
+    })
 }
 
 pub fn find_node_by_node_id<'a>(

@@ -12,6 +12,7 @@
 
 mod access_validation;
 pub mod command;
+pub mod error;
 pub mod fetch;
 pub mod find_validator;
 mod output;
@@ -21,4 +22,5 @@ mod shared;
 mod util;
 
 pub use command::Command;
+pub use error::{PassportCliError, Result};
 pub use shared::SharedAccessArgs;

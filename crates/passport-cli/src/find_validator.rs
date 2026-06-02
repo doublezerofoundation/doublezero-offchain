@@ -1,6 +1,5 @@
 use std::{io::Write, net::Ipv4Addr, sync::Arc};
 
-use anyhow::Result;
 use clap::Args;
 use doublezero_cli_core::{CliContext, OutputFormat};
 use doublezero_ledger_sentinel::{
@@ -14,7 +13,8 @@ use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use url::Url;
 
 use crate::{
-    output::{emit_json, is_json, resolve_format},
+    error::{PassportCliError, Result},
+    output::{emit_json, is_json},
     util::{find_node_by_ip, find_node_by_node_id, identify_cluster, try_get_public_ipv4},
 };
 
@@ -25,24 +25,15 @@ pub struct FindValidatorArgs {
 
     #[arg(long, value_name = "IP_ADDRESS")]
     pub gossip_ip: Option<String>,
-
-    /// Output as pretty JSON
-    #[arg(long, default_value_t = false, conflicts_with = "json_compact")]
-    pub json: bool,
-    /// Output as single-line JSON suitable for piping
-    #[arg(long = "json-compact", default_value_t = false, conflicts_with = "json")]
-    pub json_compact: bool,
 }
 
 impl FindValidatorArgs {
-    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> eyre::Result<()> {
-        let format = resolve_format(self.json, self.json_compact, ctx.output_format);
+    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> Result<()> {
+        let format = ctx.output_format;
         if is_json(format) {
-            self.run_json(ctx, out, format)
-                .await
-                .map_err(|e| eyre::eyre!("{e:#}"))
+            self.run_json(ctx, out, format).await
         } else {
-            self.run_human(ctx, out).await.map_err(|e| eyre::eyre!("{e:#}"))
+            self.run_human(ctx, out).await
         }
     }
 
@@ -55,12 +46,9 @@ impl FindValidatorArgs {
         writeln!(out, "DoubleZero Passport - Find Validator")?;
 
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        let sol_client = SolRpcClient::new(
-            Url::parse(&connection.url()).unwrap(),
-            Arc::new(Keypair::new()),
-        );
+        let sol_client = SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
 
-        let cluster = identify_cluster(&connection).await;
+        let cluster = identify_cluster(&connection).await?;
         writeln!(out, "Connected to Solana: {cluster}\n")?;
 
         if let Ok(kp) = get_doublezero_pubkey() {
@@ -69,18 +57,11 @@ impl FindValidatorArgs {
 
         let nodes = connection.get_cluster_nodes().await?;
         if nodes.is_empty() {
-            anyhow::bail!("Unable to fetch cluster nodes. Is your RPC endpoint correct?");
+            return Err(PassportCliError::ClusterNodesUnavailable);
         }
 
         if let Some(node_id) = self.validator_id {
-            if let Some(node) = find_node_by_node_id(&nodes, &node_id) {
-                print_node_info(node, &sol_client, out).await?;
-            } else {
-                writeln!(
-                    out,
-                    "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
-                )?;
-            }
+            render_node_id_node(&nodes, &node_id, &sol_client, out).await?;
         } else if let Some(ip_str) = self.gossip_ip {
             let server_ip: Ipv4Addr = match ip_str.parse() {
                 Ok(addr) => addr,
@@ -89,14 +70,7 @@ impl FindValidatorArgs {
                     return Ok(());
                 }
             };
-            if let Some(node) = find_node_by_ip(&nodes, server_ip) {
-                print_node_info(node, &sol_client, out).await?;
-            } else {
-                writeln!(
-                    out,
-                    "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
-                )?;
-            }
+            render_ip_node(&nodes, server_ip, &sol_client, out).await?;
         } else {
             match try_get_public_ipv4() {
                 Ok(ip) => {
@@ -108,14 +82,7 @@ impl FindValidatorArgs {
                             return Ok(());
                         }
                     };
-                    if let Some(node) = find_node_by_ip(&nodes, server_ip) {
-                        print_node_info(node, &sol_client, out).await?;
-                    } else {
-                        writeln!(
-                            out,
-                            "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
-                        )?;
-                    }
+                    render_ip_node(&nodes, server_ip, &sol_client, out).await?;
                 }
                 Err(e) => writeln!(out, "Failed to get public IP: {e}")?,
             }
@@ -135,44 +102,34 @@ impl FindValidatorArgs {
         tracing::debug!(env = %ctx.env, "passport find-validator (json)");
 
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        let sol_client = SolRpcClient::new(
-            Url::parse(&connection.url()).unwrap(),
-            Arc::new(Keypair::new()),
-        );
+        let sol_client = SolRpcClient::new(Url::parse(&connection.url())?, Arc::new(Keypair::new()));
 
         let mut view = ValidatorLookupView {
-            cluster: identify_cluster(&connection).await.to_string(),
+            cluster: identify_cluster(&connection).await?.to_string(),
             doublezero_id: get_doublezero_pubkey().ok().map(|kp| kp.pubkey().to_string()),
             ..Default::default()
         };
 
         let nodes = connection.get_cluster_nodes().await?;
         if nodes.is_empty() {
-            anyhow::bail!("Unable to fetch cluster nodes. Is your RPC endpoint correct?");
+            return Err(PassportCliError::ClusterNodesUnavailable);
         }
 
         let node: Option<&RpcContactInfo> = if let Some(node_id) = self.validator_id {
             find_node_by_node_id(&nodes, &node_id)
         } else if let Some(ip_str) = self.gossip_ip {
-            let server_ip: Ipv4Addr = ip_str
-                .parse()
-                .map_err(|e| anyhow::anyhow!("Failed to parse server IP: {e}"))?;
+            let server_ip: Ipv4Addr = ip_str.parse()?;
             find_node_by_ip(&nodes, server_ip)
         } else {
             let ip = try_get_public_ipv4()?;
             view.detected_public_ip = Some(ip.clone());
-            let server_ip: Ipv4Addr = ip
-                .parse()
-                .map_err(|e| anyhow::anyhow!("Failed to parse detected public IP: {e}"))?;
+            let server_ip: Ipv4Addr = ip.parse()?;
             find_node_by_ip(&nodes, server_ip)
         };
 
         match node {
             Some(node) => {
-                let pubkey = node.pubkey.parse::<Pubkey>().expect("Invalid pubkey");
-                let in_leader_schedule = sol_client
-                    .is_scheduled_leader(&pubkey, ENV_PREVIOUS_LEADER_EPOCHS)
-                    .await?;
+                let in_leader_schedule = leader_status(&sol_client, node).await?;
                 view.validator_id = Some(node.pubkey.clone());
                 view.gossip_ip = Some(
                     node.gossip
@@ -190,7 +147,53 @@ impl FindValidatorArgs {
             }
         }
 
-        emit_json(out, &view, format).map_err(|e| anyhow::anyhow!("{e:#}"))
+        emit_json(out, &view, format)
+    }
+}
+
+/// Resolve whether `node` is a scheduled leader. Shared by the human and JSON
+/// paths so the pubkey parse and `is_scheduled_leader` lookup live in one place.
+async fn leader_status(sol_client: &SolRpcClient, node: &RpcContactInfo) -> Result<bool> {
+    let pubkey = node.pubkey.parse::<Pubkey>()?;
+    Ok(sol_client
+        .is_scheduled_leader(&pubkey, ENV_PREVIOUS_LEADER_EPOCHS)
+        .await?)
+}
+
+/// Look up a node by node ID and render it (human path).
+async fn render_node_id_node<W: Write>(
+    nodes: &[RpcContactInfo],
+    node_id: &Pubkey,
+    sol_client: &SolRpcClient,
+    out: &mut W,
+) -> Result<()> {
+    if let Some(node) = find_node_by_node_id(nodes, node_id) {
+        print_node_info(node, sol_client, out).await
+    } else {
+        writeln!(
+            out,
+            "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
+        )?;
+        Ok(())
+    }
+}
+
+/// Look up a node by gossip IP and render it (human path). Shared by the
+/// `--gossip-ip` and detected-public-IP branches.
+async fn render_ip_node<W: Write>(
+    nodes: &[RpcContactInfo],
+    server_ip: Ipv4Addr,
+    sol_client: &SolRpcClient,
+    out: &mut W,
+) -> Result<()> {
+    if let Some(node) = find_node_by_ip(nodes, server_ip) {
+        print_node_info(node, sol_client, out).await
+    } else {
+        writeln!(
+            out,
+            "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero."
+        )?;
+        Ok(())
     }
 }
 
@@ -228,12 +231,7 @@ async fn print_node_info<W: Write>(
         None => writeln!(out, "Gossip IP: <unknown>")?,
     }
 
-    let pubkey = node.pubkey.parse::<Pubkey>().expect("Invalid pubkey");
-
-    if sol_client
-        .is_scheduled_leader(&pubkey, ENV_PREVIOUS_LEADER_EPOCHS)
-        .await?
-    {
+    if leader_status(sol_client, node).await? {
         writeln!(out, "In Leader scheduler")?;
         writeln!(
             out,
@@ -247,4 +245,49 @@ async fn print_node_info<W: Write>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use super::*;
+
+    fn dummy_client() -> SolRpcClient {
+        // No network calls happen on the not-in-gossip paths (the node is never
+        // found), so any well-formed URL works.
+        SolRpcClient::new(Url::parse("http://127.0.0.1:8899").unwrap(), Arc::new(Keypair::new()))
+    }
+
+    #[tokio::test]
+    async fn node_id_not_in_gossip_emits_node_id_warning() {
+        let sol_client = dummy_client();
+        let mut out = Vec::new();
+
+        render_node_id_node(&[], &Pubkey::new_unique(), &sol_client, &mut out)
+            .await
+            .unwrap();
+
+        let rendered = String::from_utf8(out).unwrap();
+        assert_eq!(
+            rendered,
+            "⚠️  Warning: Your node ID is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero.\n"
+        );
+    }
+
+    #[tokio::test]
+    async fn ip_not_in_gossip_emits_ip_warning() {
+        let sol_client = dummy_client();
+        let mut out = Vec::new();
+
+        render_ip_node(&[], Ipv4Addr::LOCALHOST, &sol_client, &mut out)
+            .await
+            .unwrap();
+
+        let rendered = String::from_utf8(out).unwrap();
+        assert_eq!(
+            rendered,
+            "⚠️  Warning: Your IP is not appearing in gossip. Your validator must be visible in gossip in order to connect to DoubleZero.\n"
+        );
+    }
 }

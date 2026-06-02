@@ -1,6 +1,5 @@
 use std::{io::Write, str::FromStr, sync::Arc};
 
-use anyhow::{Result, bail};
 use clap::Args;
 use doublezero_cli_core::CliContext;
 use doublezero_ledger_sentinel::client::solana::SolRpcClient;
@@ -28,6 +27,7 @@ use url::Url;
 
 use crate::{
     access_validation::{should_continue_after_validation, validate_validator_access},
+    error::{PassportCliError, Result},
     shared::SharedAccessArgs,
     util::identify_cluster,
 };
@@ -70,8 +70,8 @@ pub struct RequestValidatorAccessArgs {
 }
 
 impl RequestValidatorAccessArgs {
-    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> eyre::Result<()> {
-        self.run(ctx, out).await.map_err(|e| eyre::eyre!("{e:#}"))
+    pub async fn execute(self, ctx: &CliContext, out: &mut impl Write) -> Result<()> {
+        self.run(ctx, out).await
     }
 
     async fn run(self, ctx: &CliContext, out: &mut impl Write) -> Result<()> {
@@ -81,12 +81,12 @@ impl RequestValidatorAccessArgs {
 
         writeln!(out, "DoubleZero Passport - Request Validator Access")?;
 
-        let cluster = identify_cluster(&wallet.connection).await;
+        let cluster = identify_cluster(&wallet.connection).await?;
         writeln!(out, "Connected to Solana: {cluster}")?;
         writeln!(out, "\nDoubleZero Address: {}\n", self.shared.doublezero_address)?;
 
         let sol_client = SolRpcClient::new(
-            Url::parse(&wallet.connection.url()).unwrap(),
+            Url::parse(&wallet.connection.url())?,
             Arc::new(Keypair::new()),
         );
 
@@ -107,7 +107,7 @@ impl RequestValidatorAccessArgs {
 
         let request_account = wallet.connection.get_account(&address).await;
         if request_account.is_ok() {
-            bail!("Access request already exists: {address}");
+            return Err(PassportCliError::AccessRequestExists(address));
         }
 
         let tx_sig = self.request_access(&wallet, out).await?;
@@ -115,7 +115,10 @@ impl RequestValidatorAccessArgs {
         if let TransactionOutcome::Executed(tx_sig) = tx_sig {
             writeln!(out, "Request Solana validator access: {tx_sig}")?;
 
-            wallet.print_verbose_output(&[tx_sig]).await?;
+            wallet
+                .print_verbose_output(&[tx_sig])
+                .await
+                .map_err(PassportCliError::other)?;
         }
 
         Ok(())
@@ -125,6 +128,8 @@ impl RequestValidatorAccessArgs {
     /// the verb-owned transaction knobs. Reuses the shared keypair-loading and
     /// fee-payer logic in `Wallet::try_new`.
     fn build_wallet(&self, ctx: &CliContext) -> Result<Wallet> {
+        // `Wallet::try_new` (and the other `Wallet` helpers below) surface
+        // `anyhow::Error`; box it through `Other` so the cause chain survives.
         let opts = SolanaPayerOptions {
             connection_options: SolanaConnectionOptions::default(),
             signer_options: SolanaSignerOptions {
@@ -139,7 +144,7 @@ impl RequestValidatorAccessArgs {
             },
         };
         let connection = SolanaConnection::new(ctx.solana_l1_rpc_url.clone());
-        Wallet::try_new(opts, Some(connection))
+        Wallet::try_new(opts, Some(connection)).map_err(PassportCliError::other)
     }
 
     async fn request_access(
@@ -171,14 +176,15 @@ impl RequestValidatorAccessArgs {
             writeln!(out, "Raw message: {raw_message}")?;
         }
 
-        let message = OffchainMessage::new(self.message_version, raw_message.as_bytes())?;
-        let serialized_message = message.serialize()?;
+        let message = OffchainMessage::new(self.message_version, raw_message.as_bytes())
+            .map_err(PassportCliError::other)?;
+        let serialized_message = message.serialize().map_err(PassportCliError::other)?;
 
         if !ed25519_signature.verify(
             self.shared.primary_validator_id.as_array(),
             &serialized_message,
         ) {
-            bail!("Signature verification failed");
+            return Err(PassportCliError::SignatureVerificationFailed);
         } else if self.verbose {
             writeln!(
                 out,
@@ -191,7 +197,8 @@ impl RequestValidatorAccessArgs {
             &ID,
             RequestAccessAccounts::new(&wallet_key, &self.shared.doublezero_address),
             &PassportInstructionData::RequestAccess(access_mode),
-        )?;
+        )
+        .map_err(PassportCliError::other)?;
 
         let (_, bump) = AccessRequest::find_address(&self.shared.doublezero_address);
 
@@ -207,8 +214,14 @@ impl RequestValidatorAccessArgs {
             instructions.push(compute_unit_price_ix.clone());
         }
 
-        let transaction = wallet.new_transaction(&instructions).await?;
+        let transaction = wallet
+            .new_transaction(&instructions)
+            .await
+            .map_err(PassportCliError::other)?;
 
-        wallet.send_or_simulate_transaction(&transaction).await
+        wallet
+            .send_or_simulate_transaction(&transaction)
+            .await
+            .map_err(PassportCliError::other)
     }
 }
