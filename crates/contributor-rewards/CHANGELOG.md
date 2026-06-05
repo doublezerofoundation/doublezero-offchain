@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- chore(contributor-rewards): converge the doublezero SDK family on `client/v0.25.1`, dropping the duplicate v0.20 lockfile entries; adapt to the v0.25 serviceability layout (flat `Device.interfaces`, renamed `UserStatus::*Deprecated` variants) and extend the snapshot compat migrations to backfill `Device.deprecated_interfaces`, the flat `Interface` projection, and `User.bgp_rtt_ns` ([#379](https://github.com/doublezerofoundation/doublezero-offchain/pull/379))
 - fix(contributor-rewards): bump network shapley ([#377](https://github.com/doublezerofoundation/doublezero-offchain/pull/377))
 
 ## [0.5.5](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/contributor-rewards%2Fv0.5.5) - 2026-05-20
