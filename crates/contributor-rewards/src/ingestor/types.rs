@@ -139,6 +139,99 @@ fn apply_serviceability_json_compat_migrations(serviceability: &mut Value) {
                 .or_insert_with(|| Value::Number(0.into()));
             user.entry("last_bgp_reported_at")
                 .or_insert_with(|| Value::Number(0.into()));
+            user.entry("bgp_rtt_ns")
+                .or_insert_with(|| Value::Number(0.into()));
+        }
+    }
+
+    // doublezero-serviceability v0.25.1 split Device.interfaces:
+    //   old: `interfaces: Vec<Interface>` (enum with V1/V2 variants)
+    //   new: `deprecated_interfaces: Vec<InterfaceDeprecated>` + `interfaces: Vec<Interface>` (struct)
+    // Snapshots from before the split have `interfaces` in enum format; move those
+    // to `deprecated_interfaces` and build new-format `interfaces` from the V1/V2 bodies.
+    if let Some(devices) = serviceability
+        .get_mut("devices")
+        .and_then(|devices| devices.as_object_mut())
+    {
+        for device in devices.values_mut().filter_map(|d| d.as_object_mut()) {
+            // Detect old enum format: array elements are objects with "V1" or "V2" keys.
+            let is_old_format = device
+                .get("interfaces")
+                .and_then(|v| v.as_array())
+                .is_some_and(|arr| {
+                    arr.first()
+                        .is_some_and(|el| el.get("V1").is_some() || el.get("V2").is_some())
+                });
+
+            if is_old_format {
+                let old_interfaces = device.get("interfaces").cloned().unwrap_or_default();
+                device
+                    .entry("deprecated_interfaces")
+                    .or_insert(old_interfaces.clone());
+
+                // Convert each V1/V2 body into the new Interface struct format.
+                let new_interfaces: Vec<Value> = old_interfaces
+                    .as_array()
+                    .unwrap_or(&Vec::new())
+                    .iter()
+                    .filter_map(|el| {
+                        let (version, body) = if let Some(v1) = el.get("V1") {
+                            (1u8, v1)
+                        } else if let Some(v2) = el.get("V2") {
+                            (2u8, v2)
+                        } else {
+                            return None;
+                        };
+                        let mut iface = body.clone();
+                        if let Some(obj) = iface.as_object_mut() {
+                            obj.insert("size".to_string(), Value::Number(0.into()));
+                            obj.insert("version".to_string(), Value::Number(version.into()));
+                            // V1 fields absent from V2; default them.
+                            obj.entry("bandwidth").or_insert(Value::Number(0.into()));
+                            obj.entry("cir").or_insert(Value::Number(0.into()));
+                            obj.entry("mtu").or_insert(Value::Number(0.into()));
+                            obj.entry("interface_cyoa")
+                                .or_insert(Value::String("None".to_string()));
+                            obj.entry("interface_dia")
+                                .or_insert(Value::String("None".to_string()));
+                            obj.entry("routing_mode")
+                                .or_insert(Value::String("Static".to_string()));
+                            obj.entry("flex_algo_node_segments")
+                                .or_insert(Value::Array(Vec::new()));
+                        }
+                        Some(iface)
+                    })
+                    .collect();
+
+                device.insert("interfaces".to_string(), Value::Array(new_interfaces));
+            } else {
+                device
+                    .entry("deprecated_interfaces")
+                    .or_insert(Value::Array(Vec::new()));
+            }
+
+            // New Device fields added between v0.20 and v0.25.1.
+            device
+                .entry("device_health")
+                .or_insert(Value::String("Unknown".to_string()));
+            device
+                .entry("desired_status")
+                .or_insert(Value::String("Activated".to_string()));
+            device
+                .entry("unicast_users_count")
+                .or_insert(Value::Number(0.into()));
+            device
+                .entry("multicast_subscribers_count")
+                .or_insert(Value::Number(0.into()));
+            device
+                .entry("max_unicast_users")
+                .or_insert(Value::Number(0.into()));
+            device
+                .entry("max_multicast_subscribers")
+                .or_insert(Value::Number(0.into()));
+            device
+                .entry("reserved_seats")
+                .or_insert(Value::Number(0.into()));
         }
     }
 }
