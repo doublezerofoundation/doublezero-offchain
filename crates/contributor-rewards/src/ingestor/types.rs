@@ -189,7 +189,7 @@ fn apply_serviceability_json_compat_migrations(serviceability: &mut Value) {
                             // V1 fields absent from V2; default them.
                             obj.entry("bandwidth").or_insert(Value::Number(0.into()));
                             obj.entry("cir").or_insert(Value::Number(0.into()));
-                            obj.entry("mtu").or_insert(Value::Number(0.into()));
+                            obj.entry("mtu").or_insert(Value::Number(9000.into()));
                             obj.entry("interface_cyoa")
                                 .or_insert(Value::String("None".to_string()));
                             obj.entry("interface_dia")
