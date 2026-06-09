@@ -192,7 +192,7 @@ impl StatusCommand {
             .await
             .context("fetching current Solana epoch")?
             .epoch;
-        let from_epoch = current_epoch.saturating_sub(self.num_epochs + 1);
+        let from_epoch = current_epoch.saturating_sub(self.num_epochs);
 
         println!("\nScanning epochs {from_epoch}..={current_epoch}.");
 
@@ -497,8 +497,10 @@ async fn fetch_mint_decimals(
         .collect()
 }
 
-/// Format a raw token amount to at most one (truncated) fractional digit,
-/// falling back to the raw integer when decimals are unknown.
+/// Format a raw token amount to at most three (truncated) fractional digits with
+/// trailing zeros trimmed, falling back to the raw integer when decimals are
+/// unknown. Keeping three digits stops small-but-real payouts (e.g. 0.05 SOL at
+/// 9 decimals) from collapsing to `0`.
 fn format_amount(raw: u64, decimals_by_mint: &HashMap<Pubkey, u8>, mint: &Pubkey) -> String {
     let Some(&decimals) = decimals_by_mint.get(mint) else {
         return raw.to_string();
@@ -509,12 +511,13 @@ fn format_amount(raw: u64, decimals_by_mint: &HashMap<Pubkey, u8>, mint: &Pubkey
     let scale = 10u128.pow(decimals as u32);
     let raw = raw as u128;
     let integer = raw / scale;
-    let tenth = (raw % scale) * 10 / scale;
-    if tenth == 0 {
-        integer.to_string()
-    } else {
-        format!("{integer}.{tenth}")
+    // Truncate the fraction to three digits, then drop trailing zeros.
+    let frac = (raw % scale) * 1_000 / scale;
+    if frac == 0 {
+        return integer.to_string();
     }
+    let frac = format!("{frac:03}");
+    format!("{integer}.{}", frac.trim_end_matches('0'))
 }
 
 /// Resolve `(epoch → (reward mint, exact paid amount))` for `claimed` epochs by
@@ -627,7 +630,13 @@ async fn resolve_distributed_payouts(
             .unwrap_or_default();
         let paid = post_raw.saturating_sub(pre_raw) as u64;
         if let Ok(mint) = destination.mint.parse::<Pubkey>() {
-            resolved.entry(epoch).or_insert((mint, paid));
+            // A multi-client validator has multiple leaves per epoch, and
+            // distribute emits one tx per leaf crediting the same ATA, so sum
+            // them to match `estimate_publisher_payout`'s per-leaf total.
+            resolved
+                .entry(epoch)
+                .and_modify(|(_, amount)| *amount += paid)
+                .or_insert((mint, paid));
         }
     }
     resolved
@@ -818,14 +827,22 @@ mod tests {
     }
 
     #[test]
-    fn format_amount_truncates_to_one_fractional_digit() {
+    fn format_amount_trims_to_three_fractional_digits() {
         let mint = Pubkey::new_unique();
         let decimals = HashMap::from([(mint, 6u8)]);
-        assert_eq!(format_amount(1_234_500, &decimals, &mint), "1.2");
-        assert_eq!(format_amount(1_000_000, &decimals, &mint), "1");
+        assert_eq!(format_amount(1_234_560, &decimals, &mint), "1.234"); // truncates, not rounds
+        assert_eq!(format_amount(1_000_000, &decimals, &mint), "1"); // trailing zeros trimmed
         assert_eq!(format_amount(500_000, &decimals, &mint), "0.5");
-        assert_eq!(format_amount(1_960_000, &decimals, &mint), "1.9"); // truncates, not rounds
         assert_eq!(format_amount(0, &decimals, &mint), "0");
+    }
+
+    #[test]
+    fn format_amount_keeps_small_nonzero_amounts_visible() {
+        let mint = Pubkey::new_unique();
+        // 9 decimals (e.g. WSOL): a sub-0.1 amount must not collapse to "0".
+        let decimals = HashMap::from([(mint, 9u8)]);
+        assert_eq!(format_amount(50_000_000, &decimals, &mint), "0.05");
+        assert_eq!(format_amount(1_000_000, &decimals, &mint), "0.001");
     }
 
     #[test]
