@@ -207,18 +207,13 @@ fn migrate_interface_to_flat(interface: &mut Value) {
         return;
     }
 
-    let version_tag = if obj.contains_key("V1") {
-        1u8
-    } else if obj.contains_key("V2") {
-        2u8
+    // Pull out the versioned body and note whether it's V1, which predates the
+    // CYOA/DIA/bandwidth/routing fields and so needs them backfilled.
+    let (is_v1, body) = if let Some(body) = obj.get("V1").and_then(Value::as_object) {
+        (true, body)
+    } else if let Some(body) = obj.get("V2").and_then(Value::as_object) {
+        (false, body)
     } else {
-        return;
-    };
-
-    let Some(body) = obj
-        .get(if version_tag == 1 { "V1" } else { "V2" })
-        .and_then(|body| body.as_object())
-    else {
         return;
     };
 
@@ -226,7 +221,7 @@ fn migrate_interface_to_flat(interface: &mut Value) {
 
     // V1 predates the CYOA/DIA/bandwidth/routing fields; backfill them with the
     // same values the V1 -> V2 conversion uses.
-    if version_tag == 1 {
+    if is_v1 {
         flat.entry("interface_cyoa")
             .or_insert_with(|| Value::String("None".to_string()));
         flat.entry("interface_dia")
