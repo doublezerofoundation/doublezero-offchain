@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- add `memo_compute_units(memo_len)` and `build_memo_instruction_with_compute_units(memo)` helpers (next to `build_memo_instruction`) that estimate the spl-memo compute-unit cost from the memo byte length, calibrated against the spl-memo v3 program in `solana-program-test`
 - add `find_claim_holding_address` PDA helper and `CLAIM_HOLDING_SEED_PREFIX` constant for `ValidatorClientRewards` claim holding accounts
 - add `ValidatorClientRewards` discriminator + offset constants and `parse_validator_client_rewards` parser
 - add `parse_program_config_shred_oracle_key` helper for reading `ProgramConfig.shred_oracle_key`

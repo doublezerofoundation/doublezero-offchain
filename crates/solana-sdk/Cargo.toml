@@ -32,4 +32,6 @@ solana-client.workspace = true
 solana-loader-v3-interface.workspace = true
 solana-offchain-message.workspace = true
 solana-program-pack.workspace = true
+solana-program-test.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros"] }
