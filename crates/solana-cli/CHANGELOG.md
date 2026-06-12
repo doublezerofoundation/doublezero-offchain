@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- use the shared length-aware memo compute-unit helper from `solana-sdk` in place of the local `RELAY_MEMO_CU` constant and the inline 5,000/15,000 memo estimates in `validator-deposit`
+- use the shared length-aware memo compute-unit helper from `solana-sdk` in place of the local `RELAY_MEMO_CU` constant and the inline 5,000/15,000 memo estimates in `validator-deposit` (#387)
 - use the shared create-ATA compute-unit helper from `solana-client-tools` (#386)
 
 ## [0.5.7](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/doublezero-solana/v0.5.7)

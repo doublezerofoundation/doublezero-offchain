@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- refactor(contributor-rewards): use the shared length-aware memo compute-unit helper from `solana-sdk` in place of the local `RELAY_MEMO_CU` constant
+- refactor(contributor-rewards): use the shared length-aware memo compute-unit helper from `solana-sdk` in place of the local `RELAY_MEMO_CU` constant ([#387](https://github.com/doublezerofoundation/doublezero-offchain/pull/387))
 - refactor(contributor-rewards): use the shared create-ATA compute-unit helper from `solana-client-tools` ([#386](https://github.com/doublezerofoundation/doublezero-offchain/pull/386))
 - fix(contributor-rewards): bump network shapley ([#377](https://github.com/doublezerofoundation/doublezero-offchain/pull/377))
 
