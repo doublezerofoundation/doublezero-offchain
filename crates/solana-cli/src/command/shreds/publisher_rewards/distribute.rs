@@ -36,9 +36,7 @@ use doublezero_solana_sdk::{
 };
 use futures::stream::{self, StreamExt};
 use solana_sdk::{compute_budget::ComputeBudgetInstruction, instruction::Instruction};
-use spl_associated_token_account_interface::{
-    address::get_associated_token_address, instruction::create_associated_token_account_idempotent,
-};
+use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 
 use super::s3;
 
@@ -312,17 +310,21 @@ pub async fn try_distribute_pending(
 
     // ----- Step 6: pre-fetch destination ATAs -----
     //
-    // Across the entire pass there are at most three distinct
-    // destination ATAs (one per candidate reward mint:
-    // `get_associated_token_address(rewards_token_owner_key, mint)`).
+    // Across the prefetch pass there are at most three distinct
+    // destination ATAs (one per candidate reward mint). Derive each ATA
+    // with the same helper that returns the bump-sensitive CU estimate
+    // for `create_associated_token_account_idempotent`.
     // Probe them once via a single `getMultipleAccounts` so per-tx
-    // we only emit `create_associated_token_account_idempotent` when
-    // the destination is actually missing — saves ~25k CU per tx that
-    // would otherwise pay the SPL Token existence check on a no-op
-    // create. The set is mutated as freshly-created ATAs land.
-    let candidate_destination_atas: Vec<Pubkey> = journal_mint_candidates
+    // we only emit the create instruction when the destination is actually
+    // missing — saving the SPL Token existence check on a no-op create.
+    // The set is mutated as freshly-created ATAs land.
+    let candidate_destination_ata_info: Vec<(Pubkey, u32)> = journal_mint_candidates
         .iter()
-        .map(|mint| get_associated_token_address(rewards_token_owner_key, mint))
+        .map(|mint| Wallet::ata_address_and_create_compute_units(rewards_token_owner_key, mint))
+        .collect();
+    let candidate_destination_atas: Vec<Pubkey> = candidate_destination_ata_info
+        .iter()
+        .map(|(ata, _)| *ata)
         .collect();
     let candidate_destination_ata_accounts = wallet
         .connection
@@ -410,10 +412,15 @@ pub async fn try_distribute_pending(
 
             let init_key = (candidate.subscription_epoch, candidate.leaf.client_id);
             let needs_init = !claim_holding_exists && !emitted_init_for_holding.contains(&init_key);
-            let destination_ata = get_associated_token_address(
-                rewards_token_owner_key,
-                &publisher_journal.reward_mint_key,
-            );
+            let (destination_ata, destination_ata_create_compute_units) =
+                if publisher_journal.reward_mint_key == *publisher_mint {
+                    candidate_destination_ata_info[mint_index]
+                } else {
+                    Wallet::ata_address_and_create_compute_units(
+                        rewards_token_owner_key,
+                        &publisher_journal.reward_mint_key,
+                    )
+                };
             let needs_ata_create = !known_existing_atas.contains(&destination_ata);
             match submit_distribute_tx(
                 wallet,
@@ -425,6 +432,7 @@ pub async fn try_distribute_pending(
                 &dz_mint_key,
                 needs_init,
                 needs_ata_create,
+                destination_ata_create_compute_units,
             )
             .await
             {
@@ -471,6 +479,7 @@ async fn submit_distribute_tx(
     dz_mint_key: &Pubkey,
     needs_init: bool,
     needs_ata_create: bool,
+    destination_ata_create_compute_units: u32,
 ) -> Result<()> {
     let mut instructions: Vec<Instruction> = Vec::new();
 
@@ -527,10 +536,15 @@ async fn submit_distribute_tx(
     instructions.push(distribute_ix);
 
     // Per-ix headroom: ~30k init_claim_holding (only when `needs_init`),
-    // ~25k create_ata_idempotent (only when `needs_ata_create`), ~150k
-    // distribute. Same upper bounds as the admin command's submission loop.
-    let cu_limit =
-        150_000 + if needs_init { 30_000 } else { 0 } + if needs_ata_create { 25_000 } else { 0 };
+    // bump-sensitive create_ata_idempotent CU from
+    // `Wallet::ata_address_and_create_compute_units` (only when
+    // `needs_ata_create`), ~150k distribute. Same upper bounds as the admin
+    // command's submission loop.
+    let cu_limit = distribute_compute_unit_limit(
+        needs_init,
+        needs_ata_create,
+        destination_ata_create_compute_units,
+    );
     instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(cu_limit));
     if let Some(ref compute_unit_price_ix) = wallet.compute_unit_price_ix {
         instructions.push(compute_unit_price_ix.clone());
@@ -553,6 +567,24 @@ async fn submit_distribute_tx(
     Ok(())
 }
 
+fn distribute_compute_unit_limit(
+    needs_init: bool,
+    needs_ata_create: bool,
+    destination_ata_create_compute_units: u32,
+) -> u32 {
+    const DISTRIBUTE_VALIDATOR_REWARDS_CU_BASE: u32 = 150_000;
+    const INIT_CLAIM_HOLDING_CU: u32 = 30_000;
+
+    let init_compute_units = if needs_init { INIT_CLAIM_HOLDING_CU } else { 0 };
+    let create_ata_compute_units = if needs_ata_create {
+        destination_ata_create_compute_units
+    } else {
+        0
+    };
+
+    DISTRIBUTE_VALIDATOR_REWARDS_CU_BASE + init_compute_units + create_ata_compute_units
+}
+
 pub(crate) fn bitmap_bit_set(bitmap: &[u8], leaf_index: usize) -> bool {
     let byte_idx = leaf_index / 8;
     let bit_idx = leaf_index % 8;
@@ -565,6 +597,20 @@ pub(crate) fn bitmap_bit_set(bitmap: &[u8], leaf_index: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distribute_compute_unit_limit_uses_supplied_ata_create_cu() {
+        assert_eq!(distribute_compute_unit_limit(false, true, 31_000), 181_000);
+        assert_eq!(distribute_compute_unit_limit(true, true, 31_000), 211_000);
+    }
+
+    #[test]
+    fn distribute_compute_unit_limit_ignores_ata_create_cu_when_ata_exists() {
+        assert_eq!(
+            distribute_compute_unit_limit(true, false, u32::MAX),
+            180_000
+        );
+    }
 
     #[test]
     fn test_bitmap_bit_set_in_range() {

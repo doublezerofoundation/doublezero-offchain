@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- fix(solana-cli): use bump-aware ATA create CU budget ([#391](https://github.com/doublezerofoundation/doublezero-offchain/pull/391))
 - use the shared `Wallet` memo helpers from `solana-client-tools` in place of the local `RELAY_MEMO_CU` constant and the inline 5,000/15,000 memo estimates in `validator-deposit`
 - use the shared create-ATA compute-unit helper from `solana-client-tools` (#386)
 
