@@ -6,7 +6,12 @@ use bytemuck::Pod;
 use clap::{Args, ValueEnum};
 use doublezero_program_tools::PrecomputedDiscriminator;
 use doublezero_sdk::record::pubkey::create_record_key;
-use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_account_decoder_client_types::UiAccountEncoding;
+use solana_client::{
+    nonblocking::rpc_client::RpcClient,
+    rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
+    rpc_filter::{Memcmp, RpcFilterType},
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{account::Account, pubkey, pubkey::Pubkey, sysvar::Sysvar};
 
@@ -211,6 +216,14 @@ impl SolanaConnection {
         try_fetch_zero_copy_data_with_commitment(&self.0, key, self.0.commitment()).await
     }
 
+    pub async fn try_fetch_program_zero_copy_accounts<T: Pod + PrecomputedDiscriminator>(
+        &self,
+        program_id: &Pubkey,
+        commitment_config: CommitmentConfig,
+    ) -> Result<Vec<(Pubkey, ZeroCopyAccountOwnedData<T>)>> {
+        try_fetch_program_zero_copy_accounts(&self.0, program_id, commitment_config).await
+    }
+
     pub async fn try_fetch_multiple_accounts(&self, keys: &[Pubkey]) -> Result<Vec<Account>> {
         let account_infos = try_fetch_multiple_accounts(&self.0, keys)
             .await?
@@ -334,6 +347,58 @@ pub async fn try_fetch_zero_copy_data_with_commitment<T: Pod + PrecomputedDiscri
         .try_into()
 }
 
+pub async fn try_fetch_program_zero_copy_accounts<T: Pod + PrecomputedDiscriminator>(
+    rpc_client: &RpcClient,
+    program_id: &Pubkey,
+    commitment_config: CommitmentConfig,
+) -> Result<Vec<(Pubkey, ZeroCopyAccountOwnedData<T>)>> {
+    let config = program_zero_copy_accounts_config::<T>(commitment_config);
+    let accounts = rpc_client
+        .get_program_accounts_with_config(program_id, config)
+        .await?;
+
+    parse_program_zero_copy_accounts(accounts)
+}
+
+fn program_zero_copy_accounts_config<T: Pod + PrecomputedDiscriminator>(
+    commitment_config: CommitmentConfig,
+) -> RpcProgramAccountsConfig {
+    RpcProgramAccountsConfig {
+        filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+            0,
+            T::discriminator_slice().to_vec(),
+        ))]),
+        account_config: RpcAccountInfoConfig {
+            encoding: Some(UiAccountEncoding::Base64),
+            commitment: Some(commitment_config),
+            ..RpcAccountInfoConfig::default()
+        },
+        ..RpcProgramAccountsConfig::default()
+    }
+}
+
+fn parse_program_zero_copy_accounts<T: Pod + PrecomputedDiscriminator>(
+    accounts: Vec<(Pubkey, Account)>,
+) -> Result<Vec<(Pubkey, ZeroCopyAccountOwnedData<T>)>> {
+    let mut parsed_accounts = Vec::with_capacity(accounts.len());
+
+    for (pubkey, account) in accounts {
+        if account.lamports == 0 {
+            continue;
+        }
+
+        let data = ZeroCopyAccountOwnedData::<T>::from_account(&account).with_context(|| {
+            format!(
+                "Failed to deserialize program account {pubkey} as zero-copy {}",
+                std::any::type_name::<T>(),
+            )
+        })?;
+        parsed_accounts.push((pubkey, data));
+    }
+
+    Ok(parsed_accounts)
+}
+
 pub async fn try_fetch_borsh_record_with_commitment<T: BorshDeserialize>(
     rpc_client: &RpcClient,
     payer_key: &Pubkey,
@@ -371,7 +436,93 @@ pub async fn try_fetch_multiple_accounts(
 
 #[cfg(test)]
 mod tests {
+    use bytemuck::Zeroable;
+    use doublezero_program_tools::Discriminator;
+
     use super::*;
+
+    #[repr(C)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Pod, Zeroable)]
+    struct TestState {
+        value: u64,
+    }
+
+    impl PrecomputedDiscriminator for TestState {
+        const DISCRIMINATOR: Discriminator<8> = Discriminator::new([1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    fn account_with_data(data: Vec<u8>, lamports: u64) -> Account {
+        Account {
+            lamports,
+            data,
+            ..Default::default()
+        }
+    }
+
+    fn well_formed_bytes(state: &TestState) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(TestState::discriminator_slice());
+        bytes.extend_from_slice(bytemuck::bytes_of(state));
+        bytes
+    }
+
+    #[test]
+    fn program_zero_copy_accounts_config_filters_by_discriminator() {
+        let config = program_zero_copy_accounts_config::<TestState>(CommitmentConfig::finalized());
+
+        assert_eq!(
+            config.account_config.encoding,
+            Some(UiAccountEncoding::Base64)
+        );
+        assert_eq!(
+            config.account_config.commitment,
+            Some(CommitmentConfig::finalized())
+        );
+
+        let filters = config.filters.expect("expected discriminator filter");
+        assert_eq!(filters.len(), 1);
+        match &filters[0] {
+            RpcFilterType::Memcmp(memcmp) => {
+                assert_eq!(memcmp.offset(), 0);
+                assert_eq!(
+                    memcmp.bytes().expect("expected memcmp bytes").as_slice(),
+                    TestState::discriminator_slice(),
+                );
+            }
+            _ => panic!("expected memcmp filter"),
+        }
+    }
+
+    #[test]
+    fn parse_program_zero_copy_accounts_skips_closed_accounts() {
+        let valid_key = Pubkey::new_unique();
+        let closed_key = Pubkey::new_unique();
+        let state = TestState { value: 42 };
+        let accounts = vec![
+            (closed_key, account_with_data(vec![], 0)),
+            (valid_key, account_with_data(well_formed_bytes(&state), 1)),
+        ];
+
+        let parsed = parse_program_zero_copy_accounts::<TestState>(accounts).unwrap();
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].0, valid_key);
+        assert_eq!(*parsed[0].1.mucked_data, state);
+    }
+
+    #[test]
+    fn parse_program_zero_copy_accounts_errors_for_malformed_non_closed_accounts() {
+        let malformed_key = Pubkey::new_unique();
+        let error = parse_program_zero_copy_accounts::<TestState>(vec![(
+            malformed_key,
+            account_with_data(vec![], 1),
+        )])
+        .unwrap_err();
+
+        let error_message = format!("{error:#}");
+        assert!(error_message.contains(&malformed_key.to_string()));
+        assert!(error_message.contains(std::any::type_name::<TestState>()));
+    }
 
     #[test]
     fn moniker_env_defaults_to_mainnet() {
