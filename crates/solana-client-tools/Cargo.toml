@@ -16,6 +16,7 @@ doublezero-program-tools.workspace = true
 doublezero_sdk.workspace = true
 home.workspace = true
 serde_json.workspace = true
+solana-account-decoder-client-types.workspace = true
 solana-client.workspace = true
 solana-commitment-config.workspace = true
 solana-sdk.workspace = true
