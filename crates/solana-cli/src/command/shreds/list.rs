@@ -283,8 +283,6 @@ impl ListCommand {
     }
 }
 
-/// Filter `seats` to those active in the current subscription epoch. A seat is
-/// active when its `active_epoch >= current_epoch`.
 fn active_seats(
     seats: Vec<ParsedSeat>,
     active_epoch_by_seat: &HashMap<Pubkey, u64>,
