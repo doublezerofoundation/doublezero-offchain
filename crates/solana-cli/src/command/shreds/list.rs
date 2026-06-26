@@ -195,9 +195,6 @@ impl ListCommand {
             (balances, matching_seats)
         };
 
-        // With --all, restrict to seats active in the latest subscription epoch
-        // (the most recent epoch that settled seats); seats that lapsed in
-        // earlier epochs, whose accounts persist on-chain, are dropped.
         let filtered_seats = if self.all {
             match active_epoch_by_seat.values().copied().max() {
                 Some(current_epoch) => {
