@@ -38,7 +38,10 @@ pub struct ListCommand {
     #[arg(long)]
     client_ip: Option<Ipv4Addr>,
 
-    /// Show all seats regardless of funder.
+    /// Show seats regardless of funder, restricted to those active in the latest
+    /// subscription epoch (whose `active_epoch` equals the maximum across the
+    /// queried seats). Lapsed seats, whose accounts persist on-chain, are
+    /// excluded.
     #[arg(long)]
     all: bool,
 
@@ -115,12 +118,15 @@ impl ListCommand {
             return Ok(());
         }
 
-        // Parse all seats.
+        // Parse all seats, recording each seat's active_epoch for the --active
+        // filter below.
+        let mut active_epoch_by_seat: HashMap<Pubkey, u64> = HashMap::new();
         let parsed_seats: Vec<_> = accounts
             .iter()
             .filter_map(|(seat_key, account)| {
-                let (device_key, client_ip, tenure, _, _) =
+                let (device_key, client_ip, tenure, _, active_epoch) =
                     state::parse_client_seat(&account.data)?;
+                active_epoch_by_seat.insert(*seat_key, active_epoch);
                 Some((*seat_key, device_key, client_ip, tenure))
             })
             .collect();
@@ -187,6 +193,26 @@ impl ListCommand {
                 .filter(|(seat_key, _, _, _)| balances.contains_key(seat_key))
                 .collect();
             (balances, matching_seats)
+        };
+
+        // With --all, restrict to seats active in the latest subscription epoch
+        // (the most recent epoch that settled seats); seats that lapsed in
+        // earlier epochs, whose accounts persist on-chain, are dropped.
+        let filtered_seats = if self.all {
+            match active_epoch_by_seat.values().copied().max() {
+                Some(current_epoch) => {
+                    println!("Active subscription epoch: {current_epoch}\n");
+                    filtered_seats
+                        .into_iter()
+                        .filter(|(seat_key, _, _, _)| {
+                            active_epoch_by_seat.get(seat_key) == Some(&current_epoch)
+                        })
+                        .collect()
+                }
+                None => filtered_seats,
+            }
+        } else {
+            filtered_seats
         };
 
         if filtered_seats.is_empty() {
