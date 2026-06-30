@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, anyhow, bail};
 use clap::Args;
-use doublezero_solana_client_tools::payer::{SolanaPayerOptions, TransactionOutcome, Wallet};
+use doublezero_solana_client_tools::{
+    payer::{SolanaPayerOptions, TransactionOutcome, Wallet},
+    rpc::try_fetch_multiple_accounts,
+};
 use doublezero_solana_sdk::{
     shred_subscription::{
         ID,
@@ -77,9 +80,6 @@ pub(crate) fn validate_manager(wallet: &Pubkey, vcr_manager: &Pubkey) -> Result<
 /// accounts and the CheckCliVersion ix.
 pub(crate) const MAX_CLAIM_EPOCHS_PER_TX: usize = 16;
 
-/// getMultipleAccounts caps at 100 keys per request.
-const ACCOUNTS_FETCH_CHUNK: usize = 100;
-
 /// How far back (in subscription epochs) auto-discovery probes from the current
 /// epoch. Holdings older than the on-chain abandonment window are swept, so this
 /// covers every holding that can still exist.
@@ -116,12 +116,11 @@ impl ClaimCommand {
         let vcr_key = find_validator_client_rewards_address(self.client_id).0;
         let program_config_key = find_program_config_address().0;
 
-        // Single getMultipleAccounts call: VCR, ProgramConfig.
-        let accounts = wallet
-            .connection
-            .get_multiple_accounts(&[vcr_key, program_config_key])
-            .await
-            .with_context(|| "fetching VCR + program config")?;
+        // Single fetch: VCR, ProgramConfig.
+        let accounts =
+            try_fetch_multiple_accounts(&wallet.connection, &[vcr_key, program_config_key])
+                .await
+                .with_context(|| "fetching VCR + program config")?;
 
         let vcr_account = accounts.first().and_then(|a| a.as_ref()).ok_or_else(|| {
             anyhow!(
@@ -363,31 +362,25 @@ async fn discover_holdings(
     ceiling_epoch: u64,
 ) -> Result<Vec<HoldingToClaim>> {
     let floor = ceiling_epoch.saturating_sub(MAX_DISCOVERY_LOOKBACK);
-    let candidates: Vec<u64> = (floor..=ceiling_epoch).collect();
+    let derived: Vec<(u64, Pubkey, u8)> = (floor..=ceiling_epoch)
+        .map(|epoch| {
+            let (pda, bump) = find_claim_holding_address(vcr_key, epoch, mint);
+            (epoch, pda, bump)
+        })
+        .collect();
+    let keys: Vec<Pubkey> = derived.iter().map(|(_, pda, _)| *pda).collect();
+    let probed = try_fetch_multiple_accounts(&wallet.connection, &keys)
+        .await
+        .with_context(|| "probing claim holdings")?;
     let mut found: Vec<HoldingToClaim> = Vec::new();
-    for chunk in candidates.chunks(ACCOUNTS_FETCH_CHUNK) {
-        let derived: Vec<(u64, Pubkey, u8)> = chunk
-            .iter()
-            .map(|&epoch| {
-                let (pda, bump) = find_claim_holding_address(vcr_key, epoch, mint);
-                (epoch, pda, bump)
-            })
-            .collect();
-        let keys: Vec<Pubkey> = derived.iter().map(|(_, pda, _)| *pda).collect();
-        let probed = wallet
-            .connection
-            .get_multiple_accounts(&keys)
-            .await
-            .with_context(|| "probing claim holdings")?;
-        for ((epoch, pda, bump), account) in derived.into_iter().zip(probed) {
-            if let Some(pre_balance) = holding_balance(account.as_ref(), mint) {
-                found.push(HoldingToClaim {
-                    epoch,
-                    bump_seed: bump,
-                    holding_pda: pda,
-                    pre_balance,
-                });
-            }
+    for ((epoch, pda, bump), account) in derived.into_iter().zip(probed) {
+        if let Some(pre_balance) = holding_balance(account.as_ref(), mint) {
+            found.push(HoldingToClaim {
+                epoch,
+                bump_seed: bump,
+                holding_pda: pda,
+                pre_balance,
+            });
         }
     }
     found.sort_unstable_by_key(|h| h.epoch);
@@ -413,48 +406,44 @@ async fn validate_explicit_holdings(
         })
         .collect();
 
-    let mut holdings: Vec<HoldingToClaim> = Vec::new();
+    let keys: Vec<Pubkey> = derived.iter().map(|(_, pda, _)| *pda).collect();
+    let accounts = try_fetch_multiple_accounts(&wallet.connection, &keys)
+        .await
+        .with_context(|| "fetching claim holdings")?;
 
-    for chunk in derived.chunks(ACCOUNTS_FETCH_CHUNK) {
-        let keys: Vec<Pubkey> = chunk.iter().map(|(_, pda, _)| *pda).collect();
-        let accounts = wallet
-            .connection
-            .get_multiple_accounts(&keys)
-            .await
-            .with_context(|| "fetching claim holdings")?;
-        for ((epoch, pda, bump), maybe_acct) in chunk.iter().zip(accounts) {
-            match maybe_acct.as_ref() {
-                None => eprintln!(
-                    "warning: epoch {epoch} holding {pda} is not initialized; skipping. \
-                     Run `shreds validator-client-rewards init-holding ...` to create it."
+    let mut holdings: Vec<HoldingToClaim> = Vec::new();
+    for ((epoch, pda, bump), maybe_acct) in derived.iter().zip(accounts) {
+        match maybe_acct.as_ref() {
+            None => eprintln!(
+                "warning: epoch {epoch} holding {pda} is not initialized; skipping. \
+                 Run `shreds validator-client-rewards init-holding ...` to create it."
+            ),
+            Some(acct) if acct.owner != spl_token_interface::ID => eprintln!(
+                "warning: epoch {epoch} holding {pda} is not an SPL token account (owner {}); skipping.",
+                acct.owner
+            ),
+            Some(acct) => match spl_token_interface::state::Account::unpack(&acct.data) {
+                Ok(token) if token.mint != *mint => eprintln!(
+                    "warning: epoch {epoch} holding {pda} is for mint {} (expected {mint}); skipping.",
+                    token.mint
                 ),
-                Some(acct) if acct.owner != spl_token_interface::ID => eprintln!(
-                    "warning: epoch {epoch} holding {pda} is not an SPL token account (owner {}); skipping.",
-                    acct.owner
-                ),
-                Some(acct) => match spl_token_interface::state::Account::unpack(&acct.data) {
-                    Ok(token) if token.mint != *mint => eprintln!(
-                        "warning: epoch {epoch} holding {pda} is for mint {} (expected {mint}); skipping.",
-                        token.mint
-                    ),
-                    Ok(token) => {
-                        if token.amount == 0 {
-                            eprintln!(
-                                "warning: epoch {epoch} holding has 0 balance; will still close and recover rent."
-                            );
-                        }
-                        holdings.push(HoldingToClaim {
-                            epoch: *epoch,
-                            bump_seed: *bump,
-                            holding_pda: *pda,
-                            pre_balance: token.amount,
-                        });
+                Ok(token) => {
+                    if token.amount == 0 {
+                        eprintln!(
+                            "warning: epoch {epoch} holding has 0 balance; will still close and recover rent."
+                        );
                     }
-                    Err(err) => eprintln!(
-                        "warning: epoch {epoch} holding {pda} failed to unpack ({err}); skipping."
-                    ),
-                },
-            }
+                    holdings.push(HoldingToClaim {
+                        epoch: *epoch,
+                        bump_seed: *bump,
+                        holding_pda: *pda,
+                        pre_balance: token.amount,
+                    });
+                }
+                Err(err) => eprintln!(
+                    "warning: epoch {epoch} holding {pda} failed to unpack ({err}); skipping."
+                ),
+            },
         }
     }
     Ok(holdings)
