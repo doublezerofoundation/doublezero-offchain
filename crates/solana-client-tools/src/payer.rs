@@ -85,8 +85,8 @@ impl Wallet {
     /// Build a `Wallet` from CLI options, optionally overriding the default
     /// `SolanaConnection` derived from `opts.connection_options`. Pass
     /// `Some(connection)` when the wallet talks to a non-Solana endpoint such
-    /// as the DZ Ledger (`into_shred_subscription_connection()`) so callers
-    /// cannot forget the override after construction.
+    /// as the DZ Ledger so callers cannot forget the override after
+    /// construction.
     pub fn try_new(opts: SolanaPayerOptions, connection: Option<SolanaConnection>) -> Result<Self> {
         let SolanaPayerOptions {
             connection_options,

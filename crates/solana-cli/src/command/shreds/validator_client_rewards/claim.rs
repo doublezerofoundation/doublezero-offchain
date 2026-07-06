@@ -111,7 +111,7 @@ impl ClaimCommand {
             .solana_payer_options
             .connection_options
             .clone()
-            .into_shred_subscription_connection();
+            .into_solana_connection();
         let wallet = Wallet::try_new(self.solana_payer_options, Some(dz_connection))?;
         let wallet_key = wallet.pubkey();
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `shreds`: remove the testnet shred-subscription special-case that routed reads/writes to the DZ Ledger. The testnet shred-subscription program now lives on Solana devnet, so the `-u`/`--url` option resolves to the network's Solana RPC URL for all monikers (`shred_subscription_url()` and `into_shred_subscription_connection()` are gone, replaced by the generic `into_solana_connection()`); reach the testnet program with `-u devnet`. Device codes still resolve against the DZ Ledger via `--dz-ledger-url`. Mainnet behavior is unchanged (#1763)
+
 ## [0.5.10](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/doublezero-solana/v0.5.10)
 
 - uptick crate to v0.5.10 (#395)

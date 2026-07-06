@@ -148,7 +148,7 @@ enum EpochOutcome {
 impl StatusCommand {
     pub async fn try_into_execute(self) -> Result<()> {
         let solana_connection = SolanaConnection::from(self.connection_options.clone());
-        let dz_connection = self.connection_options.into_shred_subscription_connection();
+        let dz_connection = self.connection_options.into_solana_connection();
         let commitment = dz_connection.0.commitment();
 
         let vpr_pda = find_validator_publisher_rewards_address(&self.node_id).0;
