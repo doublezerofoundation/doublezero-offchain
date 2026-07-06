@@ -212,16 +212,19 @@ pub fn is_prorated_service_enabled(data: &[u8]) -> bool {
 
 /// Offset of `ExecutionController::last_settled_epoch` within the raw account
 /// data (after the discriminator). On-chain field layout preceding it:
+///
+/// ```text
 /// phase_field(u8) + bump_seed(u8) + pad(2) + total_metros(u16) +
 /// total_enabled_devices(u16) + total_client_seats(u32) +
 /// oracle_instant_request_count(u16) + validator_client_ids_count(u8) + pad(1)
-/// + flags(8) = 24 bytes to `current_subscription_epoch`, then 120 more:
+/// + flags(8) = 24 bytes to current_subscription_epoch, then 120 more:
 /// current_subscription_epoch(u64) +
 /// updated_device_prices_count(u16) + settled_devices_count(u16) +
 /// settled_client_seats_count(u16) + total_devices(u16) + last_settled_slot(u64)
 /// + last_updating_prices_slot(u64) + last_open_for_requests_slot(u64) +
 /// last_closed_for_requests_slot(u64) + epoch_round_commitment(32) +
 /// epoch_round_reveal(32) + next_seat_funding_index(u64) = 120 → 24 + 120 = 144.
+/// ```
 pub const EXECUTION_CONTROLLER_LAST_SETTLED_EPOCH_OFFSET: usize = DISCRIMINATOR_LEN + 144;
 
 /// Reads `last_settled_epoch` from raw `ExecutionController` account data.
