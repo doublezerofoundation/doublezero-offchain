@@ -128,17 +128,6 @@ impl SolanaConnectionOptions {
             .unwrap_or(Self::DEFAULT_MONIKER);
         <NetworkEnvironment as FromStr>::from_str(url_or_moniker).ok()
     }
-
-    /// Build a `SolanaConnection` from the `-u`/`--url` option: a known moniker
-    /// (m/t/d/l) resolves to that network's Solana RPC URL, a raw URL is passed
-    /// through as-is. Used by the shreds subcommands.
-    ///
-    /// The testnet shred-subscription program now lives on Solana devnet, so
-    /// reach it with `-u devnet` (or an explicit devnet/Helius URL); `-u testnet`
-    /// no longer routes shred-subscription to the DZ Ledger.
-    pub fn into_solana_connection(self) -> SolanaConnection {
-        self.into()
-    }
 }
 
 pub struct SolanaConnection(pub RpcClient);
