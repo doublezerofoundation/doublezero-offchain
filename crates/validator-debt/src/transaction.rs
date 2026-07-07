@@ -455,7 +455,7 @@ impl Transaction {
             }
             Err(err) => {
                 if let Some(client_error) = err.downcast_ref::<ClientError>() {
-                    match client_error.kind.as_ref() {
+                    match client_error.kind() {
                         ClientErrorKind::RpcError(RpcError::RpcResponseError {
                             data: RpcResponseErrorData::SendTransactionPreflightFailure(sim_result),
                             ..

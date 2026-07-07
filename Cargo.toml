@@ -75,7 +75,11 @@ solana-compute-budget-interface = "3.0"
 solana-instruction = "3.0"
 solana-pubkey = { version = "3.0", features = ["borsh", "bytemuck"] }
 solana-reward-info = "3.0"
+solana-rpc-client-types = "3.0"
 solana-sanitize = "3.0"
+# Held to the 3.0 minor: later 3.x releases of the meta-crate remove more
+# deprecated re-exports (sysvar, account, message, ...) that this workspace
+# still consumes.
 solana-sdk = "=3.0"
 solana-sdk-ids = "3.0"
 solana-system-interface = ">=1,<=3"

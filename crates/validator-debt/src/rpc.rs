@@ -172,7 +172,7 @@ impl JoinedSolanaEpochs {
             Ok(block_time) => Ok(block_time),
             Err(e) => {
                 let slot_skipped = matches!(
-                    e.kind.as_ref(),
+                    e.kind(),
                     ClientErrorKind::RpcError(RpcError::RpcResponseError {
                         code: JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
                             | JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,

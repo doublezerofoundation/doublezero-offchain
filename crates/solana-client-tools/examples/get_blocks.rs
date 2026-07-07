@@ -119,7 +119,7 @@ impl GetBlocksExampleApp {
                         Ok(confirmed_block) => {
                             block.replace(confirmed_block);
                         }
-                        Err(e) => match e.kind.as_ref() {
+                        Err(e) => match e.kind() {
                             ClientErrorKind::RpcError(RpcError::RpcResponseError {
                                 code:
                                     JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
