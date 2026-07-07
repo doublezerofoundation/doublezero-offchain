@@ -61,7 +61,9 @@ metrics-exporter-prometheus = "0.17"
 mockall = "0.13"
 parquet = { version = "57", features = [ "async" ] }
 rayon = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# rustls-tls bundles the webpki Mozilla roots; rustls-tls-native-roots adds the
+# host OS certificate store so OS-installed private CAs stay trusted.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "rustls-tls-native-roots"] }
 retainer = "0.4"
 rust_decimal = { version = "1", features = ["serde", "macros"] }
 serde = { version = "1", features = ["derive"] }

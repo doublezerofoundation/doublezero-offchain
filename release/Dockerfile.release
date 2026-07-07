@@ -1,3 +1,5 @@
+# The base tag supplies rustup and system deps; rust-toolchain.toml pins the
+# toolchain that actually builds releases (rustup fetches it on first use).
 FROM rust:1.94.0
 
 RUN apt-get update -qq \
