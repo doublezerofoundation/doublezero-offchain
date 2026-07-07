@@ -33,6 +33,7 @@ serde_json.workspace = true
 solana-account-decoder-client-types.workspace = true
 solana-client.workspace = true
 solana-commitment-config.workspace = true
+solana-compute-budget-interface.workspace = true
 solana-sanitize.workspace = true
 solana-sdk.workspace = true
 solana-transaction-status-client-types.workspace = true
