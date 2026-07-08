@@ -30,8 +30,9 @@ pub struct ClaimHoldingId {
 pub enum ShredSubscriptionInstructionData {
     /// Initialize a client seat for a (device, client_ip) pair.
     InitializeClientSeat { client_ip: u32 },
-    /// Initialize a payment escrow for a (seat, withdraw_authority) pair.
-    InitializePaymentEscrow,
+    /// Initialize a payment escrow for a (seat, withdraw_authority) pair. The
+    /// argument is the operator key (Pubkey::default() = no separate operator).
+    InitializePaymentEscrow(Pubkey),
     /// Close a payment escrow and refund any remaining USDC.
     ClosePaymentEscrow,
     /// Fund a payment escrow with USDC.
@@ -119,7 +120,10 @@ impl BorshSerialize for ShredSubscriptionInstructionData {
                 Self::INITIALIZE_CLIENT_SEAT.serialize(writer)?;
                 client_ip.serialize(writer)
             }
-            Self::InitializePaymentEscrow => Self::INITIALIZE_PAYMENT_ESCROW.serialize(writer),
+            Self::InitializePaymentEscrow(operator_key) => {
+                Self::INITIALIZE_PAYMENT_ESCROW.serialize(writer)?;
+                operator_key.serialize(writer)
+            }
             Self::ClosePaymentEscrow => Self::CLOSE_PAYMENT_ESCROW.serialize(writer),
             Self::FundPaymentEscrowUsdc(amount) => {
                 Self::FUND_PAYMENT_ESCROW_USDC.serialize(writer)?;
@@ -187,7 +191,11 @@ impl BorshDeserialize for ShredSubscriptionInstructionData {
                 let client_ip = u32::deserialize_reader(reader)?;
                 Ok(Self::InitializeClientSeat { client_ip })
             }
-            Self::INITIALIZE_PAYMENT_ESCROW => Ok(Self::InitializePaymentEscrow),
+            Self::INITIALIZE_PAYMENT_ESCROW => {
+                // Optional trailing argument: absent (legacy tx) -> default key.
+                let operator_key = Pubkey::deserialize_reader(reader).unwrap_or_default();
+                Ok(Self::InitializePaymentEscrow(operator_key))
+            }
             Self::CLOSE_PAYMENT_ESCROW => Ok(Self::ClosePaymentEscrow),
             Self::FUND_PAYMENT_ESCROW_USDC => {
                 let amount = u64::deserialize_reader(reader)?;
@@ -257,6 +265,27 @@ mod tests {
         let bytes = borsh::to_vec(ix).unwrap();
         let parsed = ShredSubscriptionInstructionData::try_from_slice(&bytes).unwrap();
         assert_eq!(*ix, parsed);
+    }
+
+    #[test]
+    fn round_trip_initialize_payment_escrow() {
+        round_trip(&ShredSubscriptionInstructionData::InitializePaymentEscrow(
+            Pubkey::new_unique(),
+        ));
+    }
+
+    // An old client that sent only the discriminator (the pre-operator-key
+    // wire form) must still decode — payments.rs decodes historical
+    // transactions. The absent key decodes to the default.
+    #[test]
+    fn initialize_payment_escrow_decodes_legacy_wire_form() {
+        let bytes = borsh::to_vec(&ShredSubscriptionInstructionData::INITIALIZE_PAYMENT_ESCROW)
+            .expect("discriminator serialization");
+        let parsed = ShredSubscriptionInstructionData::try_from_slice(&bytes).unwrap();
+        assert_eq!(
+            parsed,
+            ShredSubscriptionInstructionData::InitializePaymentEscrow(Pubkey::default()),
+        );
     }
 
     #[test]

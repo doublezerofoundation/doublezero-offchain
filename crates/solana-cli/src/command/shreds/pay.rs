@@ -415,7 +415,7 @@ impl PayCommand {
             let escrow_ix = try_build_instruction(
                 &ID,
                 InitializePaymentEscrowAccounts::new(&client_seat_key, &wallet_key),
-                &ShredSubscriptionInstructionData::InitializePaymentEscrow,
+                &ShredSubscriptionInstructionData::InitializePaymentEscrow(wallet_key),
             )?;
             instructions.push(escrow_ix);
             compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(escrow_bump);
