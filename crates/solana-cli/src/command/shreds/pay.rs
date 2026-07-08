@@ -171,6 +171,11 @@ pub struct PayCommand {
     /// Serviceability program ID for the multicast user guard (auto-detected; override for e2e)
     #[arg(long, hide = true)]
     serviceability_program_id: Option<Pubkey>,
+    /// Operator key that becomes the DoubleZero operational identity
+    /// (user.owner / access-pass user_payer). Defaults to the payer wallet,
+    /// reproducing today's behavior (owner = the withdraw authority).
+    #[arg(long)]
+    operator_key: Option<Pubkey>,
 
     #[command(flatten)]
     write_opts: crate::command::WriteVerbOptions,
@@ -186,6 +191,7 @@ impl PayCommand {
         let moniker_env = self.write_opts.connection_options.moniker_env();
         let wallet = crate::command::build_wallet(ctx, self.write_opts)?;
         let wallet_key = wallet.pubkey();
+        let operator_key = self.operator_key.unwrap_or(wallet_key);
 
         writeln!(out, "Shred subscription - Pay")?;
 
@@ -415,7 +421,7 @@ impl PayCommand {
             let escrow_ix = try_build_instruction(
                 &ID,
                 InitializePaymentEscrowAccounts::new(&client_seat_key, &wallet_key),
-                &ShredSubscriptionInstructionData::InitializePaymentEscrow(wallet_key),
+                &ShredSubscriptionInstructionData::InitializePaymentEscrow(operator_key),
             )?;
             instructions.push(escrow_ix);
             compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(escrow_bump);

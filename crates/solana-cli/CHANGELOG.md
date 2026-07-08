@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - release artifact now builds as a static `x86_64-unknown-linux-musl` binary so it runs on older glibc hosts (malbeclabs/infra#1853)
 - TLS for HTTP clients moves from openssl to rustls; trust roots are the bundled webpki Mozilla set plus the host OS certificate store, so OS-installed private CAs remain trusted (malbeclabs/infra#1853)
 - `shreds pay`: escrow initialization now sends the wallet key as the `InitializePaymentEscrow` operator key (previously the instruction carried no operator key), preserving today's behavior (owner = withdraw authority) ahead of an upcoming `--operator-key` flag
+- `shreds pay`: add `--operator-key` flag to set the DoubleZero operational identity on escrow initialization; defaults to the payer wallet, preserving today's behavior (owner = withdraw authority)
 
 ## [0.5.10](https://github.com/doublezerofoundation/doublezero-offchain/releases/tag/doublezero-solana/v0.5.10)
 
