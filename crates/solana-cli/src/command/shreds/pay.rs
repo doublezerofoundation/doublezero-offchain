@@ -422,6 +422,18 @@ impl PayCommand {
             compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(seat_bump);
         }
 
+        // The operator key is only carried by InitializePaymentEscrow and is
+        // immutable once the escrow exists — there is no set-operator-key
+        // instruction. Silently ignoring it on a top-up run would leave the
+        // user's operational identity unset, reproducing the multicast-publish
+        // failure infra#1807 targets. Refuse rather than mislead.
+        if escrow_exists && self.operator_key.is_some() {
+            bail!(
+                "--operator-key can only be set when the payment escrow is first initialized; \
+                 this seat's escrow already exists and its operator key cannot be changed"
+            );
+        }
+
         if !escrow_exists {
             let escrow_ix = try_build_instruction(
                 &ID,
@@ -429,6 +441,10 @@ impl PayCommand {
                 &ShredSubscriptionInstructionData::InitializePaymentEscrow(operator_key),
             )?;
             instructions.push(escrow_ix);
+            writeln!(
+                out,
+                "Initializing payment escrow with operator key: {operator_key}"
+            )?;
             compute_unit_limit += 50_000 + Wallet::compute_units_for_bump_seed(escrow_bump);
         }
 
