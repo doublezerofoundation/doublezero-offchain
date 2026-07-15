@@ -117,9 +117,13 @@ fn user_owner_is_acceptable(
     user_owner: Option<Pubkey>,
     oracle_key: Option<Pubkey>,
     wallet_key: Pubkey,
+    operator_key: Pubkey,
 ) -> bool {
     let is_shred_oracle_user = oracle_key.zip(user_owner).is_some_and(|(o, u)| o == u);
-    let is_self_owned = user_owner == Some(wallet_key);
+    // Under the operator-key split the oracle provisions the user owned by the
+    // operator key, which may be distinct from the wallet (withdraw authority);
+    // a re-subscribe/top-up must accept either as self-owned.
+    let is_self_owned = user_owner == Some(wallet_key) || user_owner == Some(operator_key);
     is_shred_oracle_user || is_self_owned
 }
 
@@ -232,7 +236,8 @@ impl PayCommand {
                     None
                 };
 
-                if !user_owner_is_acceptable(user_owner, oracle_key, wallet.pubkey()) {
+                if !user_owner_is_acceptable(user_owner, oracle_key, wallet.pubkey(), operator_key)
+                {
                     bail!(
                         "Client IP {} already has a multicast user on serviceability \
                          owned by neither the shred oracle nor your wallet. This IP \
@@ -1001,7 +1006,12 @@ mod tests {
     fn user_acceptable_when_owned_by_shred_oracle() {
         let oracle = Pubkey::new_unique();
         let wallet = Pubkey::new_unique();
-        assert!(user_owner_is_acceptable(Some(oracle), Some(oracle), wallet,));
+        assert!(user_owner_is_acceptable(
+            Some(oracle),
+            Some(oracle),
+            wallet,
+            wallet,
+        ));
     }
 
     #[test]
@@ -1009,14 +1019,35 @@ mod tests {
         // New behavior: validator-owned (self-owned) Users are benign.
         let oracle = Pubkey::new_unique();
         let wallet = Pubkey::new_unique();
-        assert!(user_owner_is_acceptable(Some(wallet), Some(oracle), wallet,));
+        assert!(user_owner_is_acceptable(
+            Some(wallet),
+            Some(oracle),
+            wallet,
+            wallet,
+        ));
+    }
+
+    #[test]
+    fn user_acceptable_when_owned_by_operator_key() {
+        // Operator-key split: the oracle provisions the user owned by the
+        // operator key, distinct from the wallet (withdraw authority). A
+        // re-subscribe/top-up must treat that as self-owned.
+        let oracle = Pubkey::new_unique();
+        let wallet = Pubkey::new_unique();
+        let operator = Pubkey::new_unique();
+        assert!(user_owner_is_acceptable(
+            Some(operator),
+            Some(oracle),
+            wallet,
+            operator,
+        ));
     }
 
     #[test]
     fn user_acceptable_self_owned_even_when_oracle_key_unknown() {
         // If we can't resolve the oracle pubkey, self-ownership still passes.
         let wallet = Pubkey::new_unique();
-        assert!(user_owner_is_acceptable(Some(wallet), None, wallet));
+        assert!(user_owner_is_acceptable(Some(wallet), None, wallet, wallet));
     }
 
     #[test]
@@ -1028,6 +1059,7 @@ mod tests {
             Some(third_party),
             Some(oracle),
             wallet,
+            wallet,
         ));
     }
 
@@ -1036,13 +1068,23 @@ mod tests {
         // Malformed account data → user_owner is None → bail (safe default).
         let oracle = Pubkey::new_unique();
         let wallet = Pubkey::new_unique();
-        assert!(!user_owner_is_acceptable(None, Some(oracle), wallet));
+        assert!(!user_owner_is_acceptable(
+            None,
+            Some(oracle),
+            wallet,
+            wallet
+        ));
     }
 
     #[test]
     fn user_rejected_when_third_party_and_oracle_unknown() {
         let wallet = Pubkey::new_unique();
         let third_party = Pubkey::new_unique();
-        assert!(!user_owner_is_acceptable(Some(third_party), None, wallet));
+        assert!(!user_owner_is_acceptable(
+            Some(third_party),
+            None,
+            wallet,
+            wallet,
+        ));
     }
 }
