@@ -246,14 +246,17 @@ impl PayCommand {
         let (program_config_key, _) = state::find_program_config_address();
 
         // Check which accounts already exist on-chain.
-        let accounts = wallet
+        let mut accounts = wallet
             .connection
             .get_multiple_accounts(&[client_seat_key, escrow_key, program_config_key])
-            .await?;
-        let seat_exists = accounts[0].is_some();
-        let escrow_exists = accounts[1].is_some();
-        let prorated_service_enabled = accounts[2]
-            .as_ref()
+            .await?
+            .into_iter();
+        let seat_account = accounts.next().flatten();
+        let seat_exists = seat_account.is_some();
+        let escrow_exists = accounts.next().flatten().is_some();
+        let prorated_service_enabled = accounts
+            .next()
+            .flatten()
             .is_some_and(|a| state::is_prorated_service_enabled(&a.data));
 
         // Block if this client IP already has a seat on a DIFFERENT device.
@@ -300,7 +303,7 @@ impl PayCommand {
         }
 
         let seat_already_active =
-            is_seat_already_active(accounts[0].as_ref().map(|a| a.data.as_slice()));
+            is_seat_already_active(seat_account.as_ref().map(|a| a.data.as_slice()));
 
         // Epoch-remaining warning: if <10% of the epoch remains, the user is
         // paying full price for a partial epoch. Skip if: flag set, dry-run,
@@ -310,7 +313,7 @@ impl PayCommand {
             Ok(epoch_info) => {
                 // Use >= (not ==) to handle the unlikely case where active_epoch
                 // is ahead of the RPC's reported epoch due to timing.
-                let seat_active_this_epoch = if let Some(ref seat_account) = accounts[0] {
+                let seat_active_this_epoch = if let Some(seat_account) = seat_account.as_ref() {
                     if let Some((_, _, _, _, active_epoch)) =
                         state::parse_client_seat(&seat_account.data)
                     {
@@ -364,7 +367,7 @@ impl PayCommand {
         // Check the current price so the user gets a friendly error instead of
         // an opaque on-chain revert. If the seat has a per-seat price
         // override, use that instead of the metro base + device premium.
-        let seat_price_override = accounts[0]
+        let seat_price_override = seat_account
             .as_ref()
             .and_then(|a| state::parse_client_seat_price_override(&a.data));
 
