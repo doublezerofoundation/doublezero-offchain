@@ -251,8 +251,9 @@ async fn fetch_by_type(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use doublezero_serviceability::state::location::LocationStatus;
+
+    use super::*;
 
     // A mixed batch (one valid Location, one undecodable account) must store the
     // valid account, report exactly one decode failure with its pubkey, and leave
