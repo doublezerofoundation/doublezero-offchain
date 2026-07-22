@@ -69,7 +69,10 @@ pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServ
                         pubkey,
                         &account_data,
                     ) {
-                        Ok(()) => total_processed += 1,
+                        Ok(true) => total_processed += 1,
+                        // Unexpected account type: already warned inside the
+                        // dispatch, and neither processed nor a decode failure.
+                        Ok(false) => {}
                         Err(e) => {
                             warn!(
                                 "Failed to decode {} account {} ({} bytes), skipping: {}",
@@ -105,14 +108,17 @@ pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServ
 }
 
 // Decode a single fetched account and insert it into `serviceability_data`.
-// Kept separate from the RPC fetch so the per-account decode dispatch can be
-// tested against real serialized bytes without an RPC round-trip.
+// Returns whether an account was actually stored (`false` only for an
+// unexpected account type, which is warned and neither processed nor treated
+// as a decode failure). Kept separate from the RPC fetch so the per-account
+// decode dispatch can be tested against real serialized bytes without an RPC
+// round-trip.
 fn decode_account(
     serviceability_data: &mut DZServiceabilityData,
     account_type: AccountType,
     pubkey: Pubkey,
     account_data: &[u8],
-) -> Result<()> {
+) -> Result<bool> {
     match account_type {
         AccountType::Location => {
             let location = Location::try_from(account_data)?;
@@ -135,8 +141,10 @@ fn decode_account(
             serviceability_data.users.insert(pubkey, user);
         }
         AccountType::MulticastGroup => {
-            let group = MulticastGroup::try_from(account_data)?;
-            serviceability_data.multicast_groups.insert(pubkey, group);
+            let multicast_group = MulticastGroup::try_from(account_data)?;
+            serviceability_data
+                .multicast_groups
+                .insert(pubkey, multicast_group);
         }
         AccountType::Contributor => {
             let contributor = Contributor::try_from(account_data)?;
@@ -153,10 +161,11 @@ fn decode_account(
                 "Unexpected account type {:?} in processed list",
                 account_type
             );
+            return Ok(false);
         }
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// Fetch serviceability data by account type using RPC filters
@@ -214,6 +223,7 @@ async fn fetch_by_type(
 mod tests {
     use super::*;
     use doublezero_serviceability::state::location::LocationStatus;
+    use solana_sdk::program_error::ProgramError;
 
     fn valid_location() -> Location {
         Location {
@@ -239,7 +249,7 @@ mod tests {
         let pubkey = Pubkey::new_unique();
         let account_data = borsh::to_vec(&location).unwrap();
 
-        decode_account(
+        let stored = decode_account(
             &mut serviceability_data,
             AccountType::Location,
             pubkey,
@@ -247,6 +257,7 @@ mod tests {
         )
         .unwrap();
 
+        assert!(stored);
         assert_eq!(serviceability_data.locations.len(), 1);
         assert_eq!(serviceability_data.locations[&pubkey].code, "ams");
     }
@@ -259,14 +270,19 @@ mod tests {
         // `AccountType::Location` is what makes `Location::try_from` return Err.
         let corrupt_data = [0xFF, 0x00, 0x00];
 
-        let result = decode_account(
+        let error = decode_account(
             &mut serviceability_data,
             AccountType::Location,
             Pubkey::new_unique(),
             &corrupt_data,
-        );
+        )
+        .unwrap_err();
 
-        assert!(result.is_err());
+        // The only Err source in the SDK's `try_from` is the discriminant check.
+        assert_eq!(
+            error.downcast_ref::<ProgramError>(),
+            Some(&ProgramError::InvalidAccountData)
+        );
         assert!(serviceability_data.locations.is_empty());
     }
 
