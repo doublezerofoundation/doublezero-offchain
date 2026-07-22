@@ -43,6 +43,7 @@ pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServ
     let mut serviceability_data = DZServiceabilityData::default();
     let mut total_processed = 0;
     let mut total_errors = 0;
+    let mut decode_errors = 0;
 
     // Fetch each account type separately with RPC filtering
     for account_type in PROCESSED_ACCOUNT_TYPES {
@@ -59,54 +60,25 @@ pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServ
                         continue;
                     }
 
-                    match account_type {
-                        AccountType::Location => {
-                            let location = Location::try_from(&account_data[..])?;
-                            serviceability_data.locations.insert(pubkey, location);
-                            total_processed += 1;
-                        }
-                        AccountType::Exchange => {
-                            let exchange = Exchange::try_from(&account_data[..])?;
-                            serviceability_data.exchanges.insert(pubkey, exchange);
-                            total_processed += 1;
-                        }
-                        AccountType::Device => {
-                            let device = Device::try_from(&account_data[..])?;
-                            serviceability_data.devices.insert(pubkey, device);
-                            total_processed += 1;
-                        }
-                        AccountType::Link => {
-                            let link = Link::try_from(&account_data[..])?;
-                            serviceability_data.links.insert(pubkey, link);
-                            total_processed += 1;
-                        }
-                        AccountType::User => {
-                            let user = User::try_from(&account_data[..])?;
-                            serviceability_data.users.insert(pubkey, user);
-                            total_processed += 1;
-                        }
-                        AccountType::MulticastGroup => {
-                            let group = MulticastGroup::try_from(&account_data[..])?;
-                            serviceability_data.multicast_groups.insert(pubkey, group);
-                            total_processed += 1;
-                        }
-                        AccountType::Contributor => {
-                            let contributor = Contributor::try_from(&account_data[..])?;
-                            serviceability_data.contributors.insert(pubkey, contributor);
-                            total_processed += 1;
-                        }
-                        AccountType::AccessPass => {
-                            let access_pass = AccessPass::try_from(&account_data[..])?;
-                            serviceability_data
-                                .access_passes
-                                .insert(pubkey, access_pass);
-                            total_processed += 1;
-                        }
-                        _ => {
+                    // A decode failure on one account must degrade gracefully:
+                    // warn, count it, and skip it — never fail the whole epoch
+                    // snapshot (which the scheduler would then retry forever).
+                    match decode_account(
+                        &mut serviceability_data,
+                        *account_type,
+                        pubkey,
+                        &account_data,
+                    ) {
+                        Ok(()) => total_processed += 1,
+                        Err(e) => {
                             warn!(
-                                "Unexpected account type {:?} in processed list",
-                                account_type
+                                "Failed to decode {} account {} ({} bytes), skipping: {}",
+                                account_type,
+                                pubkey,
+                                account_data.len(),
+                                e
                             );
+                            decode_errors += 1;
                         }
                     }
                 }
@@ -115,7 +87,7 @@ pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServ
     }
 
     info!(
-        "Processed {} serviceability accounts, contributors={}, locations={}, exchanges={}, devices={}, links={}, users={}, mcast_groups={}, access_passes={}. Errors={}",
+        "Processed {} serviceability accounts, contributors={}, locations={}, exchanges={}, devices={}, links={}, users={}, mcast_groups={}, access_passes={}. Errors={}, DecodeErrors={}",
         total_processed,
         serviceability_data.contributors.len(),
         serviceability_data.locations.len(),
@@ -126,9 +98,65 @@ pub async fn fetch(rpc_client: &RpcClient, settings: &Settings) -> Result<DZServ
         serviceability_data.multicast_groups.len(),
         serviceability_data.access_passes.len(),
         total_errors,
+        decode_errors,
     );
 
     Ok(serviceability_data)
+}
+
+// Decode a single fetched account and insert it into `serviceability_data`.
+// Kept separate from the RPC fetch so the per-account decode dispatch can be
+// tested against real serialized bytes without an RPC round-trip.
+fn decode_account(
+    serviceability_data: &mut DZServiceabilityData,
+    account_type: AccountType,
+    pubkey: Pubkey,
+    account_data: &[u8],
+) -> Result<()> {
+    match account_type {
+        AccountType::Location => {
+            let location = Location::try_from(account_data)?;
+            serviceability_data.locations.insert(pubkey, location);
+        }
+        AccountType::Exchange => {
+            let exchange = Exchange::try_from(account_data)?;
+            serviceability_data.exchanges.insert(pubkey, exchange);
+        }
+        AccountType::Device => {
+            let device = Device::try_from(account_data)?;
+            serviceability_data.devices.insert(pubkey, device);
+        }
+        AccountType::Link => {
+            let link = Link::try_from(account_data)?;
+            serviceability_data.links.insert(pubkey, link);
+        }
+        AccountType::User => {
+            let user = User::try_from(account_data)?;
+            serviceability_data.users.insert(pubkey, user);
+        }
+        AccountType::MulticastGroup => {
+            let group = MulticastGroup::try_from(account_data)?;
+            serviceability_data.multicast_groups.insert(pubkey, group);
+        }
+        AccountType::Contributor => {
+            let contributor = Contributor::try_from(account_data)?;
+            serviceability_data.contributors.insert(pubkey, contributor);
+        }
+        AccountType::AccessPass => {
+            let access_pass = AccessPass::try_from(account_data)?;
+            serviceability_data
+                .access_passes
+                .insert(pubkey, access_pass);
+        }
+        _ => {
+            warn!(
+                "Unexpected account type {:?} in processed list",
+                account_type
+            );
+        }
+    }
+
+    Ok(())
 }
 
 /// Fetch serviceability data by account type using RPC filters
@@ -180,4 +208,96 @@ async fn fetch_by_type(
         .collect();
 
     Ok(accounts_with_data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use doublezero_serviceability::state::location::LocationStatus;
+
+    fn valid_location() -> Location {
+        Location {
+            account_type: AccountType::Location,
+            owner: Pubkey::new_unique(),
+            index: 1,
+            bump_seed: 255,
+            lat: 52.37,
+            lng: 4.9,
+            loc_id: 42,
+            status: LocationStatus::Activated,
+            code: "ams".to_string(),
+            name: "Amsterdam".to_string(),
+            country: "NL".to_string(),
+            reference_count: 0,
+        }
+    }
+
+    #[test]
+    fn test_decode_account_valid_location() {
+        let mut serviceability_data = DZServiceabilityData::default();
+        let location = valid_location();
+        let pubkey = Pubkey::new_unique();
+        let account_data = borsh::to_vec(&location).unwrap();
+
+        decode_account(
+            &mut serviceability_data,
+            AccountType::Location,
+            pubkey,
+            &account_data,
+        )
+        .unwrap();
+
+        assert_eq!(serviceability_data.locations.len(), 1);
+        assert_eq!(serviceability_data.locations[&pubkey].code, "ams");
+    }
+
+    #[test]
+    fn test_decode_account_corrupt_location_errors() {
+        let mut serviceability_data = DZServiceabilityData::default();
+        // The SDK parser defaults absent trailing fields, so tail-truncation of a
+        // valid account still decodes; a leading discriminant that is not
+        // `AccountType::Location` is what makes `Location::try_from` return Err.
+        let corrupt_data = [0xFF, 0x00, 0x00];
+
+        let result = decode_account(
+            &mut serviceability_data,
+            AccountType::Location,
+            Pubkey::new_unique(),
+            &corrupt_data,
+        );
+
+        assert!(result.is_err());
+        assert!(serviceability_data.locations.is_empty());
+    }
+
+    // The test that would have caught the incident: a batch with one valid and one
+    // undecodable account of the same type must keep the valid account, count one
+    // decode error, and not fail the whole snapshot.
+    #[test]
+    fn test_decode_batch_skips_corrupt_account() {
+        let mut serviceability_data = DZServiceabilityData::default();
+        let valid_pubkey = Pubkey::new_unique();
+        let batch = [
+            (valid_pubkey, borsh::to_vec(&valid_location()).unwrap()),
+            (Pubkey::new_unique(), vec![0xFF, 0x00, 0x00]),
+        ];
+
+        let mut decode_errors = 0;
+        for (pubkey, account_data) in &batch {
+            if decode_account(
+                &mut serviceability_data,
+                AccountType::Location,
+                *pubkey,
+                account_data,
+            )
+            .is_err()
+            {
+                decode_errors += 1;
+            }
+        }
+
+        assert_eq!(decode_errors, 1);
+        assert_eq!(serviceability_data.locations.len(), 1);
+        assert!(serviceability_data.locations.contains_key(&valid_pubkey));
+    }
 }
