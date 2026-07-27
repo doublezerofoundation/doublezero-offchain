@@ -1,6 +1,6 @@
 use std::{collections::HashMap, io::Write};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Args;
 use doublezero_cli_core::CliContext;
 use doublezero_serviceability::state::{device::Device, exchange::Exchange};
@@ -202,13 +202,12 @@ impl PriceCommand {
         let (dh_data, rest) = history_accounts.split_at(dh_keys.len());
         let (mh_data, execution_controller_data) = rest.split_at(mh_keys.len());
 
-        // The epoch an instant seat allocation is priced from.
-        let last_settled_epoch = execution_controller_data
-            .first()
-            .and_then(|account| state::parse_execution_controller_last_settled_epoch(&account.data))
-            .with_context(|| {
-                format!("Execution controller {execution_controller_key} missing or unparseable")
-            })?;
+        // The epoch an instant seat allocation is priced from. Missing or
+        // unparseable leaves the Instant Price column empty rather than failing
+        // the whole listing — every other column stands on its own.
+        let last_settled_epoch = execution_controller_data.first().and_then(|account| {
+            state::parse_execution_controller_last_settled_epoch(&account.data)
+        });
 
         let device_infos: Vec<state::DeviceHistoryInfo> = dh_data
             .iter()
@@ -228,7 +227,7 @@ impl PriceCommand {
             .zip(mh_data.iter())
             .filter_map(|(exchange_key, account)| {
                 let price_dollars =
-                    state::parse_metro_history_price_at_epoch(&account.data, last_settled_epoch)?;
+                    state::parse_metro_history_price_at_epoch(&account.data, last_settled_epoch?)?;
                 Some((*exchange_key, price_dollars))
             })
             .collect();
@@ -239,7 +238,7 @@ impl PriceCommand {
             .filter_map(|(device_key, account)| {
                 let premium_dollars = state::parse_device_history_premium_at_epoch(
                     &account.data,
-                    last_settled_epoch,
+                    last_settled_epoch?,
                 )?;
                 Some((*device_key, premium_dollars))
             })
@@ -351,11 +350,18 @@ impl PriceCommand {
                 writeln!(out, "{} device(s) found:\n", rows.len())?;
             }
 
-            writeln!(
-                out,
-                "Instant Price is what `shreds pay` charges now, for the remainder of epoch \
-                 {last_settled_epoch}. Epoch Price applies from the next settlement.\n"
-            )?;
+            match last_settled_epoch {
+                Some(epoch) => writeln!(
+                    out,
+                    "Instant Price is what `shreds pay` charges now, for the remainder of epoch \
+                     {epoch}. Epoch Price applies from the next settlement.\n"
+                )?,
+                None => writeln!(
+                    out,
+                    "Instant Price is unavailable: execution controller \
+                     {execution_controller_key} is missing or unparseable.\n"
+                )?,
+            }
 
             let mut table = Table::new(rows);
             if !self.wide {
