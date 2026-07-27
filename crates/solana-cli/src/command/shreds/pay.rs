@@ -102,7 +102,7 @@ fn epoch_warning_prompt(input: &EpochWarningInput) -> Option<String> {
     ))
 }
 
-/// Inputs for the `--amount` floor, separated from I/O for testability.
+// Inputs for the `--amount` floor, separated from I/O for testability.
 struct SeatPriceInput {
     amount_micro: u64,
     seat_price_override: Option<u64>,
@@ -317,7 +317,7 @@ impl PayCommand {
         let (program_config_key, _) = state::find_program_config_address();
         let (execution_controller_key, _) = state::find_execution_controller_address();
 
-        // Check which accounts already exist on-chain, and read the epoch the
+        // Check which accounts already exist onchain, and read the epoch the
         // program prices an instant seat allocation from.
         let mut accounts = wallet
             .connection
@@ -442,7 +442,7 @@ impl PayCommand {
         }
         let amount_micro = (self.amount * 1_000_000.0).round() as u64;
 
-        // Derive the exchange key from the on-chain DeviceHistory account.
+        // Derive the exchange key from the onchain DeviceHistory account.
         let device_history_key = state::find_device_history_address(&device).0;
         let device_history_account = wallet.connection.get_account(&device_history_key).await?;
         let device_info = state::parse_device_history(&device_history_account.data)
@@ -450,7 +450,7 @@ impl PayCommand {
         let exchange_key = device_info.exchange_key;
 
         // Check the price the program will charge so the user gets a friendly
-        // error instead of an opaque on-chain revert. If the seat has a
+        // error instead of an opaque onchain revert. If the seat has a
         // per-seat price override, use that instead of the metro base + device
         // premium.
         let seat_price_override = seat_account
