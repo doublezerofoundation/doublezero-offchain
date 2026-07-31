@@ -1,4 +1,5 @@
 pub mod list;
+pub mod metro_dump;
 pub mod pay;
 pub mod payments;
 pub mod price;
@@ -56,6 +57,8 @@ pub enum ShredsSubcommand {
     Payments(payments::PaymentsCommand),
     /// Show current device pricing.
     Price(price::PriceCommand),
+    /// Dump the onchain metro price history.
+    MetroDump(metro_dump::MetroDumpCommand),
     /// Validator client rewards: claim accumulated rewards and manage proportions.
     ValidatorClientRewards(validator_client_rewards::ValidatorClientRewardsCommand),
     /// Validator publisher rewards configuration.
@@ -75,6 +78,7 @@ impl ShredsSubcommand {
             Self::List(command) => command.execute(dz_ledger_url, ctx, out).await,
             Self::Payments(command) => command.execute(dz_ledger_url, ctx, out).await,
             Self::Price(command) => command.execute(dz_ledger_url, ctx, out).await,
+            Self::MetroDump(command) => command.execute(dz_ledger_url, ctx, out).await,
             Self::ValidatorClientRewards(command) => command.execute(ctx, out).await,
             Self::PublisherRewards(command) => command.execute(ctx, out).await,
         }

@@ -698,6 +698,98 @@ pub fn parse_metro_history_price_at_epoch(data: &[u8], epoch: u64) -> Option<u16
     Some(u16::from_le_bytes(bytes))
 }
 
+pub const METRO_HISTORY_FLAGS_OFFSET: usize = DISCRIMINATOR_LEN + 32;
+
+const METRO_HISTORY_FLAG_RETRANSMIT_ONLY_ENABLED_BIT: u64 = 1 << 0;
+const METRO_HISTORY_FLAG_IS_CURRENT_PRICE_FINALIZED_BIT: u64 = 1 << 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MetroPriceEntry {
+    pub epoch: u64,
+    pub usdc_price_dollars: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MetroHistoryAccount {
+    pub exchange_key: Pubkey,
+    pub total_initialized_devices: u16,
+    pub is_retransmit_only_enabled: bool,
+    pub is_current_price_finalized: bool,
+    pub ring_current_index: u8,
+    // The raw onchain byte, so a dump shows what is actually stored. The walk
+    // below clamps it to `RING_BUFFER_CAPACITY`; the program saturates it there.
+    pub ring_total_count: u8,
+    // Newest first.
+    pub price_entries: Vec<MetroPriceEntry>,
+}
+
+/// Parse the full state of a `MetroHistory` account, including every price
+/// entry the ring buffer currently holds, newest first. Returns `None` when the
+/// data is too short or the discriminator does not match.
+///
+/// Unlike [`parse_metro_history`], an uninitialized ring is not an error: the
+/// account's flags and device count are still meaningful, so the entry list
+/// just comes back empty.
+pub fn parse_metro_history_account(data: &[u8]) -> Option<MetroHistoryAccount> {
+    let expected_discriminator =
+        borsh::to_vec(&METRO_HISTORY_DISCRIMINATOR).expect("discriminator serialization");
+    if data.len() < DISCRIMINATOR_LEN || data[..DISCRIMINATOR_LEN] != expected_discriminator[..] {
+        return None;
+    }
+
+    let exchange_key = Pubkey::new_from_array(
+        data.get(METRO_HISTORY_EXCHANGE_KEY_OFFSET..METRO_HISTORY_EXCHANGE_KEY_OFFSET + 32)?
+            .try_into()
+            .ok()?,
+    );
+    let total_initialized_devices = u16::from_le_bytes(
+        data.get(METRO_HISTORY_DEVICES_OFFSET..METRO_HISTORY_DEVICES_OFFSET + 2)?
+            .try_into()
+            .ok()?,
+    );
+
+    let flags = u64::from_le_bytes(
+        <[u8; 8]>::try_from(data.get(METRO_HISTORY_FLAGS_OFFSET..METRO_HISTORY_FLAGS_OFFSET + 8)?)
+            .ok()?,
+    );
+
+    let ring_offset = METRO_HISTORY_RING_OFFSET;
+    let ring_current_index = *data.get(ring_offset)?;
+    let ring_total_count = *data.get(ring_offset + 1)?;
+    let entries_offset = ring_offset + 8; // skip current_index + total_count + padding
+
+    // Bounded by `total_count`, not by capacity: walking all 32 slots would
+    // surface zero-initialized slots as real entries at epoch 0. Same reasoning
+    // as `find_ring_buffer_entry_offset`.
+    let walk_count = (ring_total_count as usize).min(RING_BUFFER_CAPACITY);
+    let mut price_entries = Vec::with_capacity(walk_count);
+    for steps_back in 0..walk_count {
+        let index = (ring_current_index as usize + RING_BUFFER_CAPACITY - steps_back)
+            % RING_BUFFER_CAPACITY;
+        let entry_offset = entries_offset + index * METRO_HISTORY_ENTRY_SIZE;
+        let epoch = u64::from_le_bytes(
+            <[u8; 8]>::try_from(data.get(entry_offset..entry_offset + 8)?).ok()?,
+        );
+        let usdc_price_dollars = u16::from_le_bytes(
+            <[u8; 2]>::try_from(data.get(entry_offset + 8..entry_offset + 10)?).ok()?,
+        );
+        price_entries.push(MetroPriceEntry {
+            epoch,
+            usdc_price_dollars,
+        });
+    }
+
+    Some(MetroHistoryAccount {
+        exchange_key,
+        total_initialized_devices,
+        is_retransmit_only_enabled: flags & METRO_HISTORY_FLAG_RETRANSMIT_ONLY_ENABLED_BIT != 0,
+        is_current_price_finalized: flags & METRO_HISTORY_FLAG_IS_CURRENT_PRICE_FINALIZED_BIT != 0,
+        ring_current_index,
+        ring_total_count,
+        price_entries,
+    })
+}
+
 // ---------------------------------------------------------------------------
 // ValidatorClientRewards raw-byte parsing.
 //
@@ -1215,6 +1307,9 @@ mod tests {
                 0;
                 METRO_HISTORY_RING_OFFSET + 8 + RING_BUFFER_CAPACITY * METRO_HISTORY_ENTRY_SIZE
             ];
+        let discriminator =
+            borsh::to_vec(&METRO_HISTORY_DISCRIMINATOR).expect("discriminator serialization");
+        data[..DISCRIMINATOR_LEN].copy_from_slice(&discriminator);
         data[METRO_HISTORY_RING_OFFSET] = current_index;
         data[METRO_HISTORY_RING_OFFSET + 1] = total_count;
         for (ring_slot, epoch, price_dollars) in entries {
@@ -1279,6 +1374,132 @@ mod tests {
         assert_eq!(parse_metro_history_price_at_epoch(&[], 10), None);
         let truncated = vec![0; METRO_HISTORY_RING_OFFSET];
         assert_eq!(parse_metro_history_price_at_epoch(&truncated, 10), None);
+    }
+
+    fn metro_price_entries(data: &[u8]) -> Vec<(u64, u16)> {
+        parse_metro_history_account(data)
+            .expect("account parses")
+            .price_entries
+            .iter()
+            .map(|entry| (entry.epoch, entry.usdc_price_dollars))
+            .collect()
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_walks_ring_newest_first() {
+        let data = metro_history_data(2, 3, &[(0, 10, 30), (1, 11, 43), (2, 12, 10)]);
+        assert_eq!(metro_price_entries(&data), [(12, 10), (11, 43), (10, 30)]);
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_walk_wraps_past_slot_zero() {
+        // current_index 0 with 3 written entries: the two older ones live in
+        // slots 31 and 30, so the walk has to run backwards through zero.
+        let data = metro_history_data(0, 3, &[(30, 10, 30), (31, 11, 43), (0, 12, 10)]);
+        assert_eq!(metro_price_entries(&data), [(12, 10), (11, 43), (10, 30)]);
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_walk_respects_total_count_bound() {
+        // Epoch 9 sits in slot 31, one step beyond the two written entries. The
+        // onchain ring never reaches it, so the walk must stop short of it
+        // rather than reporting a stale entry.
+        let data = metro_history_data(1, 2, &[(31, 9, 60), (0, 10, 30), (1, 11, 43)]);
+        assert_eq!(metro_price_entries(&data), [(11, 43), (10, 30)]);
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_walk_covers_full_capacity() {
+        let entries = (0..RING_BUFFER_CAPACITY)
+            .map(|slot| (slot, slot as u64, slot as u16 * 10))
+            .collect::<Vec<_>>();
+        let data = metro_history_data(
+            (RING_BUFFER_CAPACITY - 1) as u8,
+            RING_BUFFER_CAPACITY as u8,
+            &entries,
+        );
+
+        let walked = metro_price_entries(&data);
+        assert_eq!(walked.len(), RING_BUFFER_CAPACITY);
+        assert_eq!(walked.first(), Some(&(31, 310)));
+        assert_eq!(walked.last(), Some(&(0, 0)));
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_uninitialized_ring_yields_no_entries() {
+        // An initialized metro that has never been priced: total_count 0. The
+        // account is still parseable, and epoch 0 must not appear as an entry.
+        let data = metro_history_data(0, 0, &[]);
+        let account = parse_metro_history_account(&data).expect("account parses");
+        assert!(account.price_entries.is_empty());
+        assert_eq!(account.ring_total_count, 0);
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_reads_header_fields() {
+        let exchange = Pubkey::new_from_array([7; 32]);
+        let mut data = metro_history_data(0, 1, &[(0, 12, 25)]);
+        data[METRO_HISTORY_EXCHANGE_KEY_OFFSET..METRO_HISTORY_EXCHANGE_KEY_OFFSET + 32]
+            .copy_from_slice(exchange.as_ref());
+        data[METRO_HISTORY_DEVICES_OFFSET..METRO_HISTORY_DEVICES_OFFSET + 2]
+            .copy_from_slice(&<u16>::to_le_bytes(9));
+
+        let account = parse_metro_history_account(&data).expect("account parses");
+        assert_eq!(account.exchange_key, exchange);
+        assert_eq!(account.total_initialized_devices, 9);
+        assert_eq!(account.ring_current_index, 0);
+        assert_eq!(account.ring_total_count, 1);
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_reads_flag_bits_independently() {
+        let base = metro_history_data(0, 1, &[(0, 12, 25)]);
+
+        let unset = parse_metro_history_account(&base).expect("account parses");
+        assert!(!unset.is_retransmit_only_enabled);
+        assert!(!unset.is_current_price_finalized);
+
+        for (flags, expect_retransmit_only, expect_finalized) in [
+            (METRO_HISTORY_FLAG_RETRANSMIT_ONLY_ENABLED_BIT, true, false),
+            (
+                METRO_HISTORY_FLAG_IS_CURRENT_PRICE_FINALIZED_BIT,
+                false,
+                true,
+            ),
+            (
+                METRO_HISTORY_FLAG_RETRANSMIT_ONLY_ENABLED_BIT
+                    | METRO_HISTORY_FLAG_IS_CURRENT_PRICE_FINALIZED_BIT,
+                true,
+                true,
+            ),
+            // Unrelated bits must not bleed into either flag.
+            (1 << 7, false, false),
+        ] {
+            let mut data = base.clone();
+            data[METRO_HISTORY_FLAGS_OFFSET..METRO_HISTORY_FLAGS_OFFSET + 8]
+                .copy_from_slice(&flags.to_le_bytes());
+
+            let account = parse_metro_history_account(&data).expect("account parses");
+            assert_eq!(account.is_retransmit_only_enabled, expect_retransmit_only);
+            assert_eq!(account.is_current_price_finalized, expect_finalized);
+        }
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_wrong_discriminator_returns_none() {
+        let mut data = metro_history_data(0, 1, &[(0, 12, 25)]);
+        data[0] ^= 0xff;
+        assert_eq!(parse_metro_history_account(&data), None);
+    }
+
+    #[test]
+    fn test_parse_metro_history_account_short_buffer_returns_none() {
+        assert_eq!(parse_metro_history_account(&[]), None);
+
+        // Long enough for the discriminator and header, truncated before the ring.
+        let full = metro_history_data(0, 1, &[(0, 12, 25)]);
+        let truncated = full[..METRO_HISTORY_RING_OFFSET].to_vec();
+        assert_eq!(parse_metro_history_account(&truncated), None);
     }
 
     #[test]
