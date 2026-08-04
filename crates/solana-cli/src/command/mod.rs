@@ -132,6 +132,18 @@ pub(crate) fn try_prompt_proceed_confirmation(
     prompt_message: &str,
     abort_message: &str,
 ) -> Result<()> {
+    if try_prompt_proceed(out, prompt_message)? {
+        Ok(())
+    } else {
+        anyhow::bail!("{abort_message}")
+    }
+}
+
+// Returns whether the operator chose to proceed. Callers that treat a decline
+// as an error should use `try_prompt_proceed_confirmation` instead; this form is
+// for callers that want to report the decline themselves without the `Error:`
+// prefix `main` puts on a returned `Err`.
+pub(crate) fn try_prompt_proceed(out: &mut impl Write, prompt_message: &str) -> Result<bool> {
     loop {
         writeln!(out, "⚠️  {prompt_message}. Proceed? [y/N]")?;
         // A buffered writer would otherwise hold the prompt while stdin blocks.
@@ -147,8 +159,8 @@ pub(crate) fn try_prompt_proceed_confirmation(
             .map(|c| c.to_lowercase().next().unwrap());
 
         match first_char {
-            Some('y') => return Ok(()),
-            Some('n') | None => anyhow::bail!("{abort_message}"),
+            Some('y') => return Ok(true),
+            Some('n') | None => return Ok(false),
             _ => {
                 writeln!(
                     out,

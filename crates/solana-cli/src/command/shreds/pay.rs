@@ -1,4 +1,7 @@
-use std::{io::Write, net::Ipv4Addr};
+use std::{
+    io::{IsTerminal, Write},
+    net::Ipv4Addr,
+};
 
 use anyhow::{Context, Result, bail};
 use clap::Args;
@@ -35,6 +38,16 @@ use super::{make_dz_connection, serviceability_program_id};
 /// Warn if less than 10% of the current Solana epoch remains.
 const EPOCH_REMAINING_WARNING_THRESHOLD: f64 = 0.10;
 
+// Shown before every `shreds pay` while Edge shred payments migrate to
+// fastshreds.com. No trailing period: `try_prompt_proceed`
+// appends ". Proceed? [y/N]".
+const DEPRECATION_NOTICE: &str = "The doublezero-solana client will soon be deprecated for Edge \
+     shreds payments. You will be able to manage your account through www.fastshreds.com. We \
+     suggest making a new purchase on the front end when monthly payments are available. You can \
+     then proceed to withdraw funds in the CLI and close out this account. In the meantime, please \
+     ensure you are running the latest version of doublezero-solana by running \
+     sudo apt update && sudo apt install doublezero-solana";
+
 /// Solana's target slot duration in seconds. Actual varies with network
 /// conditions; used only for approximate display estimates (prefixed with `~`).
 const SLOT_DURATION_SECS: f64 = 0.4;
@@ -63,6 +76,26 @@ fn is_seat_already_active(seat_data: Option<&[u8]>) -> bool {
         .and_then(state::parse_client_seat)
         .map(|(_, _, tenure_epochs, _, _)| tenure_epochs > 0)
         .unwrap_or(false)
+}
+
+#[derive(Debug, PartialEq)]
+enum NoticeDelivery {
+    Prompt,
+    // Print the notice and continue. Used when stdin is not a terminal (cron,
+    // ansible, piped input) or when the operator passed
+    // `--accept-deprecation-notice`. Prompting a non-terminal would abort every
+    // automated payer: stdin hits EOF immediately, which
+    // `try_prompt_proceed` reads as "no".
+    PrintOnly,
+}
+
+/// Decide how to deliver the deprecation notice. Separated from I/O for testability.
+fn notice_delivery(accepted: bool, stdin_is_terminal: bool) -> NoticeDelivery {
+    if accepted || !stdin_is_terminal {
+        NoticeDelivery::PrintOnly
+    } else {
+        NoticeDelivery::Prompt
+    }
 }
 
 /// Returns `Some(prompt_message)` if the user should be warned about paying late
@@ -236,6 +269,10 @@ pub struct PayCommand {
     /// Skip the epoch-remaining warning prompt (for batch/multi-seat workflows)
     #[arg(long)]
     accept_partial_epoch: bool,
+    /// Acknowledge the fastshreds.com transition notice without prompting
+    /// (for batch/multi-seat workflows). The notice is still printed.
+    #[arg(long)]
+    accept_deprecation_notice: bool,
     /// Shred oracle pubkey (auto-detected from network; override for local dev)
     #[arg(long, hide = true)]
     shred_oracle_key: Option<Pubkey>,
@@ -254,6 +291,28 @@ impl PayCommand {
         ctx: &CliContext,
         out: &mut impl Write,
     ) -> Result<()> {
+        // Before the wallet is built and before any RPC: an operator who
+        // declines should not need a loadable keypair or a reachable cluster,
+        // and nothing should be signed or sent on their behalf.
+        match notice_delivery(
+            self.accept_deprecation_notice,
+            std::io::stdin().is_terminal(),
+        ) {
+            NoticeDelivery::Prompt => {
+                // A decline is a normal outcome, not a failure, so it prints
+                // plainly and exits 0 instead of returning an `Err` that `main`
+                // would render as "Error: Aborted...".
+                if !crate::command::try_prompt_proceed(out, DEPRECATION_NOTICE)? {
+                    writeln!(
+                        out,
+                        "Aborted. Upgrade with `sudo apt update && sudo apt install doublezero-solana`"
+                    )?;
+                    return Ok(());
+                }
+            }
+            NoticeDelivery::PrintOnly => writeln!(out, "⚠️  {DEPRECATION_NOTICE}.")?,
+        }
+
         let moniker_env = self.write_opts.connection_options.moniker_env();
         let wallet = crate::command::build_wallet(ctx, self.write_opts)?;
         let wallet_key = wallet.pubkey();
@@ -658,6 +717,26 @@ mod tests {
         assert_eq!(format_duration(3599.0), "~60 minutes");
         // Exactly an hour -> hours
         assert_eq!(format_duration(3600.0), "~1.0 hours");
+    }
+
+    // --- deprecation notice tests ---
+
+    #[test]
+    fn test_notice_delivery_only_prompts_an_unaccepted_terminal() {
+        assert_eq!(notice_delivery(false, true), NoticeDelivery::Prompt);
+        // Cron, ansible and piped stdin would otherwise read EOF as "no" and
+        // abort a payment the operator never got to see.
+        assert_eq!(notice_delivery(false, false), NoticeDelivery::PrintOnly);
+        assert_eq!(notice_delivery(true, true), NoticeDelivery::PrintOnly);
+        assert_eq!(notice_delivery(true, false), NoticeDelivery::PrintOnly);
+    }
+
+    #[test]
+    fn test_notice_text_has_no_trailing_period() {
+        // `try_prompt_proceed` appends ". Proceed? [y/N]", and
+        // formats the message as a single `writeln!`.
+        assert!(!DEPRECATION_NOTICE.ends_with('.'));
+        assert!(!DEPRECATION_NOTICE.contains('\n'));
     }
 
     // --- epoch_warning_prompt tests (behavior matrix) ---
