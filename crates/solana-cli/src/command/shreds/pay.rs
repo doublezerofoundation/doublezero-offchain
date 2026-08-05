@@ -750,10 +750,10 @@ mod tests {
             String::from_utf8(out).expect("output is utf8"),
             format!("⚠️  {DEPRECATION_NOTICE}.\n")
         );
-        let error = result.unwrap_err().to_string();
-        assert!(
-            error.contains("/nonexistent/keypair.json"),
-            "expected to reach build_wallet, got: {error}"
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Failed to read keypair file '/nonexistent/keypair.json': \
+             No such file or directory (os error 2)"
         );
     }
 
@@ -771,10 +771,10 @@ mod tests {
             format!("⚠️  {DEPRECATION_NOTICE}.\n")
         );
 
-        let error = result.unwrap_err().to_string();
-        assert!(
-            error.contains("/nonexistent/keypair.json"),
-            "expected to reach build_wallet, got: {error}"
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Failed to read keypair file '/nonexistent/keypair.json': \
+             No such file or directory (os error 2)"
         );
     }
 
