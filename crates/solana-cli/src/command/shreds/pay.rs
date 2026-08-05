@@ -38,9 +38,8 @@ use super::{make_dz_connection, serviceability_program_id};
 /// Warn if less than 10% of the current Solana epoch remains.
 const EPOCH_REMAINING_WARNING_THRESHOLD: f64 = 0.10;
 
-// Shown before every `shreds pay` while Edge shred payments migrate to
-// fastshreds.com. No trailing period: `try_prompt_proceed_confirmation`
-// appends ". Proceed? [y/N]".
+// No trailing period: `try_prompt_proceed_confirmation` appends
+// ". Proceed? [y/N]".
 const DEPRECATION_NOTICE: &str = "The doublezero-solana client will soon be deprecated for Edge \
      shreds payments. You will be able to manage your account through https://www.fastshreds.com. \
      For existing users, we suggest making a new purchase on the front end when monthly payments \
@@ -705,10 +704,78 @@ mod tests {
 
     #[test]
     fn test_notice_text_has_no_trailing_period() {
-        // `try_prompt_proceed_confirmation` appends ". Proceed? [y/N]", and
-        // formats the message as a single `writeln!`.
         assert!(!DEPRECATION_NOTICE.ends_with('.'));
         assert!(!DEPRECATION_NOTICE.contains('\n'));
+    }
+
+    #[derive(clap::Parser)]
+    struct NoticeCli {
+        #[command(flatten)]
+        command: PayCommand,
+    }
+
+    // `--keypair` points at a path that cannot exist, so `build_wallet` fails
+    // deterministically instead of finding a developer's keypair and reaching
+    // the network.
+    fn pay_command(extra_args: &[&str]) -> PayCommand {
+        use clap::Parser;
+
+        let device = Pubkey::new_unique().to_string();
+        let mut args = vec![
+            "test",
+            "--device",
+            &device,
+            "--client-ip",
+            "203.0.113.10",
+            "--amount",
+            "30",
+            "--keypair",
+            "/nonexistent/keypair.json",
+        ];
+        args.extend_from_slice(extra_args);
+
+        NoticeCli::try_parse_from(args)
+            .expect("pay args parse")
+            .command
+    }
+
+    #[tokio::test]
+    async fn test_notice_prints_when_flag_is_absent() {
+        let ctx = doublezero_cli_core::testing::cli_context_default_for_tests();
+        let mut out = Vec::new();
+
+        let result = pay_command(&[]).execute(None, &ctx, &mut out).await;
+
+        assert_eq!(
+            String::from_utf8(out).expect("output is utf8"),
+            format!("⚠️  {DEPRECATION_NOTICE}.\n")
+        );
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("/nonexistent/keypair.json"),
+            "expected to reach build_wallet, got: {error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_notice_flag_proceeds_to_the_payment_flow() {
+        let ctx = doublezero_cli_core::testing::cli_context_default_for_tests();
+        let mut out = Vec::new();
+
+        let result = pay_command(&["--accept-deprecation-notice"])
+            .execute(None, &ctx, &mut out)
+            .await;
+
+        assert_eq!(
+            String::from_utf8(out).expect("output is utf8"),
+            format!("⚠️  {DEPRECATION_NOTICE}.\n")
+        );
+
+        let error = result.unwrap_err().to_string();
+        assert!(
+            error.contains("/nonexistent/keypair.json"),
+            "expected to reach build_wallet, got: {error}"
+        );
     }
 
     // --- epoch_warning_prompt tests (behavior matrix) ---
