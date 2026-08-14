@@ -346,7 +346,8 @@ fn is_public_solana_endpoint(rpc_url: &str) -> bool {
 }
 
 /// Bytes `Message::serialize` may produce for a payload of `instruction_count`
-/// instructions, which is not the length of the base58 the encoder returns.
+/// instructions, and not the length of the base58 the encoder returns. Sizing to the last
+/// byte leaves no room for a memo typed at import.
 pub fn vault_transaction_payload_budget(instruction_count: usize) -> usize {
     // A Squads TransactionMessage writes each instruction's data length as a u16
     // where a legacy message writes it in one byte, so every payload instruction
