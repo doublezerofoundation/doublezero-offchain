@@ -115,7 +115,7 @@ const _: () = assert!(VAULT_TRANSACTION_RESERVED_BYTES == 384);
 // 48 is an arbitrarily conservative lower bound, not that ceiling. Nothing here measures
 // how deep a payload's own invocations go, so the limit leaves room for them rather than
 // pricing them, and a real payload needing more is the reason to raise it.
-const MAX_PAYLOAD_INSTRUCTIONS: usize = 48;
+pub const MAX_PAYLOAD_INSTRUCTIONS: usize = 48;
 
 // Squads options for a command that always acts as a vault.
 #[derive(Debug, Args)]
