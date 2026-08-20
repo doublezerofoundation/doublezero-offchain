@@ -41,7 +41,9 @@ pub struct PrepareOffchainMessageCommand {
     pub deadline_slot: Option<u64>,
 
     /// Duration the authorization remains valid (e.g. `1h`, `30m`, `7200s`).
-    /// Default: `1h`. Parsed via `humantime`.
+    /// Default: `1h`. Parsed via `humantime`. The program enforces an absolute
+    /// slot, so this is converted at a nominal 350ms per slot and the real
+    /// elapsed time varies with the cluster's slot rate.
     #[arg(long, value_parser = parse_valid_for)]
     pub valid_for: Option<Duration>,
 

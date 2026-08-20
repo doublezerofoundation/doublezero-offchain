@@ -252,31 +252,22 @@ pub async fn create_snapshot(
         fetcher.dz_rpc_client.clone(),
         fetcher.solana_read_client.clone(),
     );
-    let solana_epoch = match epoch_finder
-        .find_epoch_at_timestamp(fetch_data.start_us)
+    // fetch_leader_schedule resolves the Solana epoch itself and reports which
+    // one it used, so taking the epoch from its result avoids running the
+    // chain-verified epoch search twice over the same timestamp.
+    let leader_schedule = match epoch_finder
+        .fetch_leader_schedule(fetch_epoch, fetch_data.start_us)
         .await
     {
-        Ok(epoch) => Some(epoch),
+        Ok(schedule) => Some(schedule),
         Err(e) => {
-            warn!("Failed to determine Solana epoch: {}", e);
+            warn!("Failed to get leader schedule: {}", e);
             None
         }
     };
-
-    let leader_schedule = if solana_epoch.is_some() {
-        match epoch_finder
-            .fetch_leader_schedule(fetch_epoch, fetch_data.start_us)
-            .await
-        {
-            Ok(schedule) => Some(schedule),
-            Err(e) => {
-                warn!("Failed to get leader schedule: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let solana_epoch = leader_schedule
+        .as_ref()
+        .map(|schedule| schedule.solana_epoch);
 
     // Create metadata
     let metadata = SnapshotMetadata {
