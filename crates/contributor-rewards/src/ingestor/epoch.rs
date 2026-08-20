@@ -7,13 +7,18 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail};
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Utc;
 use doublezero_solana_client_tools::rpc::DoubleZeroLedgerConnection;
 use serde::{Deserialize, Serialize};
 use solana_client::{
-    client_error::ClientError as SolanaClientError, nonblocking::rpc_client::RpcClient,
+    client_error::{ClientError as SolanaClientError, ClientErrorKind},
+    nonblocking::rpc_client::RpcClient,
+    rpc_custom_error::{
+        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED, JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+    },
+    rpc_request::RpcError,
 };
 use solana_sdk::epoch_schedule::EpochSchedule;
 use tracing::{debug, info};
@@ -23,8 +28,26 @@ use crate::cli::{
     traits::Exportable,
 };
 
-/// Approximate slot duration in microseconds (400ms)
-pub const SLOT_DURATION_US: u64 = 400_000;
+// Seed slot duration for the epoch search in `find_epoch_at_timestamp`. Solana's
+// real slot duration is drifting: mainnet-beta moves 400ms to 350ms at the start
+// of epoch 1020 (2026-08-21) and SIMD-0525 continues stepping it down to 200ms,
+// while testnet is already at 200ms. So this number is wrong on some cluster at
+// any given time, and during the rollout the real rate changes inside a single
+// lookback window. It only decides how many RPC round trips the search needs to
+// converge, never which epoch the search returns.
+pub const SLOT_DURATION_US: u64 = 350_000;
+
+// The first slot of an epoch is frequently skipped, so the epoch start lookup
+// walks forward from it until a confirmed block turns up. A boundary that needs
+// more than this many slots to produce one block is not a run of skipped slots,
+// it is a stalled cluster, and guessing through that would be worse than an
+// error.
+const MAX_BOUNDARY_SEARCH_SLOTS: u64 = 128;
+
+// Each search step moves the candidate by one epoch. The seed is normally within
+// an epoch or two of correct, so this cap exists only to bound a pathological
+// seed rather than loop forever.
+const MAX_EPOCH_SEARCH_STEPS: usize = 16;
 
 // key: validator_pk, val: slot count
 pub type LeaderScheduleMap = BTreeMap<String, usize>;
@@ -54,6 +77,58 @@ impl Exportable for LeaderSchedule {
 pub fn calculate_epoch_from_slot(slot: u64, schedule: &EpochSchedule) -> u64 {
     // Normal epoch calculation
     ((slot - schedule.first_normal_slot) / schedule.slots_per_epoch) + schedule.first_normal_epoch
+}
+
+/// Report whether an RPC error means the slot produced no block, as opposed to
+/// the request failing.
+fn is_slot_skipped(err: &SolanaClientError) -> bool {
+    matches!(
+        err.kind(),
+        ClientErrorKind::RpcError(RpcError::RpcResponseError {
+            code: JSON_RPC_SERVER_ERROR_SLOT_SKIPPED
+                | JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
+            ..
+        })
+    )
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum EpochSearchStep {
+    Earlier,
+    Later,
+    Found,
+}
+
+/// Decide which way the epoch search should move from its current candidate.
+///
+/// `epoch_start_time` and `next_epoch_start_time` are the block times of the
+/// first confirmed block in the candidate epoch and in the epoch after it, in
+/// seconds. `None` means that epoch has produced no confirmed block yet, so it
+/// bounds nothing: for the candidate that rules the candidate out, and for the
+/// next epoch it means the candidate is the current epoch and has no upper
+/// bound to compare against.
+///
+/// The lower bound is inclusive and the upper bound is exclusive, so a timestamp
+/// falling exactly on an epoch's first block time belongs to that epoch.
+fn decide_epoch_search_step(
+    target_time: i64,
+    epoch_start_time: Option<i64>,
+    next_epoch_start_time: Option<i64>,
+) -> EpochSearchStep {
+    let Some(epoch_start_time) = epoch_start_time else {
+        return EpochSearchStep::Earlier;
+    };
+
+    if target_time < epoch_start_time {
+        return EpochSearchStep::Earlier;
+    }
+
+    match next_epoch_start_time {
+        Some(next_epoch_start_time) if target_time >= next_epoch_start_time => {
+            EpochSearchStep::Later
+        }
+        _ => EpochSearchStep::Found,
+    }
 }
 
 /// Estimate the slot at a given timestamp based on current slot and time
@@ -158,9 +233,82 @@ impl EpochFinder {
             .expect("solana_schedule cannot be none"))
     }
 
+    /// Find the block time of the first confirmed block at or after `first_slot`,
+    /// in seconds.
+    ///
+    /// Returns `Ok(None)` when no confirmed block exists between `first_slot` and
+    /// `current_slot`, which means the epoch starting at `first_slot` has not
+    /// produced a block yet and so bounds nothing.
+    ///
+    /// The block time that is found is returned as is, with no back estimation of
+    /// the skipped slots that preceded it. For deciding which epoch a timestamp
+    /// falls in, the first confirmed block's time is the epoch's effective start,
+    /// so subtracting an estimate would only add error. This is a deliberate
+    /// difference from `estimate_block_time_for_skipped_slot` in
+    /// `validator-debt/src/rpc.rs`, which does subtract one.
+    async fn try_epoch_start_block_time(
+        &self,
+        epoch: u64,
+        first_slot: u64,
+        current_slot: u64,
+    ) -> Result<Option<i64>> {
+        for slot in first_slot..first_slot + MAX_BOUNDARY_SEARCH_SLOTS {
+            if slot > current_slot {
+                return Ok(None);
+            }
+
+            // Retry transport failures, but return a skipped slot immediately:
+            // a skipped slot is a settled fact, not a transient error, so
+            // retrying it just burns the backoff schedule.
+            let block_time = (|| async { self.solana_read_client.get_block_time(slot).await })
+                .retry(&ExponentialBuilder::default().with_jitter())
+                .when(|err: &SolanaClientError| !is_slot_skipped(err))
+                .notify(|err: &SolanaClientError, dur: Duration| {
+                    info!(
+                        "retrying get_block_time error: {:?} with sleeping {:?}",
+                        err, dur
+                    )
+                })
+                .await;
+
+            match block_time {
+                Ok(block_time) => return Ok(Some(block_time)),
+                Err(err) if is_slot_skipped(&err) => {
+                    debug!(
+                        "Solana slot {} was skipped, searching forward for the start of epoch {}",
+                        slot, epoch
+                    );
+                }
+                Err(err) => {
+                    return Err(err).with_context(|| {
+                        format!("Failed to get block time for Solana slot {slot}")
+                    });
+                }
+            }
+        }
+
+        bail!(
+            "No confirmed block within {MAX_BOUNDARY_SEARCH_SLOTS} slots of slot {first_slot}, \
+             the first slot of Solana epoch {epoch}"
+        )
+    }
+
     /// Find the Solana epoch that was active at a given timestamp
     ///
-    /// This uses the Solana network to map timestamps to Solana epochs
+    /// The timestamp is mapped to a seed slot by dividing wall clock elapsed by
+    /// `SLOT_DURATION_US`, and the epoch that seed lands in is then verified
+    /// against real block times. The verification is what makes the answer
+    /// correct: the seed drifts by thousands of slots over a day of lookback, and
+    /// no fixed slot duration survives the SIMD-0525 rollout, so a seeded guess
+    /// alone selects the wrong epoch near a boundary. Since the epoch chooses the
+    /// leader schedule that contributor rewards are computed against, a wrong
+    /// answer here corrupts rewards, and an error is the better outcome.
+    ///
+    /// A second chain verified epoch search lives in
+    /// `validator-debt/src/rpc.rs` (`find_solana_epoch_before_timestamp`). That
+    /// one walks backward only and threads a `leaky-bucket` rate limiter, so the
+    /// two are not yet worth unifying, but a fix to the skipped slot or boundary
+    /// handling here probably belongs there too.
     pub async fn find_epoch_at_timestamp(&mut self, timestamp_us: u64) -> Result<u64> {
         // Get current slot from Solana
         let current_slot = (|| async { self.solana_read_client.get_slot().await })
@@ -172,19 +320,56 @@ impl EpochFinder {
 
         let current_time_us = Utc::now().timestamp_micros() as u64;
 
-        // Estimate the slot at the given timestamp
-        let target_slot =
+        // Seed the search. This also rejects a future or unreachably old
+        // timestamp before any RPC calls are spent on it.
+        let estimated_slot =
             estimate_slot_from_timestamp(timestamp_us, current_slot, current_time_us)?;
 
-        // Get SOLANA epoch schedule and calculate epoch
-        let schedule = self.get_solana_schedule().await?;
-        let epoch = calculate_epoch_from_slot(target_slot, schedule);
+        // Copied out of the cache rather than borrowed, because the borrow that
+        // get_solana_schedule hands back is tied to its &mut self, which the
+        // block time lookups below also need.
+        let schedule = self.get_solana_schedule().await?.clone();
 
-        debug!(
-            "Mapped timestamp {} to Solana epoch {}",
-            timestamp_us, epoch
-        );
-        Ok(epoch)
+        let mut candidate_epoch = calculate_epoch_from_slot(estimated_slot, &schedule);
+        let target_time = (timestamp_us / 1_000_000) as i64;
+
+        for _ in 0..MAX_EPOCH_SEARCH_STEPS {
+            let epoch_start_time = self
+                .try_epoch_start_block_time(
+                    candidate_epoch,
+                    schedule.get_first_slot_in_epoch(candidate_epoch),
+                    current_slot,
+                )
+                .await?;
+            let next_epoch_start_time = self
+                .try_epoch_start_block_time(
+                    candidate_epoch + 1,
+                    schedule.get_first_slot_in_epoch(candidate_epoch + 1),
+                    current_slot,
+                )
+                .await?;
+
+            match decide_epoch_search_step(target_time, epoch_start_time, next_epoch_start_time) {
+                EpochSearchStep::Found => {
+                    debug!(
+                        "Mapped timestamp {} to Solana epoch {}",
+                        timestamp_us, candidate_epoch
+                    );
+                    return Ok(candidate_epoch);
+                }
+                EpochSearchStep::Earlier => {
+                    candidate_epoch = candidate_epoch.checked_sub(1).with_context(|| {
+                        format!("Timestamp {timestamp_us} precedes the first Solana epoch")
+                    })?;
+                }
+                EpochSearchStep::Later => candidate_epoch += 1,
+            }
+        }
+
+        bail!(
+            "Could not resolve timestamp {timestamp_us} to a Solana epoch within \
+             {MAX_EPOCH_SEARCH_STEPS} steps, last candidate was epoch {candidate_epoch}"
+        )
     }
 
     /// Fetch leader schedule for a DZ epoch
@@ -281,12 +466,15 @@ mod tests {
         let current_slot = 1000000;
         let current_time_us = 1_000_000_000_000; // 1 million seconds in microseconds
 
-        // Test normal case - 400 seconds ago (1000 slots)
-        let timestamp_us = current_time_us - 400_000_000;
+        // Test normal case - 350 seconds ago (350_000_000 us / 350_000 us per
+        // slot = 1000 slots)
+        let timestamp_us = current_time_us - 350_000_000;
         let result = estimate_slot_from_timestamp(timestamp_us, current_slot, current_time_us);
         assert_eq!(result.unwrap(), 999000);
 
-        // Test future timestamp
+        // Test future timestamp. find_epoch_at_timestamp seeds its search with
+        // this call, so this guard is what keeps a future timestamp out of the
+        // search entirely.
         let future_timestamp = current_time_us + 1000;
         let result = estimate_slot_from_timestamp(future_timestamp, current_slot, current_time_us);
         assert!(result.is_err());
@@ -295,5 +483,58 @@ mod tests {
         let ancient_timestamp = 0;
         let result = estimate_slot_from_timestamp(ancient_timestamp, current_slot, current_time_us);
         assert!(result.is_err());
+    }
+
+    // The epoch's first confirmed block time is the inclusive lower bound, so a
+    // timestamp landing exactly on it belongs to the candidate epoch.
+    #[test]
+    fn test_decide_epoch_search_step_at_epoch_start_is_found() {
+        assert_eq!(
+            decide_epoch_search_step(1_700_000_000, Some(1_700_000_000), Some(1_700_100_000)),
+            EpochSearchStep::Found
+        );
+    }
+
+    // One second earlier belongs to the previous epoch. This is the boundary case
+    // that a seeded estimate alone got wrong.
+    #[test]
+    fn test_decide_epoch_search_step_before_epoch_start_steps_earlier() {
+        assert_eq!(
+            decide_epoch_search_step(1_699_999_999, Some(1_700_000_000), Some(1_700_100_000)),
+            EpochSearchStep::Earlier
+        );
+    }
+
+    // The next epoch's first confirmed block time is the exclusive upper bound, so
+    // a timestamp landing exactly on it belongs to the next epoch, not this one.
+    #[test]
+    fn test_decide_epoch_search_step_at_next_epoch_start_steps_later() {
+        assert_eq!(
+            decide_epoch_search_step(1_700_100_000, Some(1_700_000_000), Some(1_700_100_000)),
+            EpochSearchStep::Later
+        );
+    }
+
+    // The current epoch has no next epoch to bound it, because
+    // get_first_slot_in_epoch for the epoch after it names a future slot with no
+    // block time. Without this the search would fail on every recent timestamp.
+    #[test]
+    fn test_decide_epoch_search_step_current_epoch_has_no_upper_bound() {
+        assert_eq!(
+            decide_epoch_search_step(1_700_100_000, Some(1_700_000_000), None),
+            EpochSearchStep::Found
+        );
+    }
+
+    // An epoch that has produced no confirmed block cannot contain a past
+    // timestamp. The caller feeds this step into a checked_sub, so a timestamp
+    // older than the earliest available block walks the candidate down and then
+    // errors rather than underflowing or silently returning epoch 0.
+    #[test]
+    fn test_decide_epoch_search_step_unstarted_epoch_steps_earlier() {
+        assert_eq!(
+            decide_epoch_search_step(1_700_000_000, None, None),
+            EpochSearchStep::Earlier
+        );
     }
 }
