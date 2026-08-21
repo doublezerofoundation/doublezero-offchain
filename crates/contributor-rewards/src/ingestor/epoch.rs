@@ -59,6 +59,28 @@ const _: () = assert!(SEED_SLOT_DURATION_US > 400_000);
 // a stalled cluster rather than a run of skipped slots.
 const MAX_CHAIN_TIP_SEARCH_SLOTS: u64 = 128;
 
+// How far past an epoch's first slot that epoch's first block may be and still be
+// trusted to date the epoch.
+//
+// `getBlocksWithLimit` steps over a gap in the endpoint's block history without
+// saying that it did, so the slot it returns cannot by itself distinguish a
+// routine run of skipped boundary slots from a node restored from a snapshot
+// partway through the epoch. The distance is the tell: dating an epoch by a block
+// this far in overstates when the epoch began by that much, and a timestamp
+// inside the gap then resolves to the previous epoch and picks up its leader
+// schedule.
+//
+// Some ambiguity is inherent, because a skipped boundary slot leaves no block to
+// mark where the epoch began, and it is bounded by the length of the gap. 432
+// slots is 0.1% of a mainnet epoch, around two and a half minutes, which is far
+// above any routine skip run and far below a gap worth guessing through.
+//
+// Note that this bounds trust rather than work, which is what separates it from
+// the capped forward walk it replaced. Exceeding it costs no extra round trips
+// and says the answer is not credible, where exceeding the old cap only said the
+// walk gave up.
+const MAX_BOUNDARY_SKIP_SLOTS: u64 = 432;
+
 // Each search step moves the candidate by one epoch. The seed is normally within
 // an epoch or two of correct, so this cap exists only to bound a pathological
 // seed rather than loop forever.
@@ -128,6 +150,28 @@ fn is_block_cleaned_up(err: &SolanaClientError) -> bool {
             ..
         })
     )
+}
+
+/// Report whether an RPC error is settled, meaning a retry would sleep through
+/// the backoff schedule only to be told the same thing.
+fn is_settled_block_error(err: &SolanaClientError) -> bool {
+    is_block_unavailable(err) || is_block_cleaned_up(err)
+}
+
+/// Report whether a block at `first_block_slot` is close enough to `first_slot`,
+/// the first slot of an epoch, to date when that epoch began.
+///
+/// `MAX_BOUNDARY_SKIP_SLOTS` is the real bound. The next epoch's first slot only
+/// binds first on a cluster whose epochs are shorter than that budget, such as a
+/// local test validator.
+fn can_date_epoch_start(
+    first_slot: u64,
+    first_block_slot: u64,
+    next_epoch_first_slot: u64,
+) -> bool {
+    let last_datable_slot = (first_slot + MAX_BOUNDARY_SKIP_SLOTS).min(next_epoch_first_slot);
+
+    first_block_slot < last_datable_slot
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -284,7 +328,7 @@ impl EpochFinder {
     async fn try_get_block_time(&self, slot: u64) -> Result<Option<i64>> {
         let block_time = (|| async { self.solana_read_client.get_block_time(slot).await })
             .retry(&ExponentialBuilder::default().with_jitter())
-            .when(|err: &SolanaClientError| !is_block_unavailable(err) && !is_block_cleaned_up(err))
+            .when(|err: &SolanaClientError| !is_settled_block_error(err))
             .notify(|err: &SolanaClientError, dur: Duration| {
                 info!(
                     "retrying get_block_time error: {:?} with sleeping {:?}",
@@ -304,19 +348,25 @@ impl EpochFinder {
 
     /// Find the block time in seconds of the first block in `epoch`.
     ///
-    /// Returns `Ok(None)` only when the epoch has not started, meaning its first
-    /// slot is beyond `current_slot`. Such an epoch bounds nothing. Every other
-    /// way of failing to date the epoch is an error: an epoch already in the past
-    /// that the endpoint reports no block for is an endpoint missing history for
-    /// that range, not an empty epoch, and answering `None` there would walk the
+    /// Returns `Ok(None)` only when the epoch has produced no block, meaning its
+    /// first slot is past `chain_tip_slot`, the newest slot that actually has one.
+    /// Such an epoch bounds nothing. Comparing against the chain tip rather than
+    /// against `getSlot` matters because `getSlot` can name a blockless slot, so a
+    /// just-started epoch whose opening slots are all skipped would otherwise look
+    /// like an endpoint missing history and fail the search.
+    ///
+    /// Every other way of failing to date the epoch is an error rather than a
+    /// `None`. Since `chain_tip_slot` has a block, an epoch that starts at or
+    /// before it must have one too, so an empty answer means the endpoint is
+    /// missing history for that range, and reporting that as `None` would walk the
     /// search backward past the right answer.
     ///
     /// The first slot of an epoch is frequently skipped, so the first block is
     /// often a few slots in. `getBlocksWithLimit` answers "the first block at or
-    /// after this slot" directly, which is why this does not walk forward one
-    /// `getBlockTime` at a time: a walk needs an arbitrary cap on how long a run
-    /// of skipped slots to tolerate, and since a skip run is a settled fact, a run
-    /// past the cap would turn a readable boundary into a permanent failure.
+    /// after this slot" in one round trip, so finding it costs the same whether it
+    /// is the next slot or hundreds later. It does step over a gap in the
+    /// endpoint's own block history without saying so, which is what
+    /// [`can_date_epoch_start`] guards.
     ///
     /// The block time is returned as is, with no back estimation of the skipped
     /// slots before it. For deciding which epoch a timestamp falls in, the first
@@ -328,10 +378,10 @@ impl EpochFinder {
         &self,
         schedule: &EpochSchedule,
         epoch: u64,
-        current_slot: u64,
+        chain_tip_slot: u64,
     ) -> Result<Option<i64>> {
         let first_slot = schedule.get_first_slot_in_epoch(epoch);
-        if first_slot > current_slot {
+        if first_slot > chain_tip_slot {
             return Ok(None);
         }
 
@@ -341,6 +391,7 @@ impl EpochFinder {
                 .await
         })
         .retry(&ExponentialBuilder::default().with_jitter())
+        .when(|err: &SolanaClientError| !is_settled_block_error(err))
         .notify(|err: &SolanaClientError, dur: Duration| {
             info!(
                 "retrying get_blocks_with_limit error: {:?} with sleeping {:?}",
@@ -354,16 +405,21 @@ impl EpochFinder {
         .with_context(|| {
             format!(
                 "Solana endpoint reports no block at or after slot {first_slot}, the first slot \
-                 of epoch {epoch}, which is already in the past. The endpoint is most likely \
-                 missing block history for that range"
+                 of epoch {epoch}, even though slot {chain_tip_slot} has one. The endpoint is \
+                 most likely missing block history for that range"
             )
         })?;
 
-        let next_epoch_first_slot = schedule.get_first_slot_in_epoch(epoch + 1);
         ensure!(
-            first_block_slot < next_epoch_first_slot,
-            "The first block at or after slot {first_slot} is slot {first_block_slot}, past the \
-             end of Solana epoch {epoch}, so that epoch has no block to date it by"
+            can_date_epoch_start(
+                first_slot,
+                first_block_slot,
+                schedule.get_first_slot_in_epoch(epoch + 1)
+            ),
+            "The first block at or after slot {first_slot} is slot {first_block_slot}, more than \
+             {MAX_BOUNDARY_SKIP_SLOTS} slots into Solana epoch {epoch}. The endpoint is most \
+             likely missing block history there, and dating the epoch by that block would place \
+             its start late enough that timestamps inside the gap resolve to the previous epoch"
         );
 
         let block_time = self
@@ -379,18 +435,23 @@ impl EpochFinder {
         Ok(Some(block_time))
     }
 
-    /// Find the block time of the newest block at or before `current_slot`, in
-    /// seconds.
+    /// Find the newest slot at or before `current_slot` that has a block, and
+    /// return it with its block time in seconds.
     ///
     /// The walk runs backward because `getSlot` can name a slot that has no block
     /// yet, either because it was skipped or because the endpoint has not caught
     /// up to it. It resolves on the first probe in the ordinary case.
-    async fn try_chain_tip_block_time(&self, current_slot: u64) -> Result<i64> {
+    ///
+    /// Both halves of the answer are used: the time bounds how recent a timestamp
+    /// the search will accept, and the slot is what
+    /// [`Self::try_epoch_start_block_time`] measures an epoch against to tell "has
+    /// produced no block yet" apart from "endpoint is missing history".
+    async fn try_chain_tip_block(&self, current_slot: u64) -> Result<(u64, i64)> {
         let oldest_slot_to_search = current_slot.saturating_sub(MAX_CHAIN_TIP_SEARCH_SLOTS - 1);
 
         for slot in (oldest_slot_to_search..=current_slot).rev() {
             if let Some(block_time) = self.try_get_block_time(slot).await? {
-                return Ok(block_time);
+                return Ok((slot, block_time));
             }
         }
 
@@ -451,11 +512,11 @@ impl EpochFinder {
         // the answer, on the grounds that the next epoch has produced no block
         // yet, so a timestamp past the chain tip would resolve to whatever epoch
         // a lagging endpoint happens to be sitting in. Reject it here instead.
-        let chain_tip_time = self.try_chain_tip_block_time(current_slot).await?;
+        let (chain_tip_slot, chain_tip_time) = self.try_chain_tip_block(current_slot).await?;
         if target_time > chain_tip_time {
             bail!(
                 "Timestamp {timestamp_us} is ahead of the Solana chain tip at slot \
-                 {current_slot} (block time {chain_tip_time}), so the epoch containing it is \
+                 {chain_tip_slot} (block time {chain_tip_time}), so the epoch containing it is \
                  not yet determined"
             );
         }
@@ -466,10 +527,10 @@ impl EpochFinder {
         // move needs a lookup, which halves the round trips a multi-step walk
         // costs.
         let mut epoch_start_time = self
-            .try_epoch_start_block_time(&schedule, candidate_epoch, current_slot)
+            .try_epoch_start_block_time(&schedule, candidate_epoch, chain_tip_slot)
             .await?;
         let mut next_epoch_start_time = self
-            .try_epoch_start_block_time(&schedule, candidate_epoch + 1, current_slot)
+            .try_epoch_start_block_time(&schedule, candidate_epoch + 1, chain_tip_slot)
             .await?;
 
         for _ in 0..MAX_EPOCH_SEARCH_STEPS {
@@ -487,14 +548,14 @@ impl EpochFinder {
                     })?;
                     next_epoch_start_time = epoch_start_time;
                     epoch_start_time = self
-                        .try_epoch_start_block_time(&schedule, candidate_epoch, current_slot)
+                        .try_epoch_start_block_time(&schedule, candidate_epoch, chain_tip_slot)
                         .await?;
                 }
                 EpochSearchStep::Later => {
                     candidate_epoch += 1;
                     epoch_start_time = next_epoch_start_time;
                     next_epoch_start_time = self
-                        .try_epoch_start_block_time(&schedule, candidate_epoch + 1, current_slot)
+                        .try_epoch_start_block_time(&schedule, candidate_epoch + 1, chain_tip_slot)
                         .await?;
                 }
             }
@@ -697,6 +758,8 @@ mod tests {
         let err = rpc_response_error(JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP);
         assert!(!is_block_unavailable(&err));
         assert!(is_block_cleaned_up(&err));
+        // Settled either way, so neither is worth retrying.
+        assert!(is_settled_block_error(&err));
     }
 
     // A transport failure is neither, so it stays retryable.
@@ -705,5 +768,79 @@ mod tests {
         let err = RpcError::RpcRequestError("connection reset".to_string()).into();
         assert!(!is_block_unavailable(&err));
         assert!(!is_block_cleaned_up(&err));
+        assert!(!is_settled_block_error(&err));
+    }
+
+    // The ordinary cases: the epoch's own first slot produced a block, or a short
+    // run of skipped slots pushed the first block a few slots in.
+    #[test]
+    fn test_can_date_epoch_start_accepts_a_short_skip_run() {
+        let first_slot = 432_000;
+        let next_epoch_first_slot = 864_000;
+
+        assert!(can_date_epoch_start(
+            first_slot,
+            first_slot,
+            next_epoch_first_slot
+        ));
+        assert!(can_date_epoch_start(
+            first_slot,
+            first_slot + 4,
+            next_epoch_first_slot
+        ));
+    }
+
+    // The budget is exclusive, so the last accepted slot is one below it.
+    #[test]
+    fn test_can_date_epoch_start_budget_edge() {
+        let first_slot = 432_000;
+        let next_epoch_first_slot = 864_000;
+
+        assert!(can_date_epoch_start(
+            first_slot,
+            first_slot + MAX_BOUNDARY_SKIP_SLOTS - 1,
+            next_epoch_first_slot
+        ));
+        assert!(!can_date_epoch_start(
+            first_slot,
+            first_slot + MAX_BOUNDARY_SKIP_SLOTS,
+            next_epoch_first_slot
+        ));
+    }
+
+    // A block far into the epoch means getBlocksWithLimit stepped over a gap in
+    // the endpoint's own block history. Dating the epoch by it would put the start
+    // late enough that timestamps inside the gap resolve to the previous epoch and
+    // pick up its leader schedule, so this has to be rejected rather than trusted.
+    #[test]
+    fn test_can_date_epoch_start_rejects_a_history_gap() {
+        let first_slot = 432_000;
+        let next_epoch_first_slot = 864_000;
+
+        assert!(!can_date_epoch_start(
+            first_slot,
+            first_slot + 100_000,
+            next_epoch_first_slot
+        ));
+    }
+
+    // On a cluster whose epochs are shorter than the budget, such as a local test
+    // validator, the epoch's own end is what binds. Without the `min` the budget
+    // would accept a block belonging to a later epoch.
+    #[test]
+    fn test_can_date_epoch_start_short_epoch_binds_before_the_budget() {
+        let first_slot = 64;
+        let next_epoch_first_slot = 96;
+
+        assert!(can_date_epoch_start(
+            first_slot,
+            next_epoch_first_slot - 1,
+            next_epoch_first_slot
+        ));
+        assert!(!can_date_epoch_start(
+            first_slot,
+            next_epoch_first_slot,
+            next_epoch_first_slot
+        ));
     }
 }
