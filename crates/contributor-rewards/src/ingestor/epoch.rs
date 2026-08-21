@@ -6,7 +6,7 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use backon::{ExponentialBuilder, Retryable};
 use chrono::Utc;
 use doublezero_solana_client_tools::rpc::DoubleZeroLedgerConnection;
@@ -28,21 +28,36 @@ use crate::cli::{
     traits::Exportable,
 };
 
-// Seed slot duration for the epoch search in `find_epoch_at_timestamp`. Solana's
-// real slot duration is drifting: mainnet-beta moves 400ms to 350ms at the start
-// of epoch 1020 (2026-08-21) and SIMD-0525 continues stepping it down to 200ms,
-// while testnet is already at 200ms. So this number is wrong on some cluster at
-// any given time, and during the rollout the real rate changes inside a single
-// lookback window. It only decides how many RPC round trips the search needs to
-// converge, never which epoch the search returns.
-const SEED_SLOT_DURATION_US: u64 = 350_000;
+// Seed slot duration for the epoch search in `find_epoch_at_timestamp`. This is
+// deliberately slower than any real Solana slot rate rather than close to one,
+// because what matters is the direction of the error, not its size.
+//
+// `estimate_slot_from_timestamp` divides elapsed wall clock by this number, so a
+// value above the real rate under-counts the slots elapsed and seeds the search
+// at or after the epoch being looked for. The search then only ever walks
+// backward, and the oldest slot it probes is the first slot of the answer's own
+// epoch. A value below the real rate inverts that: the seed lands at or before
+// the answer, and the first probe is older than the target, which can fall
+// outside the endpoint's retention and fail the search for a target that is
+// itself readable.
+//
+// Mainnet-beta is the slowest cluster at 400ms until the start of epoch 1020
+// (2026-08-21), after which SIMD-0525 steps it down toward testnet's 200ms, so
+// the margin here only grows. The cost of the margin is search steps, roughly one
+// extra epoch of backward walk per two days of lookback, against a cap of
+// `MAX_EPOCH_SEARCH_STEPS`.
+const SEED_SLOT_DURATION_US: u64 = 500_000;
 
-// The first slot of an epoch is frequently skipped, so the epoch start lookup
-// walks forward from it until a confirmed block turns up. A boundary that needs
-// more than this many slots to produce one block is not a run of skipped slots,
-// it is a stalled cluster, and guessing through that would be worse than an
-// error. The same bound caps the backward walk for the chain tip's block time.
-const MAX_BOUNDARY_SEARCH_SLOTS: u64 = 128;
+// The whole argument above rests on this one inequality, so pin it rather than
+// leaving it to the prose. 400_000 is mainnet-beta's rate until epoch 1020 and
+// the slowest any cluster runs, and every step of the SIMD-0525 rollout only
+// lowers it.
+const _: () = assert!(SEED_SLOT_DURATION_US > 400_000);
+
+// `getSlot` can name a slot that has no block yet, so the chain tip lookup walks
+// backward from it. A tip that needs more than this many slots to find a block is
+// a stalled cluster rather than a run of skipped slots.
+const MAX_CHAIN_TIP_SEARCH_SLOTS: u64 = 128;
 
 // Each search step moves the candidate by one epoch. The seed is normally within
 // an epoch or two of correct, so this cap exists only to bound a pathological
@@ -82,10 +97,9 @@ impl Exportable for LeaderSchedule {
 /// block-not-available. All three mean the same thing to the callers here: move
 /// on to the next slot.
 ///
-/// `JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP` is deliberately excluded. A pruned
-/// ledger means the answer is unknowable rather than "this slot produced no
-/// block", so it has to fail the search instead of sending the walk forward over
-/// slots whose block times are equally gone.
+/// `JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP` is deliberately excluded, because a
+/// pruned ledger means the answer is unknowable rather than absent. See
+/// [`is_block_cleaned_up`].
 fn is_block_unavailable(err: &SolanaClientError) -> bool {
     match err.kind() {
         ClientErrorKind::RpcError(RpcError::RpcResponseError { code, .. }) => matches!(
@@ -103,9 +117,9 @@ fn is_block_unavailable(err: &SolanaClientError) -> bool {
 
 /// Report whether an RPC error means the ledger no longer holds the slot.
 ///
-/// Kept apart from [`is_block_unavailable`] because this one has to fail the
-/// search rather than advance it, but it is just as settled, so it is not worth
-/// retrying either.
+/// This has to fail a lookup rather than be treated as an absent block, since the
+/// block time is gone rather than nonexistent. It is just as settled, so it is
+/// not worth retrying either.
 fn is_block_cleaned_up(err: &SolanaClientError) -> bool {
     matches!(
         err.kind(),
@@ -288,43 +302,81 @@ impl EpochFinder {
         }
     }
 
-    /// Find the block time of the first block at or after `first_slot`, in
-    /// seconds.
+    /// Find the block time in seconds of the first block in `epoch`.
     ///
-    /// Returns `Ok(None)` when no block exists between `first_slot` and
-    /// `current_slot`, which means the epoch starting at `first_slot` has not
-    /// produced a block yet and so bounds nothing.
+    /// Returns `Ok(None)` only when the epoch has not started, meaning its first
+    /// slot is beyond `current_slot`. Such an epoch bounds nothing. Every other
+    /// way of failing to date the epoch is an error: an epoch already in the past
+    /// that the endpoint reports no block for is an endpoint missing history for
+    /// that range, not an empty epoch, and answering `None` there would walk the
+    /// search backward past the right answer.
     ///
-    /// The block time that is found is returned as is, with no back estimation of
-    /// the skipped slots that preceded it. For deciding which epoch a timestamp
-    /// falls in, the first block's time is the epoch's effective start, so
-    /// subtracting an estimate would only add error. This is a deliberate
-    /// difference from `estimate_block_time_for_skipped_slot` in
-    /// `validator-debt/src/rpc.rs`, which does subtract one.
+    /// The first slot of an epoch is frequently skipped, so the first block is
+    /// often a few slots in. `getBlocksWithLimit` answers "the first block at or
+    /// after this slot" directly, which is why this does not walk forward one
+    /// `getBlockTime` at a time: a walk needs an arbitrary cap on how long a run
+    /// of skipped slots to tolerate, and since a skip run is a settled fact, a run
+    /// past the cap would turn a readable boundary into a permanent failure.
+    ///
+    /// The block time is returned as is, with no back estimation of the skipped
+    /// slots before it. For deciding which epoch a timestamp falls in, the first
+    /// block's time is the epoch's effective start, so subtracting an estimate
+    /// would only add error. This is a deliberate difference from
+    /// `estimate_block_time_for_skipped_slot` in `validator-debt/src/rpc.rs`,
+    /// which does subtract one.
     async fn try_epoch_start_block_time(
         &self,
+        schedule: &EpochSchedule,
         epoch: u64,
-        first_slot: u64,
         current_slot: u64,
     ) -> Result<Option<i64>> {
-        for slot in first_slot..first_slot + MAX_BOUNDARY_SEARCH_SLOTS {
-            if slot > current_slot {
-                return Ok(None);
-            }
-
-            match self.try_get_block_time(slot).await? {
-                Some(block_time) => return Ok(Some(block_time)),
-                None => debug!(
-                    "Solana slot {} has no block, searching forward for the start of epoch {}",
-                    slot, epoch
-                ),
-            }
+        let first_slot = schedule.get_first_slot_in_epoch(epoch);
+        if first_slot > current_slot {
+            return Ok(None);
         }
 
-        bail!(
-            "No block within {MAX_BOUNDARY_SEARCH_SLOTS} slots of slot {first_slot}, \
-             the first slot of Solana epoch {epoch}"
-        )
+        let first_block_slot = (|| async {
+            self.solana_read_client
+                .get_blocks_with_limit(first_slot, 1)
+                .await
+        })
+        .retry(&ExponentialBuilder::default().with_jitter())
+        .notify(|err: &SolanaClientError, dur: Duration| {
+            info!(
+                "retrying get_blocks_with_limit error: {:?} with sleeping {:?}",
+                err, dur
+            )
+        })
+        .await
+        .with_context(|| format!("Failed to find the first block of Solana epoch {epoch}"))?
+        .first()
+        .copied()
+        .with_context(|| {
+            format!(
+                "Solana endpoint reports no block at or after slot {first_slot}, the first slot \
+                 of epoch {epoch}, which is already in the past. The endpoint is most likely \
+                 missing block history for that range"
+            )
+        })?;
+
+        let next_epoch_first_slot = schedule.get_first_slot_in_epoch(epoch + 1);
+        ensure!(
+            first_block_slot < next_epoch_first_slot,
+            "The first block at or after slot {first_slot} is slot {first_block_slot}, past the \
+             end of Solana epoch {epoch}, so that epoch has no block to date it by"
+        );
+
+        let block_time = self
+            .try_get_block_time(first_block_slot)
+            .await?
+            .with_context(|| {
+                format!(
+                    "Solana slot {first_block_slot} was reported as the first block of epoch \
+                     {epoch} but has no block time"
+                )
+            })?;
+
+        Ok(Some(block_time))
     }
 
     /// Find the block time of the newest block at or before `current_slot`, in
@@ -332,9 +384,9 @@ impl EpochFinder {
     ///
     /// The walk runs backward because `getSlot` can name a slot that has no block
     /// yet, either because it was skipped or because the endpoint has not caught
-    /// up to it.
+    /// up to it. It resolves on the first probe in the ordinary case.
     async fn try_chain_tip_block_time(&self, current_slot: u64) -> Result<i64> {
-        let oldest_slot_to_search = current_slot.saturating_sub(MAX_BOUNDARY_SEARCH_SLOTS - 1);
+        let oldest_slot_to_search = current_slot.saturating_sub(MAX_CHAIN_TIP_SEARCH_SLOTS - 1);
 
         for slot in (oldest_slot_to_search..=current_slot).rev() {
             if let Some(block_time) = self.try_get_block_time(slot).await? {
@@ -343,7 +395,7 @@ impl EpochFinder {
         }
 
         bail!(
-            "No block within {MAX_BOUNDARY_SEARCH_SLOTS} slots at or before the current slot \
+            "No block within {MAX_CHAIN_TIP_SEARCH_SLOTS} slots at or before the current slot \
              {current_slot}"
         )
     }
@@ -358,6 +410,11 @@ impl EpochFinder {
     /// alone selects the wrong epoch near a boundary. Since the epoch chooses the
     /// leader schedule that contributor rewards are computed against, a wrong
     /// answer here corrupts rewards, and an error is the better outcome.
+    ///
+    /// The seed is deliberately biased so the walk runs backward, which keeps the
+    /// oldest slot probed inside the answer's own epoch. The forward step is still
+    /// here because the local clock, not the chain, decides how far back the seed
+    /// lands, so a clock running ahead can still overshoot.
     ///
     /// A second chain verified epoch search lives in
     /// `validator-debt/src/rpc.rs` (`find_solana_epoch_before_timestamp`). That
@@ -403,22 +460,19 @@ impl EpochFinder {
             );
         }
 
-        for _ in 0..MAX_EPOCH_SEARCH_STEPS {
-            let epoch_start_time = self
-                .try_epoch_start_block_time(
-                    candidate_epoch,
-                    schedule.get_first_slot_in_epoch(candidate_epoch),
-                    current_slot,
-                )
-                .await?;
-            let next_epoch_start_time = self
-                .try_epoch_start_block_time(
-                    candidate_epoch + 1,
-                    schedule.get_first_slot_in_epoch(candidate_epoch + 1),
-                    current_slot,
-                )
-                .await?;
+        // Each step reuses the bound it already resolved: stepping earlier turns
+        // the candidate's own start into the new candidate's upper bound, and
+        // stepping later does the reverse. Only the bound on the far side of the
+        // move needs a lookup, which halves the round trips a multi-step walk
+        // costs.
+        let mut epoch_start_time = self
+            .try_epoch_start_block_time(&schedule, candidate_epoch, current_slot)
+            .await?;
+        let mut next_epoch_start_time = self
+            .try_epoch_start_block_time(&schedule, candidate_epoch + 1, current_slot)
+            .await?;
 
+        for _ in 0..MAX_EPOCH_SEARCH_STEPS {
             match decide_epoch_search_step(target_time, epoch_start_time, next_epoch_start_time) {
                 EpochSearchStep::Found => {
                     debug!(
@@ -431,8 +485,18 @@ impl EpochFinder {
                     candidate_epoch = candidate_epoch.checked_sub(1).with_context(|| {
                         format!("Timestamp {timestamp_us} precedes the first Solana epoch")
                     })?;
+                    next_epoch_start_time = epoch_start_time;
+                    epoch_start_time = self
+                        .try_epoch_start_block_time(&schedule, candidate_epoch, current_slot)
+                        .await?;
                 }
-                EpochSearchStep::Later => candidate_epoch += 1,
+                EpochSearchStep::Later => {
+                    candidate_epoch += 1;
+                    epoch_start_time = next_epoch_start_time;
+                    next_epoch_start_time = self
+                        .try_epoch_start_block_time(&schedule, candidate_epoch + 1, current_slot)
+                        .await?;
+                }
             }
         }
 
@@ -522,9 +586,9 @@ mod tests {
         let current_slot = 1000000;
         let current_time_us = 1_000_000_000_000; // 1 million seconds in microseconds
 
-        // Test normal case - 350 seconds ago (350_000_000 us / 350_000 us per
+        // Test normal case - 500 seconds ago (500_000_000 us / 500_000 us per
         // slot = 1000 slots)
-        let timestamp_us = current_time_us - 350_000_000;
+        let timestamp_us = current_time_us - 500_000_000;
         let result = estimate_slot_from_timestamp(timestamp_us, current_slot, current_time_us);
         assert_eq!(result.unwrap(), 999000);
 
