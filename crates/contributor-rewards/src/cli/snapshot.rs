@@ -318,11 +318,9 @@ pub async fn create_snapshot(
         Network::Devnet => "dn",
     };
 
-    // Refuse to write a snapshot no consumer can read. Every consumer rejects a
-    // snapshot with no leader schedule, and the write lands on the canonical
-    // `<network>-epoch-N-snapshot.json` name, so exiting 0 without this check
-    // leaves an unusable file where the next command expects a good one and
-    // reports the failure a step late.
+    // Refuse to write a snapshot no consumer can read. Without this the command
+    // exits 0 having left an unusable file under the canonical name, and the
+    // failure surfaces a step later in whatever reads it next.
     snapshot.validate()?;
 
     // Export: local override or configured storage

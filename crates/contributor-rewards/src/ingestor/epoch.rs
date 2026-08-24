@@ -28,30 +28,21 @@ use crate::cli::{
     traits::Exportable,
 };
 
-// Seed slot duration for the epoch search in `find_epoch_at_timestamp`. This is
-// deliberately slower than any real Solana slot rate rather than close to one,
-// because what matters is the direction of the error, not its size.
+// Seed slot duration for the epoch search in `find_epoch_at_timestamp`. What
+// matters is the direction of the error, not its size, so this is deliberately
+// slower than any real cluster rate rather than close to one.
 //
-// `estimate_slot_from_timestamp` divides elapsed wall clock by this number, so a
-// value above the real rate under-counts the slots elapsed and seeds the search
-// at or after the epoch being looked for. The search then only ever walks
-// backward, and the oldest slot it probes is the first slot of the answer's own
-// epoch. A value below the real rate inverts that: the seed lands at or before
-// the answer, and the first probe is older than the target, which can fall
+// Dividing elapsed wall clock by a value above the real rate under-counts the
+// slots elapsed, seeding at or after the epoch being looked for, so the search
+// walks backward only and never probes older than the answer's own epoch. A
+// value below the real rate probes older than the target instead, which can fall
 // outside the endpoint's retention and fail the search for a target that is
-// itself readable.
-//
-// Mainnet-beta is the slowest cluster at 400ms until the start of epoch 1020
-// (2026-08-21), after which SIMD-0525 steps it down toward testnet's 200ms, so
-// the margin here only grows. The cost of the margin is search steps, roughly one
-// extra epoch of backward walk per two days of lookback, against a cap of
-// `MAX_EPOCH_SEARCH_STEPS`.
+// itself readable. The margin costs search steps, roughly one extra epoch of
+// backward walk per two days of lookback.
 const SEED_SLOT_DURATION_US: u64 = 500_000;
 
-// The whole argument above rests on this one inequality, so pin it rather than
-// leaving it to the prose. 400_000 is mainnet-beta's rate until epoch 1020 and
-// the slowest any cluster runs, and every step of the SIMD-0525 rollout only
-// lowers it.
+// 400_000 is mainnet-beta's rate until epoch 1020 (2026-08-21) and the slowest
+// any cluster runs; every step of the SIMD-0525 rollout only lowers it.
 const _: () = assert!(SEED_SLOT_DURATION_US > 400_000);
 
 // `getSlot` can name a slot that has no block yet, so the chain tip lookup walks
@@ -62,23 +53,16 @@ const MAX_CHAIN_TIP_SEARCH_SLOTS: u64 = 128;
 // How far past an epoch's first slot that epoch's first block may be and still be
 // trusted to date the epoch.
 //
-// `getBlocksWithLimit` steps over a gap in the endpoint's block history without
-// saying that it did, so the slot it returns cannot by itself distinguish a
+// `getBlocksWithLimit` steps over a gap in the endpoint's own block history
+// without saying that it did, so the slot it returns cannot by itself tell a
 // routine run of skipped boundary slots from a node restored from a snapshot
-// partway through the epoch. The distance is the tell: dating an epoch by a block
-// this far in overstates when the epoch began by that much, and a timestamp
-// inside the gap then resolves to the previous epoch and picks up its leader
-// schedule.
+// partway through the epoch. Distance is the tell: dating an epoch by a block
+// that far in overstates when the epoch began by the length of the gap, and
+// timestamps inside the gap then resolve to the previous epoch and pick up its
+// leader schedule.
 //
-// Some ambiguity is inherent, because a skipped boundary slot leaves no block to
-// mark where the epoch began, and it is bounded by the length of the gap. 432
-// slots is 0.1% of a mainnet epoch, around two and a half minutes, which is far
-// above any routine skip run and far below a gap worth guessing through.
-//
-// Note that this bounds trust rather than work, which is what separates it from
-// the capped forward walk it replaced. Exceeding it costs no extra round trips
-// and says the answer is not credible, where exceeding the old cap only said the
-// walk gave up.
+// 432 slots is 0.1% of a mainnet epoch, around two and a half minutes, chosen to
+// sit far above any routine skip run and far below a gap worth guessing through.
 const MAX_BOUNDARY_SKIP_SLOTS: u64 = 432;
 
 // Each search step moves the candidate by one epoch. The seed is normally within
@@ -111,13 +95,13 @@ impl Exportable for LeaderSchedule {
 /// Report whether an RPC error means the slot has no block to report a time for,
 /// as opposed to the request itself failing.
 ///
-/// `getBlockTime` says this in more than one way depending on what the endpoint
-/// has behind it. A validator with long term storage answers with a coded
-/// skipped-slot error, one without it answers with a JSON `null` that
+/// `getBlockTime` says this in three ways depending on what the endpoint has
+/// behind it, and missing any one of them fails the search on endpoints of that
+/// shape: a validator with long term storage answers with a coded skipped-slot
+/// error, one without it answers with a JSON `null` that
 /// `RpcClient::get_block_time` turns into `RpcError::ForUser("Block Not
 /// Found: ...")`, and a slot the endpoint has not rooted yet is reported as
-/// block-not-available. All three mean the same thing to the callers here: move
-/// on to the next slot.
+/// block-not-available.
 ///
 /// `JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP` is deliberately excluded, because a
 /// pruned ledger means the answer is unknowable rather than absent. See
@@ -139,9 +123,9 @@ fn is_block_unavailable(err: &SolanaClientError) -> bool {
 
 /// Report whether an RPC error means the ledger no longer holds the slot.
 ///
-/// This has to fail a lookup rather than be treated as an absent block, since the
-/// block time is gone rather than nonexistent. It is just as settled, so it is
-/// not worth retrying either.
+/// This fails a lookup rather than counting as an absent block, since the block
+/// time is gone rather than nonexistent. It is just as settled, so it is not
+/// worth retrying either.
 fn is_block_cleaned_up(err: &SolanaClientError) -> bool {
     matches!(
         err.kind(),
@@ -185,12 +169,10 @@ enum EpochSearchStep {
 ///
 /// `epoch_start_time` and `next_epoch_start_time` are the block times of the
 /// first block in the candidate epoch and in the epoch after it, in seconds.
-/// `None` means that epoch has produced no block yet, so it bounds nothing: for
-/// the candidate that rules the candidate out, and for the next epoch it means
-/// the candidate is the newest epoch the cluster has produced a block in, so
-/// there is no upper bound to compare against. Accepting the candidate in that
-/// second case is only sound because the caller has already established that the
-/// target is at or before the chain tip.
+/// `None` means that epoch has produced no block yet and so bounds nothing: it
+/// rules the candidate out, or, for the next epoch, means the candidate has no
+/// upper bound. Accepting the candidate unbounded is only sound because the
+/// caller has already established that the target is at or before the chain tip.
 ///
 /// The lower bound is inclusive and the upper bound is exclusive, so a timestamp
 /// falling exactly on an epoch's first block time belongs to that epoch.
@@ -320,11 +302,9 @@ impl EpochFinder {
     /// Get a slot's block time in seconds, or `Ok(None)` when the slot has no
     /// block to report a time for.
     ///
-    /// Transport failures are retried, but a slot that produced no block is
-    /// returned immediately: that is a settled fact rather than a transient
-    /// error, so retrying it only burns the backoff schedule before arriving at
-    /// the same answer. A pruned ledger is settled in the same way but is an
-    /// error rather than a `None`, so it is not retried either.
+    /// Transport failures are retried; a slot that produced no block and a pruned
+    /// ledger are not, since both are settled and retrying only burns the backoff
+    /// schedule before arriving at the same answer.
     async fn try_get_block_time(&self, slot: u64) -> Result<Option<i64>> {
         let block_time = (|| async { self.solana_read_client.get_block_time(slot).await })
             .retry(&ExponentialBuilder::default().with_jitter())
@@ -349,31 +329,25 @@ impl EpochFinder {
     /// Find the block time in seconds of the first block in `epoch`.
     ///
     /// Returns `Ok(None)` only when the epoch has produced no block, meaning its
-    /// first slot is past `chain_tip_slot`, the newest slot that actually has one.
-    /// Such an epoch bounds nothing. Comparing against the chain tip rather than
-    /// against `getSlot` matters because `getSlot` can name a blockless slot, so a
-    /// just-started epoch whose opening slots are all skipped would otherwise look
+    /// first slot is past `chain_tip_slot`. Measuring against the chain tip rather
+    /// than `getSlot` matters because `getSlot` can name a blockless slot, which
+    /// would make a just-started epoch whose opening slots were all skipped look
     /// like an endpoint missing history and fail the search.
     ///
     /// Every other way of failing to date the epoch is an error rather than a
-    /// `None`. Since `chain_tip_slot` has a block, an epoch that starts at or
-    /// before it must have one too, so an empty answer means the endpoint is
-    /// missing history for that range, and reporting that as `None` would walk the
-    /// search backward past the right answer.
+    /// `None`, and `chain_tip_slot` is what makes that sound: it has a block, so
+    /// an epoch starting at or before it must have one too, leaving missing
+    /// history as the only reading of an empty answer. Returning `None` there
+    /// would walk the search backward past the right answer.
     ///
-    /// The first slot of an epoch is frequently skipped, so the first block is
-    /// often a few slots in. `getBlocksWithLimit` answers "the first block at or
-    /// after this slot" in one round trip, so finding it costs the same whether it
-    /// is the next slot or hundreds later. It does step over a gap in the
-    /// endpoint's own block history without saying so, which is what
-    /// [`can_date_epoch_start`] guards.
+    /// [`can_date_epoch_start`] guards the one thing `getBlocksWithLimit` will not
+    /// report, which is that it stepped over a gap in the endpoint's own history.
     ///
     /// The block time is returned as is, with no back estimation of the skipped
-    /// slots before it. For deciding which epoch a timestamp falls in, the first
-    /// block's time is the epoch's effective start, so subtracting an estimate
-    /// would only add error. This is a deliberate difference from
-    /// `estimate_block_time_for_skipped_slot` in `validator-debt/src/rpc.rs`,
-    /// which does subtract one.
+    /// slots before it: the first block's time is the epoch's effective start for
+    /// this purpose, so subtracting an estimate would only add error. This is a
+    /// deliberate difference from `estimate_block_time_for_skipped_slot` in
+    /// `validator-debt/src/rpc.rs`, which does subtract one.
     async fn try_epoch_start_block_time(
         &self,
         schedule: &EpochSchedule,
@@ -438,14 +412,13 @@ impl EpochFinder {
     /// Find the newest slot at or before `current_slot` that has a block, and
     /// return it with its block time in seconds.
     ///
-    /// The walk runs backward because `getSlot` can name a slot that has no block
-    /// yet, either because it was skipped or because the endpoint has not caught
-    /// up to it. It resolves on the first probe in the ordinary case.
+    /// The walk runs backward because `getSlot` can name a slot with no block yet,
+    /// whether skipped or not yet caught up to. It resolves on the first probe in
+    /// the ordinary case.
     ///
-    /// Both halves of the answer are used: the time bounds how recent a timestamp
-    /// the search will accept, and the slot is what
-    /// [`Self::try_epoch_start_block_time`] measures an epoch against to tell "has
-    /// produced no block yet" apart from "endpoint is missing history".
+    /// The time bounds how recent a timestamp the search accepts; the slot is what
+    /// [`Self::try_epoch_start_block_time`] measures against to tell "no block
+    /// yet" apart from "endpoint is missing history".
     async fn try_chain_tip_block(&self, current_slot: u64) -> Result<(u64, i64)> {
         let oldest_slot_to_search = current_slot.saturating_sub(MAX_CHAIN_TIP_SEARCH_SLOTS - 1);
 
@@ -463,25 +436,23 @@ impl EpochFinder {
 
     /// Find the Solana epoch that was active at a given timestamp
     ///
-    /// The timestamp is mapped to a seed slot by dividing wall clock elapsed by
-    /// `SEED_SLOT_DURATION_US`, and the epoch that seed lands in is then verified
-    /// against real block times. The verification is what makes the answer
-    /// correct: the seed drifts by thousands of slots over a day of lookback, and
-    /// no fixed slot duration survives the SIMD-0525 rollout, so a seeded guess
-    /// alone selects the wrong epoch near a boundary. Since the epoch chooses the
-    /// leader schedule that contributor rewards are computed against, a wrong
-    /// answer here corrupts rewards, and an error is the better outcome.
+    /// The timestamp seeds a slot estimate, and the epoch that seed lands in is
+    /// then verified against real block times. The verification is what makes the
+    /// answer correct: the seed drifts by thousands of slots over a day of
+    /// lookback and no fixed slot duration survives the SIMD-0525 rollout, so a
+    /// seeded guess alone picks the wrong epoch near a boundary. That epoch
+    /// chooses the leader schedule contributor rewards are computed against, so a
+    /// wrong answer corrupts rewards and an error is the better outcome.
     ///
-    /// The seed is deliberately biased so the walk runs backward, which keeps the
-    /// oldest slot probed inside the answer's own epoch. The forward step is still
-    /// here because the local clock, not the chain, decides how far back the seed
-    /// lands, so a clock running ahead can still overshoot.
+    /// The forward step exists despite the backward-biased seed because the local
+    /// clock, not the chain, decides where the seed lands, so a clock running
+    /// ahead can still overshoot.
     ///
-    /// A second chain verified epoch search lives in
-    /// `validator-debt/src/rpc.rs` (`find_solana_epoch_before_timestamp`). That
-    /// one walks backward only and threads a `leaky-bucket` rate limiter, so the
-    /// two are not yet worth unifying, but a fix to the skipped slot or boundary
-    /// handling here probably belongs there too.
+    /// A second chain-verified epoch search lives in `validator-debt/src/rpc.rs`
+    /// (`find_solana_epoch_before_timestamp`). It threads a `leaky-bucket` rate
+    /// limiter and searches one direction only, so the two are not yet worth
+    /// unifying, but a fix to the boundary handling here probably belongs there
+    /// too.
     pub async fn find_epoch_at_timestamp(&mut self, timestamp_us: u64) -> Result<u64> {
         // Get current slot from Solana
         let current_slot = (|| async { self.solana_read_client.get_slot().await })
@@ -493,25 +464,22 @@ impl EpochFinder {
 
         let current_time_us = Utc::now().timestamp_micros() as u64;
 
-        // Seed the search. This also rejects a future or unreachably old
-        // timestamp before any RPC calls are spent on it.
+        // Also rejects a future or unreachably old timestamp before any RPC
+        // calls are spent on it.
         let estimated_slot =
             estimate_slot_from_timestamp(timestamp_us, current_slot, current_time_us)?;
 
-        // Copied out of the cache rather than borrowed, because the borrow that
-        // get_solana_schedule hands back is tied to its &mut self, which the
-        // block time lookups below also need.
+        // Copied rather than borrowed: the borrow is tied to the &mut self that
+        // the block time lookups below also need.
         let schedule = self.get_solana_schedule().await?.clone();
 
         let mut candidate_epoch = schedule.get_epoch(estimated_slot);
         let target_time = (timestamp_us / 1_000_000) as i64;
 
-        // estimate_slot_from_timestamp only checked the timestamp against the
-        // local clock, which says nothing about how far the read endpoint has
-        // caught up. The search below accepts a candidate with no upper bound as
-        // the answer, on the grounds that the next epoch has produced no block
-        // yet, so a timestamp past the chain tip would resolve to whatever epoch
-        // a lagging endpoint happens to be sitting in. Reject it here instead.
+        // The seed was only checked against the local clock, which says nothing
+        // about how far the endpoint has caught up. Since the search accepts an
+        // unbounded candidate as the answer, a timestamp past the chain tip would
+        // otherwise resolve to whatever epoch a lagging endpoint sits in.
         let (chain_tip_slot, chain_tip_time) = self.try_chain_tip_block(current_slot).await?;
         if target_time > chain_tip_time {
             bail!(
@@ -521,11 +489,8 @@ impl EpochFinder {
             );
         }
 
-        // Each step reuses the bound it already resolved: stepping earlier turns
-        // the candidate's own start into the new candidate's upper bound, and
-        // stepping later does the reverse. Only the bound on the far side of the
-        // move needs a lookup, which halves the round trips a multi-step walk
-        // costs.
+        // Each step reuses the bound it already resolved, so only the far side of
+        // the move needs a lookup. Halves the round trips of a multi-step walk.
         let mut epoch_start_time = self
             .try_epoch_start_block_time(&schedule, candidate_epoch, chain_tip_slot)
             .await?;
@@ -696,9 +661,7 @@ mod tests {
         );
     }
 
-    // The current epoch has no next epoch to bound it, because
-    // get_first_slot_in_epoch for the epoch after it names a future slot with no
-    // block time. Without this the search would fail on every recent timestamp.
+    // Without this the search would fail on every recent timestamp.
     #[test]
     fn test_decide_epoch_search_step_current_epoch_has_no_upper_bound() {
         assert_eq!(
@@ -707,10 +670,9 @@ mod tests {
         );
     }
 
-    // An epoch that has produced no block cannot contain a past timestamp. The
-    // caller feeds this step into a checked_sub, so a timestamp older than the
-    // earliest available block walks the candidate down and then errors rather
-    // than underflowing or silently returning epoch 0.
+    // The caller feeds this step into a checked_sub, so a timestamp older than
+    // the earliest available block errors rather than underflowing or silently
+    // returning epoch 0.
     #[test]
     fn test_decide_epoch_search_step_unstarted_epoch_steps_earlier() {
         assert_eq!(
@@ -728,11 +690,8 @@ mod tests {
         .into()
     }
 
-    // Every shape `getBlockTime` uses to say "this slot has no block" has to be
-    // classified the same way, or the forward walk over a skipped epoch boundary
-    // never happens and the search aborts instead. Which shape arrives depends on
-    // what the endpoint has behind it, so an endpoint without long-term storage
-    // would otherwise fail at most epoch boundaries.
+    // Which shape arrives depends on what the endpoint has behind it, so missing
+    // any one of them fails every lookup on endpoints of that shape.
     #[test]
     fn test_is_block_unavailable_covers_every_absent_block_shape() {
         assert!(is_block_unavailable(&rpc_response_error(
@@ -750,9 +709,8 @@ mod tests {
         ));
     }
 
-    // A pruned ledger has to fail the search rather than send the walk forward,
-    // because the block times it would walk over are equally gone. Neither
-    // classifier may retry it, since the answer will not change.
+    // A pruned ledger has to fail the lookup rather than read as an absent block,
+    // and is not worth retrying either.
     #[test]
     fn test_is_block_cleaned_up_is_not_an_absent_block() {
         let err = rpc_response_error(JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP);
@@ -808,10 +766,9 @@ mod tests {
         ));
     }
 
-    // A block far into the epoch means getBlocksWithLimit stepped over a gap in
-    // the endpoint's own block history. Dating the epoch by it would put the start
-    // late enough that timestamps inside the gap resolve to the previous epoch and
-    // pick up its leader schedule, so this has to be rejected rather than trusted.
+    // A block this far in means getBlocksWithLimit stepped over a history gap.
+    // Dating the epoch by it would resolve timestamps inside the gap to the
+    // previous epoch and its leader schedule.
     #[test]
     fn test_can_date_epoch_start_rejects_a_history_gap() {
         let first_slot = 432_000;
