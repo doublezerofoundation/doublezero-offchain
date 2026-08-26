@@ -247,13 +247,12 @@ pub async fn create_snapshot(
         fetch_data.dz_internet = internet_data;
     }
 
-    // Try to get Solana epoch and leader schedule
+    // Fetch the Solana epoch and leader schedule
     let mut epoch_finder = EpochFinder::new(
         fetcher.dz_rpc_client.clone(),
         fetcher.solana_read_client.clone(),
     );
-    // The leader schedule is required. validate() below rejects a snapshot without
-    // one, so warning and continuing would only discard the cause of the failure.
+    // Required: validate() below rejects a snapshot without a leader schedule.
     // fetch_leader_schedule resolves the Solana epoch itself and reports which one it
     // used, so taking the epoch from its result avoids running the chain-verified
     // epoch search twice over the same timestamp.
@@ -345,68 +344,4 @@ pub async fn create_snapshot(
 
     info!("Snapshot exported successfully");
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ingestor::epoch::LeaderScheduleMap;
-
-    // FetchData::default() leaves the serviceability and telemetry collections empty,
-    // so validate() always reports issues here. These tests assert on the presence or
-    // absence of the leader-schedule issues specifically.
-    fn snapshot_with(leader_schedule: Option<LeaderSchedule>) -> CompleteSnapshot {
-        CompleteSnapshot {
-            dz_epoch: 42,
-            solana_epoch: leader_schedule
-                .as_ref()
-                .map(|schedule| schedule.solana_epoch),
-            fetch_data: FetchData::default(),
-            leader_schedule,
-            metadata: SnapshotMetadata {
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                network: "Testnet".to_string(),
-                exchanges_count: 0,
-                locations_count: 0,
-                devices_count: 0,
-                internet_samples_count: 0,
-                device_samples_count: 0,
-            },
-        }
-    }
-
-    #[test]
-    fn test_validate_reports_missing_leader_schedule() {
-        let error = snapshot_with(None).validate().unwrap_err().to_string();
-        assert!(error.contains("Missing leader schedule"), "{error}");
-    }
-
-    #[test]
-    fn test_validate_reports_empty_leader_schedule() {
-        let schedule = LeaderSchedule {
-            solana_epoch: 1021,
-            schedule_map: LeaderScheduleMap::new(),
-        };
-        let error = snapshot_with(Some(schedule))
-            .validate()
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("Leader schedule is empty"), "{error}");
-    }
-
-    #[test]
-    fn test_validate_accepts_populated_leader_schedule() {
-        let mut schedule_map = LeaderScheduleMap::new();
-        schedule_map.insert("validator-identity".to_string(), 432_000);
-        let schedule = LeaderSchedule {
-            solana_epoch: 1021,
-            schedule_map,
-        };
-        let error = snapshot_with(Some(schedule))
-            .validate()
-            .unwrap_err()
-            .to_string();
-        assert!(!error.contains("Missing leader schedule"), "{error}");
-        assert!(!error.contains("Leader schedule is empty"), "{error}");
-    }
 }

@@ -142,6 +142,24 @@ fn is_settled_block_error(err: &SolanaClientError) -> bool {
     is_block_unavailable(err) || is_block_cleaned_up(err)
 }
 
+/// Format an RPC error for logging with the request URL removed.
+///
+/// `ClientErrorKind::Reqwest` is transparent over `reqwest::Error`, whose `Debug`
+/// and `Display` both print the request URL. The Solana read endpoint carries its
+/// API key in that URL on mainnet-beta, and journald ships to Loki, so logging the
+/// error verbatim publishes the key on every timeout and every 429.
+fn redacted(err: &SolanaClientError) -> String {
+    let text = format!("{err:?}");
+
+    match err.kind() {
+        ClientErrorKind::Reqwest(inner) => match inner.url() {
+            Some(url) => text.replace(url.as_str(), "<redacted>"),
+            None => text,
+        },
+        _ => text,
+    }
+}
+
 /// Report whether a block at `first_block_slot` is close enough to `first_slot`,
 /// the first slot of an epoch, to date when that epoch began.
 ///
@@ -264,8 +282,9 @@ impl EpochFinder {
                 .retry(&ExponentialBuilder::default().with_jitter())
                 .notify(|err: &SolanaClientError, dur: Duration| {
                     info!(
-                        "retrying get_epoch_schedule error: {:?} with sleeping {:?}",
-                        err, dur
+                        "retrying get_epoch_schedule error: {} with sleeping {:?}",
+                        redacted(err),
+                        dur
                     )
                 })
                 .await?;
@@ -285,8 +304,9 @@ impl EpochFinder {
                 .retry(&ExponentialBuilder::default().with_jitter())
                 .notify(|err: &SolanaClientError, dur: Duration| {
                     info!(
-                        "retrying get_epoch_schedule error: {:?} with sleeping {:?}",
-                        err, dur
+                        "retrying get_epoch_schedule error: {} with sleeping {:?}",
+                        redacted(err),
+                        dur
                     )
                 })
                 .await?;
@@ -311,8 +331,9 @@ impl EpochFinder {
             .when(|err: &SolanaClientError| !is_settled_block_error(err))
             .notify(|err: &SolanaClientError, dur: Duration| {
                 info!(
-                    "retrying get_block_time error: {:?} with sleeping {:?}",
-                    err, dur
+                    "retrying get_block_time error: {} with sleeping {:?}",
+                    redacted(err),
+                    dur
                 )
             })
             .await;
@@ -368,8 +389,9 @@ impl EpochFinder {
         .when(|err: &SolanaClientError| !is_settled_block_error(err))
         .notify(|err: &SolanaClientError, dur: Duration| {
             info!(
-                "retrying get_blocks_with_limit error: {:?} with sleeping {:?}",
-                err, dur
+                "retrying get_blocks_with_limit error: {} with sleeping {:?}",
+                redacted(err),
+                dur
             )
         })
         .await
@@ -458,7 +480,11 @@ impl EpochFinder {
         let current_slot = (|| async { self.solana_read_client.get_slot().await })
             .retry(&ExponentialBuilder::default().with_jitter())
             .notify(|err: &SolanaClientError, dur: Duration| {
-                info!("retrying get_slot error: {:?} with sleeping {:?}", err, dur)
+                info!(
+                    "retrying get_slot error: {} with sleeping {:?}",
+                    redacted(err),
+                    dur
+                )
             })
             .await?;
 
@@ -576,8 +602,9 @@ impl EpochFinder {
         .retry(&ExponentialBuilder::default().with_jitter())
         .notify(|err: &SolanaClientError, dur: Duration| {
             info!(
-                "retrying get_leader_schedule error: {:?} with sleeping {:?}",
-                err, dur
+                "retrying get_leader_schedule error: {} with sleeping {:?}",
+                redacted(err),
+                dur
             )
         })
         .await?
