@@ -247,7 +247,6 @@ pub async fn create_snapshot(
         fetch_data.dz_internet = internet_data;
     }
 
-    // Fetch the Solana epoch and leader schedule
     let mut epoch_finder = EpochFinder::new(
         fetcher.dz_rpc_client.clone(),
         fetcher.solana_read_client.clone(),

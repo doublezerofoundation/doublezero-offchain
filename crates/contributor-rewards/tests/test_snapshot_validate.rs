@@ -10,10 +10,8 @@ use doublezero_contributor_rewards::{
 };
 use serde_json::Value;
 
-// A snapshot missing a leader schedule is what both producers used to write after a
-// failed fetch, and what every consumer then rejected on read-back. These tests pin
-// validate() as the check that rejects it, since that is what the producers now run
-// before they save.
+// validate() is what both producers run before they save, so these pin the leader
+// schedule checks it has to enforce.
 fn load_snapshot(leader_schedule: Option<LeaderSchedule>) -> Result<CompleteSnapshot> {
     let mut data: Value = serde_json::from_str(&fs::read_to_string(Path::new(
         "tests/testnet_snapshot.json",

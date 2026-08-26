@@ -418,9 +418,8 @@ impl ScheduleWorker {
                     (location, path, temp_guard)
                 }
                 Err(e) => {
-                    // `{:#}` prints the whole context chain. Plain `{}` prints only the
-                    // outermost message, which would drop the reason the leader-schedule
-                    // fetch failed and leave the operator with just the stage name.
+                    // `{:#}` prints the cause chain; plain `{}` prints only the outermost
+                    // context, dropping the reason the fetch failed.
                     error!("Failed to create snapshot for epoch {target_epoch}: {e:#}");
                     metrics::counter!(
                         "doublezero_contributor_rewards_snapshot_failed",
@@ -769,8 +768,7 @@ impl ScheduleWorker {
             );
         }
 
-        // Required: every consumer rejects a snapshot without a leader schedule, so
-        // warning and continuing would only discard the cause of the failure.
+        // Required: every consumer rejects a snapshot without a leader schedule.
         info!("Fetching leader schedule for epoch {}", epoch);
         let leader_schedule = EpochFinder::new(
             fetcher.dz_rpc_client.clone(),
@@ -804,10 +802,9 @@ impl ScheduleWorker {
             metadata,
         };
 
-        // Validate before saving: storage.save writes the canonical
-        // <prefix>-epoch-<N>-snapshot.json key, so an incomplete snapshot would
-        // overwrite a good one for the same epoch. A dry run reads it back nowhere,
-        // which makes this the only check on that path.
+        // Validate before saving: storage.save writes the canonical per-epoch key, so
+        // an incomplete snapshot overwrites a good one, and a dry run never reads it
+        // back to find out.
         snapshot.validate()?;
 
         // Save snapshot using storage abstraction (S3 or local file)

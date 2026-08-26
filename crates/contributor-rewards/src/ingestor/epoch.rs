@@ -142,12 +142,10 @@ fn is_settled_block_error(err: &SolanaClientError) -> bool {
     is_block_unavailable(err) || is_block_cleaned_up(err)
 }
 
-/// Format an RPC error for logging with the request URL removed.
-///
-/// `ClientErrorKind::Reqwest` is transparent over `reqwest::Error`, whose `Debug`
-/// and `Display` both print the request URL. The Solana read endpoint carries its
-/// API key in that URL on mainnet-beta, and journald ships to Loki, so logging the
-/// error verbatim publishes the key on every timeout and every 429.
+// `reqwest::Error`, which `ClientErrorKind::Reqwest` is transparent over, prints the
+// request URL from both `Debug` and `Display`. On mainnet-beta that URL carries the
+// read endpoint's API key, and journald ships to Loki, so logging the error verbatim
+// publishes the key on every timeout and every 429.
 fn redacted(err: &SolanaClientError) -> String {
     let text = format!("{err:?}");
 
