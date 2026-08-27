@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- test(contributor-rewards): extend the Shapley golden to per-city outputs. The aggregate can hide drift when two cities move in opposite directions, so the per-city values are pinned as well
 - test(contributor-rewards): pin the aggregated Shapley output for the committed mainnet-beta fixture with a golden file, the crate's first test covering reward values. Drives `PreparedData::from_snapshot`, the same path the scheduler uses for snapshots. Structure (operator set, ordering, counts) is asserted exactly. Values use a 1e-12 relative tolerance, because bit-identical floating point is not guaranteed across architectures and an exact gate would go permanently red on a CI architecture change. Regenerate deliberately with `UPDATE_GOLDEN=1 cargo test -p doublezero-contributor-rewards`
 - test(contributor-rewards): add a committed mainnet-beta snapshot fixture
   (`tests/goldens/mn-beta-epoch-129-trimmed.json`) and the script that produces it

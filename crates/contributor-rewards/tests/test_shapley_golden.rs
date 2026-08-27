@@ -1,7 +1,7 @@
 mod common;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fs,
     path::{Path, PathBuf},
 };
@@ -151,6 +151,81 @@ fn test_aggregated_shapley_output_matches_golden() -> Result<()> {
             actual_entry.proportion,
             expected_entry.proportion,
         );
+    }
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PerCityGolden {
+    city_count: usize,
+    // city -> [(operator, value)], in BTreeMap and Vec order as produced.
+    cities: BTreeMap<String, Vec<(String, f64)>>,
+}
+
+#[test]
+fn test_per_city_shapley_output_matches_golden() -> Result<()> {
+    let (result, _settings) = compute_from_fixture()?;
+
+    let actual = PerCityGolden {
+        city_count: result.per_city_outputs.len(),
+        cities: result.per_city_outputs.clone(),
+    };
+
+    let path = golden_path("shapley-per-city-mn-beta-epoch-129.json");
+
+    if regenerating() {
+        fs::create_dir_all(path.parent().unwrap())?;
+        fs::write(
+            &path,
+            format!("{}\n", serde_json::to_string_pretty(&actual)?),
+        )?;
+        eprintln!("wrote golden {}", path.display());
+        return Ok(());
+    }
+
+    let golden_json = fs::read_to_string(&path).with_context(|| {
+        format!(
+            "reading {}. Generate it with UPDATE_GOLDEN=1",
+            path.display()
+        )
+    })?;
+    let expected = serde_json::from_str::<PerCityGolden>(&golden_json)?;
+
+    assert_eq!(actual.city_count, expected.city_count, "city count changed");
+
+    let actual_cities = actual.cities.keys().collect::<Vec<_>>();
+    let expected_cities = expected.cities.keys().collect::<Vec<_>>();
+    assert_eq!(
+        actual_cities, expected_cities,
+        "city set or ordering changed"
+    );
+
+    for (city, actual_values) in actual.cities.iter() {
+        let expected_values = expected
+            .cities
+            .get(city)
+            .with_context(|| format!("city {city} missing from golden"))?;
+        let actual_operators = actual_values
+            .iter()
+            .map(|(operator, _)| operator)
+            .collect::<Vec<_>>();
+        let expected_operators = expected_values
+            .iter()
+            .map(|(operator, _)| operator)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual_operators, expected_operators,
+            "{city}: operator set or ordering changed"
+        );
+        for ((operator, actual_value), (_, expected_value)) in
+            actual_values.iter().zip(expected_values.iter())
+        {
+            assert_close(
+                &format!("{city}/{operator}"),
+                *actual_value,
+                *expected_value,
+            );
+        }
     }
     Ok(())
 }
