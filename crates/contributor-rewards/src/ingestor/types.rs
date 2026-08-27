@@ -183,7 +183,7 @@ fn apply_serviceability_json_compat_migrations(serviceability: &mut Value) {
             // `AccessPassStatus::Expired` to `ExpiredDeprecated` (same discriminant,
             // epoch expiry no longer demotes access passes). Snapshots serialized
             // before that rename carry the old variant name.
-            if access_pass.get("status") == Some(&Value::String("Expired".to_string())) {
+            if access_pass.get("status").and_then(Value::as_str) == Some("Expired") {
                 access_pass.insert(
                     "status".to_string(),
                     Value::String("ExpiredDeprecated".to_string()),

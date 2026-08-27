@@ -14,30 +14,40 @@ network topology. It keeps a small, still-connected sub-network:
   `--city-cap` (default 6) and drop devices outside them, and then their links.
 - Drop users whose device no longer exists. AccessPass records carry no device
   reference in this schema (only a user_payer/validator identity), so there is nothing
-  to drop there by device membership; they are left as captured.
+  to drop there by device membership. They are left as captured.
 - Truncate every `samples` array in `dz_telemetry.device_latency_samples` and
   `dz_internet.internet_latency_samples` to the first `--sample-cap` (default 32)
   entries, updating `sample_count` to match where present. 32 because
   `settings.inet_lookback.min_samples_per_link` is 20, and anything at or below risks a
-  link being dropped for insufficient coverage.
+  link being dropped for insufficient coverage. These telemetry records are NOT
+  filtered to the surviving devices. All 328 device and 870 internet records in the
+  full capture are kept, with only their sample arrays truncated, even though the trim
+  above leaves only 74 of the 328 device records relevant to the surviving topology.
 
 Everything else (locations, multicast_groups, access_passes, leader_schedule,
-metro_prices) is kept as captured; none of it drives the operator or city count that
+metro_prices) is kept as captured. None of it drives the operator or city count that
 makes exact Shapley expensive.
 
 Usage:
     python3 make-fixture.py <input snapshot path> <output fixture path> \\
         [--sample-cap N] [--operator-cap N] [--city-cap N]
 
+The input snapshot is a full CompleteSnapshot capture. It is not committed (it lives
+under the gitignored dry-run-output/ directory). Re-capture it with the crate's own
+snapshot command, with network set to mainnet-beta in the config or environment, for
+example:
+    cargo run -p doublezero-contributor-rewards -- snapshot --epoch 129 \\
+        --local-dir ../../dry-run-output/
+
 Regenerate the committed fixture with:
     python3 make-fixture.py \\
-        ../dry-run-output/mn-beta-epoch-129-snapshot.json \\
-        mn-beta-epoch-129-trimmed.json
+        ../../dry-run-output/mainnet-beta-epoch-129-snapshot.json \\
+        mainnet-beta-epoch-129-trimmed.json
 
 If a future regeneration times out, lower --operator-cap or --city-cap and retry. If it
-comes back all zero, the surviving sub-network is likely disconnected; try a larger
---operator-cap with a smaller --city-cap (more operators concentrated into fewer
-cities makes a connecting path more likely). See the task 1a report for the timings
+comes back all zero, the surviving sub-network is likely disconnected. Try a larger
+--operator-cap with a smaller --city-cap: more operators concentrated into fewer
+cities makes a connecting path more likely. See the task 1a report for the timings
 this cap was chosen against.
 """
 

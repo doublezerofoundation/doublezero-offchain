@@ -11,7 +11,7 @@ use common::create_test_settings;
 use doublezero_contributor_rewards::{
     calculator::{data_prep::PreparedData, shapley::evaluator::compute_shapley_values},
     cli::snapshot::CompleteSnapshot,
-    settings::{self, network::Network},
+    settings::network::Network,
 };
 use serde::{Deserialize, Serialize};
 
@@ -22,9 +22,18 @@ use serde::{Deserialize, Serialize};
 // than this tolerance. A last-bit difference does not.
 const RELATIVE_TOLERANCE: f64 = 1e-12;
 
-const FIXTURE: &str = "tests/goldens/mn-beta-epoch-129-trimmed.json";
+// Values below this carry no reward information. They are cancellation noise from
+// the Shapley computation, and pinning them at a 1e-12 absolute gate would make the
+// test fail on floating point differences that mean nothing. A real regression moves
+// these entries to the hundreds, not to 1e-12.
+const NEGLIGIBLE: f64 = 1e-6;
+
+const FIXTURE: &str = "tests/goldens/mainnet-beta-epoch-129-trimmed.json";
 
 fn assert_close(label: &str, actual: f64, expected: f64) {
+    if actual.abs() < NEGLIGIBLE && expected.abs() < NEGLIGIBLE {
+        return;
+    }
     let difference = (actual - expected).abs();
     let scale = expected.abs().max(actual.abs()).max(1.0);
     assert!(
@@ -40,7 +49,7 @@ fn golden_path(name: &str) -> PathBuf {
 
 // Set UPDATE_GOLDEN=1 to rewrite the golden files instead of comparing against them.
 fn regenerating() -> bool {
-    std::env::var("UPDATE_GOLDEN").is_ok()
+    std::env::var("UPDATE_GOLDEN").as_deref() == Ok("1")
 }
 
 /// Run the committed fixture through the production snapshot path.
@@ -49,10 +58,8 @@ fn regenerating() -> bool {
 /// the snapshot case, so this exercises the real assembly rather than a copy of it.
 /// Everything past `compute_shapley_values` is async and reads from RPC, so this is
 /// the deepest point a test can reach offline.
-fn compute_from_fixture() -> Result<(
-    doublezero_contributor_rewards::calculator::shapley::evaluator::ShapleyComputeResult,
-    settings::Settings,
-)> {
+fn compute_from_fixture()
+-> Result<doublezero_contributor_rewards::calculator::shapley::evaluator::ShapleyComputeResult> {
     // create_test_settings hardcodes Testnet. The fixture is mainnet-beta, and
     // build_devices derives city codes on a different branch per network, so
     // leaving this as Testnet mis-maps every city.
@@ -65,8 +72,7 @@ fn compute_from_fixture() -> Result<(
     let inputs = prepared
         .shapley_inputs
         .context("from_snapshot returned no shapley inputs despite require_shapley")?;
-    let result = compute_shapley_values(&inputs, &settings.shapley, &HashMap::new())?;
-    Ok((result, settings))
+    compute_shapley_values(&inputs, &settings.shapley, &HashMap::new())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -85,7 +91,7 @@ struct AggregatedGolden {
 
 #[test]
 fn test_aggregated_shapley_output_matches_golden() -> Result<()> {
-    let (result, _settings) = compute_from_fixture()?;
+    let result = compute_from_fixture()?;
 
     let operators = result
         .aggregated_output
@@ -101,7 +107,7 @@ fn test_aggregated_shapley_output_matches_golden() -> Result<()> {
         operators,
     };
 
-    let path = golden_path("shapley-mn-beta-epoch-129.json");
+    let path = golden_path("shapley-mainnet-beta-epoch-129.json");
 
     if regenerating() {
         fs::write(
@@ -164,17 +170,16 @@ struct PerCityGolden {
 
 #[test]
 fn test_per_city_shapley_output_matches_golden() -> Result<()> {
-    let (result, _settings) = compute_from_fixture()?;
+    let result = compute_from_fixture()?;
 
     let actual = PerCityGolden {
         city_count: result.per_city_outputs.len(),
         cities: result.per_city_outputs.clone(),
     };
 
-    let path = golden_path("shapley-per-city-mn-beta-epoch-129.json");
+    let path = golden_path("shapley-per-city-mainnet-beta-epoch-129.json");
 
     if regenerating() {
-        fs::create_dir_all(path.parent().unwrap())?;
         fs::write(
             &path,
             format!("{}\n", serde_json::to_string_pretty(&actual)?),

@@ -7,16 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- test(contributor-rewards): fix the Shapley golden tests. `assert_close` now treats
+  both values as equal once each is below `1e-6`, so the seven per-city entries that
+  are cancellation noise (values around `1e-12`) no longer sit below their own
+  comparison gate. `UPDATE_GOLDEN` now regenerates only when set to `1`, not on any
+  set value, so a stale exported `UPDATE_GOLDEN=0` can no longer make both tests pass
+  while silently overwriting the goldens. The fixture and goldens rename from
+  `mn-beta` to `mainnet-beta`, matching the no-abbreviations rule
 - test(contributor-rewards): extend the Shapley golden to per-city outputs. The aggregate can hide drift when two cities move in opposite directions, so the per-city values are pinned as well
 - test(contributor-rewards): pin the aggregated Shapley output for the committed mainnet-beta fixture with a golden file, the crate's first test covering reward values. Drives `PreparedData::from_snapshot`, the same path the scheduler uses for snapshots. Structure (operator set, ordering, counts) is asserted exactly. Values use a 1e-12 relative tolerance, because bit-identical floating point is not guaranteed across architectures and an exact gate would go permanently red on a CI architecture change. Regenerate deliberately with `UPDATE_GOLDEN=1 cargo test -p doublezero-contributor-rewards`
 - test(contributor-rewards): add a committed mainnet-beta snapshot fixture
-  (`tests/goldens/mn-beta-epoch-129-trimmed.json`) and the script that produces it
+  (`tests/goldens/mainnet-beta-epoch-129-trimmed.json`) and the script that produces it
   (`tests/goldens/make-fixture.py`), for a future Shapley golden test. The only
   previously committed snapshot (testnet) produces zero reward for every operator, so
   no golden test can assert a real value against it. Exact Shapley computation is
   O(2^n) in the operator count, so the fixture keeps only the 4 contributors with the
   most devices and the 6 cities with the most surviving devices among them, which
-  keeps the network connected and the computation fast; it is not a byte-size trim of
+  keeps the network connected and the computation fast. It is not a byte-size trim of
   the full topology (malbeclabs/infra#2392)
 - fix(contributor-rewards): migrate the access pass status value `Expired` to
   `ExpiredDeprecated` when loading a snapshot captured before doublezero-serviceability
