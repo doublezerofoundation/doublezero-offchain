@@ -143,9 +143,10 @@ fn is_settled_block_error(err: &SolanaClientError) -> bool {
 }
 
 // `reqwest::Error`, which `ClientErrorKind::Reqwest` is transparent over, prints the
-// request URL from both `Debug` and `Display`. On mainnet-beta that URL carries the
-// read endpoint's API key, and journald ships to Loki, so logging the error verbatim
-// publishes the key on every timeout and every 429.
+// request URL from both `Debug` and `Display`. `EpochFinder` reads through the DZ
+// ledger endpoint, which is a vaulted URL carrying credentials on mainnet-beta, and
+// journald ships to Loki, so logging the error verbatim publishes them on every
+// timeout and every 429.
 fn redacted(err: &SolanaClientError) -> String {
     let text = format!("{err:?}");
 
