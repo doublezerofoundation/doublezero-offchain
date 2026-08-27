@@ -178,6 +178,17 @@ fn apply_serviceability_json_compat_migrations(serviceability: &mut Value) {
             access_pass
                 .entry("max_multicast_users")
                 .or_insert_with(|| Value::Number(1.into()));
+
+            // doublezero-serviceability renamed the enum variant
+            // `AccessPassStatus::Expired` to `ExpiredDeprecated` (same discriminant,
+            // epoch expiry no longer demotes access passes). Snapshots serialized
+            // before that rename carry the old variant name.
+            if access_pass.get("status") == Some(&Value::String("Expired".to_string())) {
+                access_pass.insert(
+                    "status".to_string(),
+                    Value::String("ExpiredDeprecated".to_string()),
+                );
+            }
         }
     }
 

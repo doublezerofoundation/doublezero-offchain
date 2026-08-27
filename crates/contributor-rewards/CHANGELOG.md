@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- test(contributor-rewards): add a committed mainnet-beta snapshot fixture
+  (`tests/goldens/mn-beta-epoch-129-trimmed.json`) and the script that produces it
+  (`tests/goldens/make-fixture.py`), for a future Shapley golden test. The only
+  previously committed snapshot (testnet) produces zero reward for every operator, so
+  no golden test can assert a real value against it. Exact Shapley computation is
+  O(2^n) in the operator count, so the fixture keeps only the 4 contributors with the
+  most devices and the 6 cities with the most surviving devices among them, which
+  keeps the network connected and the computation fast; it is not a byte-size trim of
+  the full topology (malbeclabs/infra#2392)
+- fix(contributor-rewards): migrate the access pass status value `Expired` to
+  `ExpiredDeprecated` when loading a snapshot captured before doublezero-serviceability
+  PR #3831 renamed that enum variant. Without the migration, such a snapshot fails to
+  deserialize (malbeclabs/infra#2392)
 - fix(contributor-rewards): the scheduler no longer writes a snapshot it cannot use. A failed leader-schedule fetch was warned and discarded, so an unusable snapshot overwrote the epoch's canonical S3 key and the tick then failed reading it back with "Missing leader schedule". Both producers now propagate the fetch error, and the scheduler validates before saving, which also covers `--dry-run`, where nothing validated at all. Scheduler failures log the full cause chain, and every `EpochFinder` RPC error is stripped of its request URL, in the retry logs and in the error it propagates, since that URL carries the mainnet-beta read endpoint's API key into journald and Loki (malbeclabs/infra#2372)
 - fix(contributor-rewards): resolve the Solana epoch for a timestamp from real block times instead of dividing wall clock by a hardcoded 400ms slot duration. The old estimate drifted about 30k slots per day of lookback and picked the wrong epoch near a boundary, and no fixed constant survives the SIMD-0525 rollout. That epoch selects the leader schedule rewards are computed against, so the search now errors rather than returning a wrong answer: a backfill older than the endpoint's ledger retention fails on the `ingestor::demand` path instead of silently mis-estimating (malbeclabs/infra#2317)
 - fix(contributor-rewards): `snapshot` validates before writing. It warns and continues when the leader schedule cannot be fetched, but every consumer rejects a snapshot without one, so the command exited 0 having written an unusable file under the canonical name and a `snapshot` then `export-shapley` chain failed a step late. Pre-existing, but reachable now that resolving the Solana epoch depends on block-time reads (malbeclabs/infra#2317)
