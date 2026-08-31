@@ -1,5 +1,4 @@
 pub mod list;
-pub mod pay;
 pub mod payments;
 pub mod price;
 pub mod publisher_rewards;
@@ -55,8 +54,6 @@ impl ShredsCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ShredsSubcommand {
-    /// Initialize a client seat (if needed) and fund a payment escrow with USDC.
-    Pay(pay::PayCommand),
     /// Close a payment escrow and withdraw any remaining USDC.
     Withdraw(withdraw::WithdrawCommand),
     /// List client seats.
@@ -79,7 +76,6 @@ impl ShredsSubcommand {
         out: &mut impl Write,
     ) -> Result<()> {
         match self {
-            Self::Pay(command) => command.execute(dz_ledger_url, ctx, out).await,
             Self::Withdraw(command) => command.execute(dz_ledger_url, ctx, out).await,
             Self::List(command) => command.execute(dz_ledger_url, ctx, out).await,
             Self::Payments(command) => command.execute(dz_ledger_url, ctx, out).await,
