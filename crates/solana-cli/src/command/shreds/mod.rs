@@ -133,22 +133,6 @@ pub(in crate::command::shreds) fn make_dz_connection(
     }
 }
 
-/// Known shred oracle pubkey per environment. Returns `None` on localnet
-/// (the multicast-user guard is already skipped there because
-/// `serviceability_program_id` returns `Err`).
-pub(in crate::command::shreds) fn shred_oracle_key(env: NetworkEnvironment) -> Option<Pubkey> {
-    match env {
-        NetworkEnvironment::MainnetBeta => Some(solana_sdk::pubkey!(
-            "3b2Ze7VYUvhwQBfx5oCMCmsc2xvyZ74s2Lata5vmQeeN"
-        )),
-        NetworkEnvironment::Testnet => Some(solana_sdk::pubkey!(
-            "BUtAWK4GaUV42YRp7jSHZhchspsshabn67HnBHnKxzsY"
-        )),
-        NetworkEnvironment::Devnet => None,
-        NetworkEnvironment::Localnet => None,
-    }
-}
-
 /// Parse the CLI's build version into (major, minor, patch).
 ///
 /// Handles version strings like "0.5.0" or "0.5.0-rc1" by only considering
