@@ -3003,7 +3003,7 @@ dependencies = [
 
 [[package]]
 name = "doublezero-solana-cli"
-version = "0.5.10"
+version = "0.5.12"
 dependencies = [
  "anyhow",
  "async-trait",
